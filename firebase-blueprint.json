@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the Merlux Chauffeur platform.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The UID from Firebase Auth." },
+        "name": { "type": "string", "description": "Full name of the user." },
+        "email": { "type": "string", "format": "email", "description": "Email address." },
+        "phone": { "type": "string", "description": "Contact phone number." },
+        "role": { "type": "string", "enum": ["customer", "driver", "admin"], "description": "User role." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of account creation." }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A chauffeur service reservation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Auto-generated document ID." },
+        "userId": { "type": "string", "description": "Reference to the user who booked (optional for guest bookings)." },
+        "guestName": { "type": "string", "description": "Name of the guest (if not logged in)." },
+        "guestEmail": { "type": "string", "format": "email", "description": "Email of the guest (if not logged in)." },
+        "guestPhone": { "type": "string", "description": "Phone of the guest (if not logged in)." },
+        "serviceType": { "type": "string", "enum": ["airport", "corporate", "wedding", "tour", "hourly"], "description": "Type of service." },
+        "pickup": { "type": "string", "description": "Pickup address." },
+        "dropoff": { "type": "string", "description": "Dropoff address." },
+        "date": { "type": "string", "format": "date", "description": "Booking date." },
+        "time": { "type": "string", "description": "Booking time." },
+        "vehicleId": { "type": "string", "description": "ID of the selected vehicle." },
+        "passengers": { "type": "integer", "description": "Number of passengers." },
+        "distance": { "type": "string", "description": "Distance of the trip." },
+        "duration": { "type": "string", "description": "Duration of the trip." },
+        "flightNumber": { "type": "string", "description": "Optional flight number for airport transfers." },
+        "flightStatus": { "type": "string", "description": "Real-time status of the flight." },
+        "flightETA": { "type": "string", "format": "date-time", "description": "Estimated time of arrival for the flight." },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "in-progress", "completed", "cancelled"], "description": "Current status of the booking." },
+        "price": { "type": "number", "description": "Total price of the booking." },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "paid", "refunded"], "description": "Status of the payment." },
+        "paymentMethod": { "type": "string", "enum": ["card", "cash"], "description": "Method of payment." },
+        "stripeSessionId": { "type": "string", "description": "Stripe Checkout Session ID." },
+        "driverId": { "type": "string", "description": "ID of the assigned driver." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of booking creation." }
+      },
+      "required": ["serviceType", "pickup", "dropoff", "date", "time", "vehicleId", "price", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles."
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Service reservations."
+    }
+  }
+}

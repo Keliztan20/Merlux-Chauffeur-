@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches auth.uid)
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, 1-100 chars)
+    //   - email: string (required, email format)
+    //   - phone: string (optional)
+    //   - role: string (required, enum: customer, driver, admin)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: bookings
+    // Document ID: {bookingId} (auto-generated)
+    // Fields:
+    //   - userId: string (optional, matches creator's uid)
+    //   - guestName: string (required if userId missing)
+    //   - guestEmail: string (required if userId missing)
+    //   - guestPhone: string (required if userId missing)
+    //   - serviceType: string (required, enum)
+    //   - pickup: string (required, 5-200 chars)
+    //   - dropoff: string (required, 5-200 chars)
+    //   - date: string (required, format)
+    //   - time: string (required)
+    //   - vehicleId: string (required)
+    //   - passengers: int (required, 1-20)
+    //   - distance: string (optional)
+    //   - duration: string (optional)
+    //   - flightNumber: string (optional)
+    //   - flightStatus: string (optional)
+    //   - flightETA: string (optional)
+    //   - status: string (required, enum)
+    //   - price: number (required, positive)
+    //   - paymentStatus: string (required, enum)
+    //   - stripeSessionId: string (optional)
+    //   - driverId: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && 'userId' in resource.data && request.auth.uid == resource.data.userId;
+    }
+
+    function isBookingSessionOwner(bookingId) {
+      return 'stripeSessionId' in resource.data && resource.data.stripeSessionId == bookingId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "keliztan20@gmail.com" && request.auth.token.email_verified == true) ||
+         (request.auth.token.email == "admin@merlux.com.au"));
+    }
+
+    function isDriver() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'driver';
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'email', 'phone', 'role', 'createdAt']) &&
+             data.id == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.role in ['customer', 'driver', 'admin'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidBooking(data) {
+      let commonFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'stripeSessionId'];
+      let authFields = commonFields.concat(['userId']);
+      let guestFields = commonFields.concat(['guestName', 'guestEmail', 'guestPhone']);
+      
+      let isAuthBooking = isAuthenticated() && 
+                          hasOnlyAllowedFields(authFields) && 
+                          (!('userId' in data) || data.userId == request.auth.uid);
+      
+      let isGuestBooking = hasOnlyAllowedFields(guestFields) &&
+                           data.guestName is string && data.guestName.size() > 0 &&
+                           isValidEmail(data.guestEmail) &&
+                           data.guestPhone is string && data.guestPhone.size() > 0;
+
+      return (isAuthBooking || isGuestBooking) &&
+             data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly'] &&
+             data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 200 &&
+             data.dropoff is string && data.dropoff.size() >= 5 && data.dropoff.size() <= 200 &&
+             data.passengers is int && data.passengers >= 1 && data.passengers <= 20 &&
+             data.status in ['pending', 'confirmed', 'in-progress', 'completed', 'cancelled'] &&
+             data.price is number && data.price > 0 &&
+             data.paymentStatus in ['unpaid', 'paid', 'refunded'] &&
+             data.paymentMethod in ['card', 'cash'] &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role in ['customer', 'driver', 'admin'] || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isDocOwner() || isAdmin() || isDriver() || isBookingSessionOwner(bookingId);
+      allow create: if isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
+      allow update: if isAuthenticated() && (
+        (isDocOwner() && isValidBooking(request.resource.data) && request.resource.data.status == resource.data.status) ||
+        isAdmin() ||
+        (isDriver() && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'driverId']) &&
+         (request.resource.data.driverId == request.auth.uid || resource.data.driverId == request.auth.uid))
+      );
+    }
+  }
+}
