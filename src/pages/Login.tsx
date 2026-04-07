@@ -42,7 +42,7 @@ export default function Login() {
           id: user.uid,
           name: displayName || user.displayName || 'New User',
           email: user.email,
-          role: selectedRole || (user.email === 'admin@merlux.com.au' ? 'admin' : 'customer'),
+          role: selectedRole || 'customer',
           createdAt: serverTimestamp()
         });
       }
@@ -90,18 +90,20 @@ export default function Login() {
       let errorMessage = 'Authentication failed. Please try again.';
       
       // Handle Firebase Auth errors
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        errorMessage = email === 'admin@merlux.com.au' && err.code === 'auth/user-not-found' 
-          ? 'Admin account not found. Please register this email to create the admin profile.' 
-          : 'Invalid email or password.';
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-login-credentials') {
+        errorMessage = 'Invalid email or password. Please check your credentials and try again.';
       } else if (err.code === 'auth/email-already-in-use') {
         errorMessage = 'This email is already registered. Please try logging in instead.';
       } else if (err.code === 'auth/weak-password') {
         errorMessage = 'Password should be at least 6 characters.';
+      } else if (err.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many failed login attempts. Please try again later or reset your password.';
       } else if (err.code === 'auth/operation-not-allowed') {
         errorMessage = 'Authentication providers are not enabled. Please enable Email/Password and Google in your Firebase Console (Authentication > Sign-in method).';
       } else if (err.code === 'auth/invalid-email') {
         errorMessage = 'Please enter a valid email address.';
+      } else if (err.code === 'auth/user-disabled') {
+        errorMessage = 'This account has been disabled. Please contact support.';
       } else {
         // Check if it's a Firestore error thrown by handleFirestoreError
         try {

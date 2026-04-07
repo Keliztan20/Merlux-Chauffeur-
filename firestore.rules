@@ -14,6 +14,7 @@ service cloud.firestore {
     //   - email: string (required, email format)
     //   - phone: string (optional)
     //   - role: string (required, enum: customer, driver, admin)
+    //   - blocked: boolean (optional)
     //   - createdAt: timestamp (required)
     //
     // Collection: bookings
@@ -40,6 +41,8 @@ service cloud.firestore {
     //   - paymentStatus: string (required, enum)
     //   - stripeSessionId: string (optional)
     //   - driverId: string (optional)
+    //   - read: boolean (optional)
+    //   - rating: int (optional, 1-5)
     //   - createdAt: timestamp (required)
     //
     // ===============================================================
@@ -66,13 +69,17 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "keliztan20@gmail.com" && request.auth.token.email_verified == true) ||
-         (request.auth.token.email == "admin@merlux.com.au"));
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          request.auth.token.email == "keliztan20@gmail.com"
+        );
     }
 
     function isDriver() {
-      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'driver';
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'driver';
     }
 
     function isValidEmail(email) {
@@ -88,16 +95,18 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['id', 'name', 'email', 'phone', 'role', 'createdAt']) &&
-             data.id == request.auth.uid &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             isValidEmail(data.email) &&
-             data.role in ['customer', 'driver', 'admin'] &&
-             data.createdAt is timestamp;
+      return hasOnlyAllowedFields(['id', 'name', 'email', 'phone', 'role', 'blocked', 'createdAt', 'updatedAt']) &&
+             (!('id' in data) || data.id is string) &&
+             (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 100)) &&
+             (!('email' in data) || isValidEmail(data.email)) &&
+             (!('role' in data) || data.role in ['customer', 'driver', 'admin']) &&
+             (!('blocked' in data) || data.blocked is bool) &&
+             (!('createdAt' in data) || (data.createdAt is timestamp || data.createdAt is string)) &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp || data.updatedAt is string));
     }
 
     function isValidBooking(data) {
-      let commonFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'stripeSessionId'];
+      let commonFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 'stripeSessionId', 'read', 'rating'];
       let authFields = commonFields.concat(['userId']);
       let guestFields = commonFields.concat(['guestName', 'guestEmail', 'guestPhone']);
       
@@ -115,11 +124,12 @@ service cloud.firestore {
              data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 200 &&
              data.dropoff is string && data.dropoff.size() >= 5 && data.dropoff.size() <= 200 &&
              data.passengers is int && data.passengers >= 1 && data.passengers <= 20 &&
-             data.status in ['pending', 'confirmed', 'in-progress', 'completed', 'cancelled'] &&
+             data.status in ['pending', 'confirmed', 'assigned', 'accepted', 'rejected', 'completed', 'cancelled'] &&
              data.price is number && data.price > 0 &&
              data.paymentStatus in ['unpaid', 'paid', 'refunded'] &&
              data.paymentMethod in ['card', 'cash'] &&
-             data.createdAt is timestamp;
+             (!('rating' in data) || (data.rating is int && data.rating >= 1 && data.rating <= 5)) &&
+             (data.createdAt is timestamp || data.createdAt is string);
     }
 
     // ===============================================================
@@ -127,21 +137,35 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role in ['customer', 'driver', 'admin'] || isAdmin());
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+      allow read: if isAuthenticated();
+      allow create: if (isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role in ['customer', 'driver', 'admin'] || isAdmin())) || isAdmin();
+      allow update: if (isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin())) || isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /bookings/{bookingId} {
       allow read: if isDocOwner() || isAdmin() || isDriver() || isBookingSessionOwner(bookingId);
       allow create: if isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
       allow update: if isAuthenticated() && (
-        (isDocOwner() && isValidBooking(request.resource.data) && request.resource.data.status == resource.data.status) ||
+        (isDocOwner() && isValidBooking(request.resource.data) && 
+          (request.resource.data.status == resource.data.status || 
+           (resource.data.status == 'completed' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'updatedAt'])))) ||
         isAdmin() ||
         (isDriver() && 
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'driverId']) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'driverId', 'read', 'updatedAt']) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
          (request.resource.data.driverId == request.auth.uid || resource.data.driverId == request.auth.uid))
       );
+    }
+
+    match /settings/system {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /fleet/{vehicleId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

@@ -56,6 +56,7 @@ export default function PaymentSuccess() {
             ...bookingData,
             paymentStatus: 'paid',
             stripeSessionId: sessionId,
+            read: false,
             createdAt: serverTimestamp(),
           });
           

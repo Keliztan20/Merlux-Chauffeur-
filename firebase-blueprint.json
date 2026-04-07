@@ -45,6 +45,45 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of booking creation." }
       },
       "required": ["serviceType", "pickup", "dropoff", "date", "time", "vehicleId", "price", "status"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Global application configuration.",
+      "type": "object",
+      "properties": {
+        "basePrice": { "type": "number", "description": "Base price for any ride." },
+        "kmPrice": { "type": "number", "description": "Price per kilometer." },
+        "taxPercentage": { "type": "number", "description": "Tax percentage to apply." },
+        "services": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "desc": { "type": "string" },
+              "icon": { "type": "string" }
+            }
+          }, 
+          "description": "Available service types." 
+        }
+      }
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "A vehicle in the fleet.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "model": { "type": "string" },
+        "type": { "type": "string", "enum": ["sedan", "suv", "van", "limo"] },
+        "pax": { "type": "integer" },
+        "bags": { "type": "integer" },
+        "price": { "type": "number" },
+        "img": { "type": "string" }
+      },
+      "required": ["name", "model", "type", "pax", "bags", "price", "img"]
     }
   },
   "firestore": {
@@ -55,6 +94,14 @@
     "/bookings/{bookingId}": {
       "schema": "Booking",
       "description": "Service reservations."
+    },
+    "/settings/system": {
+      "schema": "SystemSettings",
+      "description": "Global system settings."
+    },
+    "/fleet/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Fleet vehicles."
     }
   }
 }

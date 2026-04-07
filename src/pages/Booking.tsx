@@ -10,7 +10,7 @@ import {
 import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer, Autocomplete } from '@react-google-maps/api';
 import { cn } from '../lib/utils';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, doc, getDocs } from 'firebase/firestore';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { fetchFlightStatus, FlightStatus } from '../services/flightService';
@@ -101,6 +101,8 @@ export default function Booking() {
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash'>('card');
   const [flightInfo, setFlightInfo] = useState<FlightStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fleet, setFleet] = useState<any[]>([]);
+  const [settings, setSettings] = useState<any>(null);
 
   const [formData, setFormData] = useState({
     serviceType: initialState?.service || '',
@@ -132,11 +134,58 @@ export default function Booking() {
   }, [formData.pickup, formData.dropoff]);
 
   useEffect(() => {
+    const fetchFleet = async () => {
+      try {
+        const fleetSnap = await getDocs(collection(db, 'fleet'));
+        setFleet(fleetSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        console.error('Error fetching fleet:', err);
+      }
+    };
+
+    const fetchSettings = async () => {
+      try {
+        const settingsDoc = await getDoc(doc(db, 'settings', 'system'));
+        if (settingsDoc.exists()) {
+          setSettings(settingsDoc.data());
+        }
+      } catch (err) {
+        console.error('Error fetching settings:', err);
+      }
+    };
+
+    fetchFleet();
+    fetchSettings();
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      const fetchUserDetails = async () => {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            setFormData(prev => ({
+              ...prev,
+              guestName: prev.guestName || userData.name || user.displayName || '',
+              guestEmail: prev.guestEmail || userData.email || user.email || '',
+              guestPhone: prev.guestPhone || userData.phone || '',
+            }));
+          }
+        } catch (err) {
+          console.error('Error fetching user details:', err);
+        }
+      };
+      fetchUserDetails();
+    }
+  }, [user]);
 
   const minDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD format
 
@@ -253,12 +302,44 @@ export default function Booking() {
     }
   };
 
+  const calculatePrice = useCallback((vehicleId: string) => {
+    const vehicle = fleet.find(v => v.id === vehicleId);
+    if (!vehicle) return 0;
+
+    const distanceKm = parseFloat(distance.replace(/[^\d.]/g, '')) || 0;
+    let price = Number(vehicle.price) || 0; // Base price
+
+    // Add KM-based surcharge
+    if (vehicle.kmRanges && vehicle.kmRanges.length > 0) {
+      const range = vehicle.kmRanges.find((r: any) => {
+        // Handle labels like "0-25", "25-50", "50+"
+        if (r.label.includes('+')) {
+          const min = parseFloat(r.label.replace('+', ''));
+          return distanceKm >= min;
+        }
+        const [min, max] = r.label.split('-').map(Number);
+        return distanceKm >= min && distanceKm <= max;
+      });
+      if (range) {
+        price += Number(range.surcharge);
+      }
+    }
+
+    // Add tax
+    if (settings?.taxPercentage) {
+      price = price * (1 + Number(settings.taxPercentage) / 100);
+    }
+
+    return Math.round(price);
+  }, [fleet, distance, settings]);
+
   const handleConfirmBooking = async () => {
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const selectedVehicle = vehicles.find(v => v.id === formData.vehicle);
+      const totalPrice = calculatePrice(formData.vehicle);
+      const selectedVehicle = fleet.find(v => v.id === formData.vehicle) || vehicles.find(v => v.id === formData.vehicle);
       const bookingData: any = {
         serviceType: formData.serviceType,
         pickup: formData.pickup,
@@ -266,7 +347,7 @@ export default function Booking() {
         date: formData.date,
         time: formData.time,
         vehicleId: formData.vehicle,
-        price: selectedVehicle?.price || 0,
+        price: totalPrice,
         status: 'pending',
         flightNumber: formData.flightNumber,
         flightStatus: flightInfo?.status || null,
@@ -276,14 +357,13 @@ export default function Booking() {
         duration: duration,
         paymentStatus: 'unpaid',
         paymentMethod: paymentMethod,
+        guestName: formData.guestName,
+        guestEmail: formData.guestEmail,
+        guestPhone: formData.guestPhone,
       };
 
       if (user) {
         bookingData.userId = user.uid;
-      } else {
-        bookingData.guestName = formData.guestName;
-        bookingData.guestEmail = formData.guestEmail;
-        bookingData.guestPhone = formData.guestPhone;
       }
 
       if (paymentMethod === 'card') {
@@ -316,6 +396,7 @@ export default function Booking() {
         try {
           const docRef = await addDoc(collection(db, 'bookings'), {
             ...bookingData,
+            read: false,
             createdAt: serverTimestamp(),
           });
           navigate(`/payment/success?booking_id=${docRef.id}&method=cash`);
@@ -672,35 +753,38 @@ export default function Booking() {
                   className="space-y-6"
                 >
                   <div className="grid grid-cols-1 gap-4">
-                    {vehicles.map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={() => updateForm('vehicle', v.id)}
-                        className={cn(
-                          "flex flex-col md:flex-row items-center gap-6 p-4 border transition-all text-left overflow-hidden",
-                          formData.vehicle === v.id 
-                            ? "border-gold bg-gold/5" 
-                            : "border-white/10 hover:border-gold/50 bg-white/5"
-                        )}
-                      >
-                        <img src={v.img} alt={v.name} className="w-full md:w-48 h-32 object-cover rounded-sm" referrerPolicy="no-referrer" />
-                        <div className="flex-1 p-2">
-                          <div className="flex justify-between items-start mb-2">
-                            <h3 className="font-display text-2xl">{v.name}</h3>
-                            <span className="text-gold font-bold text-xl">${v.price}</span>
-                          </div>
-                          <p className="text-white/40 text-sm mb-4">{v.model}</p>
-                          <div className="flex gap-6">
-                            <div className="flex items-center gap-2 text-white/60 text-xs">
-                              <User size={14} className="text-gold" /> {v.pax} Passengers
-                            </div>
-                            <div className="flex items-center gap-2 text-white/60 text-xs">
-                              <Briefcase size={14} className="text-gold" /> {v.bags} Bags
-                            </div>
+                  {(fleet.length > 0 ? fleet : vehicles).map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => updateForm('vehicle', v.id)}
+                      className={cn(
+                        "flex flex-col md:flex-row items-center gap-6 p-4 border transition-all text-left overflow-hidden",
+                        formData.vehicle === v.id 
+                          ? "border-gold bg-gold/5" 
+                          : "border-white/10 hover:border-gold/50 bg-white/5"
+                      )}
+                    >
+                      <img src={v.img} alt={v.name} className="w-full md:w-48 h-32 object-cover rounded-sm" referrerPolicy="no-referrer" />
+                      <div className="flex-1 p-2">
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="font-display text-2xl">{v.name}</h3>
+                          <div className="text-right">
+                            <span className="text-gold font-bold text-xl">${calculatePrice(v.id) || v.price}</span>
+                            <p className="text-[8px] text-white/40 uppercase font-bold">Estimated</p>
                           </div>
                         </div>
-                      </button>
-                    ))}
+                        <p className="text-white/40 text-sm mb-4">{v.model}</p>
+                        <div className="flex gap-6">
+                          <div className="flex items-center gap-2 text-white/60 text-xs">
+                            <User size={14} className="text-gold" /> {v.pax} Passengers
+                          </div>
+                          <div className="flex items-center gap-2 text-white/60 text-xs">
+                            <Briefcase size={14} className="text-gold" /> {v.bags} Bags
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                   </div>
 
                   <div className="flex justify-between pt-6">
@@ -726,50 +810,51 @@ export default function Booking() {
                   </p>
                   
                   <div className="bg-white/5 p-6 text-left space-y-4 mb-10 border border-white/10">
-                    {!user && (
-                      <div className="space-y-4 mb-6 pb-6 border-b border-white/10">
-                        <h3 className="text-gold text-xs uppercase tracking-widest font-bold mb-4">Guest Information</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase tracking-widest text-white/40">Full Name</label>
-                            <input 
-                              type="text" 
-                              className="w-full bg-white/5 border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
-                              value={formData.guestName}
-                              onChange={(e) => updateForm('guestName', e.target.value)}
-                              placeholder="Your Name"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase tracking-widest text-white/40">Email</label>
-                            <input 
-                              type="email" 
-                              className="w-full bg-white/5 border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
-                              value={formData.guestEmail}
-                              onChange={(e) => updateForm('guestEmail', e.target.value)}
-                              placeholder="Email Address"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase tracking-widest text-white/40">Phone</label>
-                            <input 
-                              type="tel" 
-                              className="w-full bg-white/5 border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
-                              value={formData.guestPhone}
-                              onChange={(e) => updateForm('guestPhone', e.target.value)}
-                              placeholder="Phone Number"
-                            />
-                          </div>
+                    <div className="space-y-4 mb-6 pb-6 border-b border-white/10">
+                      <h3 className="text-gold text-xs uppercase tracking-widest font-bold mb-4">Contact Information</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-widest text-white/40">Full Name</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-white/5 border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
+                            value={formData.guestName}
+                            onChange={(e) => updateForm('guestName', e.target.value)}
+                            placeholder="Your Name"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-widest text-white/40">Email</label>
+                          <input 
+                            type="email" 
+                            className="w-full bg-white/5 border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
+                            value={formData.guestEmail}
+                            onChange={(e) => updateForm('guestEmail', e.target.value)}
+                            placeholder="Email Address"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-widest text-white/40">Phone</label>
+                          <input 
+                            type="tel" 
+                            className="w-full bg-white/5 border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
+                            value={formData.guestPhone}
+                            onChange={(e) => updateForm('guestPhone', e.target.value)}
+                            placeholder="Phone Number"
+                            required
+                          />
                         </div>
                       </div>
-                    )}
+                    </div>
                     <div className="flex justify-between border-b border-white/5 pb-2">
                       <span className="text-white/40 text-xs uppercase tracking-widest">Service</span>
                       <span className="text-gold font-bold">{serviceTypes.find(t => t.id === formData.serviceType)?.name}</span>
                     </div>
                     <div className="flex justify-between border-b border-white/5 pb-2">
                       <span className="text-white/40 text-xs uppercase tracking-widest">Vehicle</span>
-                      <span className="text-gold font-bold">{vehicles.find(v => v.id === formData.vehicle)?.name}</span>
+                      <span className="text-gold font-bold">{(fleet.find(v => v.id === formData.vehicle) || vehicles.find(v => v.id === formData.vehicle))?.name}</span>
                     </div>
                     <div className="flex justify-between border-b border-white/5 pb-2">
                       <span className="text-white/40 text-xs uppercase tracking-widest">Pickup</span>
@@ -787,7 +872,7 @@ export default function Booking() {
                     )}
                     <div className="flex justify-between pt-4 pb-6 border-b border-white/10">
                       <span className="text-white font-bold">Total Price</span>
-                      <span className="text-gold font-bold text-2xl">${vehicles.find(v => v.id === formData.vehicle)?.price}</span>
+                      <span className="text-gold font-bold text-2xl">${calculatePrice(formData.vehicle)}</span>
                     </div>
 
                     <div className="pt-6 space-y-4">
