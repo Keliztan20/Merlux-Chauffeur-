@@ -3,14 +3,15 @@ import {
   Home, MapPin, Clock, User,
   Settings, Bell, CreditCard, History,
   ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft,
-  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw,
-  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save
+  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown,
+  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye,
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { cn } from '../lib/utils';
-import { auth, db } from '../lib/firebase';
+import { auth, db, storage } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, getDocs, addDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
@@ -85,13 +86,18 @@ export default function AppDashboard() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [ratingBooking, setRatingBooking] = useState<any>(null);
   const [ratingValue, setRatingValue] = useState(0);
+  const [ratingComment, setRatingComment] = useState('');
+  const [expandedFeedback, setExpandedFeedback] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [priceSort, setPriceSort] = useState<'asc' | 'desc' | null>(null);
-  const [dateSort, setDateSort] = useState<'asc' | 'desc'>('desc');
+  const [dateSort, setDateSort] = useState<'asc' | 'desc' | null>(null);
   const [typeFilter, setTypeFilter] = useState('all');
+  const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Profile Edit State
   const [profileName, setProfileName] = useState('');
@@ -164,8 +170,9 @@ export default function AppDashboard() {
   const clearFilters = () => {
     setSearchQuery('');
     setPriceSort(null);
-    setDateSort('desc');
+    setDateSort(null);
     setTypeFilter('all');
+    setServiceFilter('all');
     setStatusFilter('all');
   };
 
@@ -175,14 +182,16 @@ export default function AppDashboard() {
     setTimeout(() => setIsRefreshing(false), 800);
   };
 
-  const handleRateDriver = async (bookingId: string, rating: number) => {
+  const handleRateDriver = async (bookingId: string, rating: number, comment: string) => {
     try {
       await updateDoc(doc(db, 'bookings', bookingId), {
         rating,
+        ratingComment: comment,
         updatedAt: serverTimestamp()
       });
       setRatingBooking(null);
       setRatingValue(0);
+      setRatingComment('');
     } catch (err) {
       console.error('Error rating driver:', err);
     }
@@ -276,6 +285,27 @@ export default function AppDashboard() {
     }
   };
 
+  // Time Formatter
+  const formatTimeToAMPM = (timeStr: string) => {
+    if (!timeStr) return '';
+    try {
+      // Check if it's already in AM/PM format
+      if (timeStr.toLowerCase().includes('am') || timeStr.toLowerCase().includes('pm')) return timeStr;
+
+      const [hours, minutes] = timeStr.split(':');
+      if (hours === undefined || minutes === undefined) return timeStr;
+
+      let h = parseInt(hours);
+      const m = minutes;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12;
+      h = h ? h : 12; // the hour '0' should be '12'
+      return `${h}:${m} ${ampm}`;
+    } catch (e) {
+      return timeStr;
+    }
+  };
+
   // Analytics Computation
   const analytics = useMemo(() => {
     const totalRevenue = bookings
@@ -286,6 +316,8 @@ export default function AppDashboard() {
     const pendingBookings = bookings.filter(b => b.status === 'pending').length;
     const cancelledBookings = bookings.filter(b => b.status === 'cancelled').length;
     const confirmedBookings = bookings.filter(b => b.status === 'confirmed').length;
+    const assignedBookings = bookings.filter(b => b.status === 'assigned').length;
+    const acceptedBookings = bookings.filter(b => b.status === 'accepted').length;
 
     const now = new Date();
     const currentMonthStart = startOfMonth(now);
@@ -326,6 +358,8 @@ export default function AppDashboard() {
       pendingBookings,
       cancelledBookings,
       confirmedBookings,
+      assignedBookings,
+      acceptedBookings,
       currentMonthCount: currentMonthBookings.length,
       currentMonthRevenue,
       revenueData
@@ -547,9 +581,14 @@ export default function AppDashboard() {
       );
     }
 
-    // Filter by type
+    // Filter by type (Vehicle Type)
     if (typeFilter !== 'all') {
-      result = result.filter(b => b.serviceType === typeFilter);
+      result = result.filter(b => (b.vehicleType || 'sedan').toLowerCase() === typeFilter.toLowerCase());
+    }
+
+    // Filter by service (Service Type)
+    if (serviceFilter !== 'all') {
+      result = result.filter(b => (b.serviceType || 'standard').toLowerCase() === serviceFilter.toLowerCase());
     }
 
     // Filter by status
@@ -565,13 +604,20 @@ export default function AppDashboard() {
         return priceSort === 'asc' ? priceA - priceB : priceB - priceA;
       }
 
-      const dateA = a.createdAt?.seconds || 0;
-      const dateB = b.createdAt?.seconds || 0;
-      return dateSort === 'asc' ? dateA - dateB : dateB - dateA;
+      if (dateSort) {
+        const dateA = new Date(`${a.date} ${a.time}`).getTime();
+        const dateB = new Date(`${b.date} ${b.time}`).getTime();
+        return dateSort === 'asc' ? dateA - dateB : dateB - dateA;
+      }
+
+      // Default sort by createdAt
+      const createdA = a.createdAt?.seconds || 0;
+      const createdB = b.createdAt?.seconds || 0;
+      return createdB - createdA;
     });
 
     return result;
-  }, [bookings, searchQuery, typeFilter, statusFilter, priceSort, dateSort]);
+  }, [bookings, searchQuery, typeFilter, serviceFilter, statusFilter, priceSort, dateSort]);
 
   const handleDeleteUser = async (userId: string) => {
     setConfirmDelete({ type: 'user', id: userId });
@@ -610,6 +656,24 @@ export default function AppDashboard() {
     } catch (err) {
       console.error('Error deleting vehicle:', err);
       handleFirestoreError(err, OperationType.DELETE, `fleet/${vehicleId}`);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const storageRef = ref(storage, `fleet/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setEditingVehicle({ ...editingVehicle, img: url });
+    } catch (err) {
+      console.error('Upload error:', err);
+      alert('Failed to upload image');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -665,85 +729,141 @@ export default function AppDashboard() {
     switch (activeTab) {
       case 'bookings':
         return (
-          <div className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-display text-gold">Bookings</h2>
-                <p className="text-white/40 text-xs uppercase tracking-widest">Manage and track all rides</p>
+                <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Manage and track all rides</p>
+              </div>
+            </div>
+
+            {/* Filters Row - Relocated from Header */}
+            <div className="flex flex-wrap items-center gap-3 bg-white/5 p-2 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-2 px-3 border-r border-white/10 hidden md:flex">
+                <Filter size={14} className="text-gold" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Filters</span>
+              </div>
+
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                <input
+                  type="text"
+                  placeholder="Search bookings..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
-                  <input
-                    type="text"
-                    placeholder="Search bookings..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
+                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-2">
+                  <Filter size={12} className="text-white/20" />
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="bg-transparent py-2 text-[10px] text-white outline-none focus:ring-0 appearance-none min-w-[90px] font-bold uppercase tracking-widest cursor-pointer"
+                  >
+                    <option value="all" className="bg-black">All Status</option>
+                    <option value="pending" className="bg-black">Pending</option>
+                    <option value="confirmed" className="bg-black">Confirmed</option>
+                    <option value="assigned" className="bg-black">Assigned</option>
+                    <option value="accepted" className="bg-black">Accepted</option>
+                    <option value="completed" className="bg-black">Completed</option>
+                    <option value="cancelled" className="bg-black">Cancelled</option>
+                  </select>
                 </div>
 
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-gold transition-all appearance-none"
-                >
-                  <option value="all" className="bg-black">All Status</option>
-                  <option value="pending" className="bg-black">Pending</option>
-                  <option value="confirmed" className="bg-black">Confirmed</option>
-                  <option value="assigned" className="bg-black">Assigned</option>
-                  <option value="accepted" className="bg-black">Accepted</option>
-                  <option value="completed" className="bg-black">Completed</option>
-                  <option value="cancelled" className="bg-black">Cancelled</option>
-                </select>
+                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-2">
+                  <Shield size={12} className="text-white/20" />
+                  <select
+                    value={serviceFilter}
+                    onChange={(e) => setServiceFilter(e.target.value)}
+                    className="bg-transparent py-2 text-[10px] text-white outline-none focus:ring-0 appearance-none min-w-[90px] font-bold uppercase tracking-widest cursor-pointer"
+                  >
+                    <option value="all" className="bg-black">All Services</option>
+                    <option value="wedding" className="bg-black">Wedding</option>
+                    <option value="tour" className="bg-black">Tour</option>
+                    <option value="hourly" className="bg-black">Hourly</option>
+                    <option value="airport" className="bg-black">Airport</option>
+                    <option value="corporate" className="bg-black">Corporate</option>
+                  </select>
+                </div>
 
-                <button
-                  onClick={() => setPriceSort(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-xl border transition-all text-xs",
-                    priceSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-white/5 text-white/40"
-                  )}
-                >
-                  <DollarSign size={14} />
-                  Price {priceSort === 'asc' ? 'Low-High' : priceSort === 'desc' ? 'High-Low' : ''}
-                </button>
+                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-2">
+                  <Car size={12} className="text-white/20" />
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                    className="bg-transparent py-2 text-[10px] text-white outline-none focus:ring-0 appearance-none min-w-[90px] font-bold uppercase tracking-widest cursor-pointer"
+                  >
+                    <option value="all" className="bg-black">All Vehicles</option>
+                    <option value="sedan" className="bg-black">Sedan</option>
+                    <option value="suv" className="bg-black">SUV</option>
+                    <option value="van" className="bg-black">Van</option>
+                    <option value="luxury" className="bg-black">Luxury</option>
+                  </select>
+                </div>
 
-                <button
-                  onClick={() => setDateSort(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-xl border transition-all text-xs",
-                    dateSort !== 'desc' ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-white/5 text-white/40"
-                  )}
-                >
-                  <Calendar size={14} />
-                  Date {dateSort === 'asc' ? 'Oldest' : 'Newest'}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setPriceSort(prev => prev === 'asc' ? 'desc' : 'asc');
+                      setDateSort(null);
+                    }}
+                    className={cn(
+                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
+                      priceSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
+                    )}
+                    title={priceSort === 'asc' ? 'Price: Low to High' : priceSort === 'desc' ? 'Price: High to Low' : 'Sort by Price'}
+                  >
+                    <div className="flex items-center gap-1">
+                      <DollarSign size={14} />
+                      {priceSort === 'asc' ? <ArrowUp size={10} /> : priceSort === 'desc' ? <ArrowDown size={10} /> : null}
+                    </div>
+                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Price</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setDateSort(prev => prev === 'asc' ? 'desc' : 'asc');
+                      setPriceSort(null);
+                    }}
+                    className={cn(
+                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
+                      dateSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
+                    )}
+                    title={dateSort === 'asc' ? 'Date: Oldest First' : 'Date: Newest First'}
+                  >
+                    <div className="flex items-center gap-1">
+                      {dateSort === 'asc' ? <CalendarArrowUp size={16} /> : dateSort === 'desc' ? <CalendarArrowDown size={16} /> : <Calendar size={14} />}
+                    </div>
+                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Pickup</span>
+                  </button>
+                </div>
 
                 <button
                   onClick={handleRefresh}
-                  className="p-2 rounded-xl border border-white/10 bg-white/5 text-white/40 hover:text-gold transition-all"
+                  className="p-2 rounded-xl border border-white/10 bg-black/20 text-white/40 hover:text-gold transition-all"
                   title="Refresh Data"
                 >
                   <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
                 </button>
 
-                {(searchQuery || priceSort || dateSort !== 'desc' || statusFilter !== 'all' || typeFilter !== 'all') && (
+                {(searchQuery || priceSort || dateSort || statusFilter !== 'all' || typeFilter !== 'all' || serviceFilter !== 'all') && (
                   <button
                     onClick={clearFilters}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl border border-gold/20 bg-gold/5 text-gold hover:bg-gold/10 transition-all text-xs font-bold uppercase tracking-widest"
+                    className="p-2 rounded-xl border border-gold/20 bg-gold/5 text-gold hover:bg-gold/10 transition-all"
                     title="Reset All Filters"
                   >
                     <RotateCcw size={14} />
-                    Reset
                   </button>
                 )}
               </div>
@@ -751,59 +871,101 @@ export default function AppDashboard() {
 
             {/* Booking Stats Section */}
             {isAdmin && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="glass p-6 rounded-2xl border border-white/5 flex items-center gap-4">
-                  <div className="p-3 bg-gold/10 text-gold rounded-xl">
-                    <LayoutGrid size={24} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-white/40">Total Bookings</p>
-                    <h3 className="text-2xl font-display">{bookings.length}</h3>
-                  </div>
-                </div>
-                <div className="glass p-6 rounded-2xl border border-white/5 flex items-center gap-4">
-                  <div className="p-3 bg-green-500/10 text-green-500 rounded-xl">
-                    <DollarSign size={24} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-white/40">Total Revenue</p>
-                    <h3 className="text-2xl font-display">${analytics.totalRevenue.toFixed(2)}</h3>
-                  </div>
-                </div>
-                <div className="glass p-6 rounded-2xl border border-white/5 flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl">
-                    <Calendar size={24} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-white/40">This Month</p>
-                    <div className="flex items-baseline gap-2">
-                      <h3 className="text-2xl font-display">{analytics.currentMonthCount}</h3>
-                      <span className="text-xs text-white/40">(${analytics.currentMonthRevenue.toFixed(2)})</span>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Total Bookings */}
+                <div className="glass p-4 rounded-2xl border border-white/5">
+                  <div className="flex justify-between items-center mb-1 w-full">
+                    <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                      Total Bookings
+                    </p>
+                    <div className="p-1.5 bg-gold/10 text-gold rounded-xl">
+                      <LayoutGrid size={12} />
                     </div>
                   </div>
+                  <div className="space-y-1">
+                    <h3 className="text-2xl font-bold text-gold font-display">{bookings.length}</h3>
+                    <p className="text-[10px] text-white/60">All Bookings</p>
+                  </div>
                 </div>
-                <div className="glass p-6 rounded-2xl border border-white/5 md:col-span-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-gold rounded-full" />
-                        <span className="text-[10px] uppercase font-bold text-white/40">Pending: {analytics.pendingBookings}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                        <span className="text-[10px] uppercase font-bold text-white/40">Confirmed: {analytics.confirmedBookings}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full" />
-                        <span className="text-[10px] uppercase font-bold text-white/40">Completed: {analytics.completedBookings}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-red-500 rounded-full" />
-                        <span className="text-[10px] uppercase font-bold text-white/40">Cancelled: {analytics.cancelledBookings}</span>
-                      </div>
+
+                {/* Revenue */}
+                <div className="glass p-4 rounded-2xl border border-white/5">
+                  <div className="flex justify-between items-center mb-1 w-full">
+                    <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                      Total Revenue
+                    </p>
+                    <div className="p-1.5 bg-green-500/10 text-green-500 rounded-xl">
+                      <DollarSign size={12} />
                     </div>
-                    <div className="p-2 bg-white/5 rounded-lg">
-                      <BarChart3 size={16} className="text-white/20" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-2xl font-bold text-green-500 font-display">${analytics.totalRevenue.toFixed(2)}</h3>
+                    <p className="text-[10px] text-white/60">From Completed Bookings</p>
+                  </div>
+                </div>
+
+                {/* Monthly */}
+                <div className="glass p-4 rounded-2xl border border-white/5">
+                  <div className="flex justify-between items-center mb-1 w-full">
+                    <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                      This Month
+                    </p>
+                    <div className="p-1.5 bg-blue-500/10 text-blue-500 rounded-xl">
+                      <Calendar size={12} />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-2xl font-bold text-blue-500 font-display">{analytics.currentMonthCount}</h3>
+                    <p className="text-[10px] text-white/60">${analytics.currentMonthRevenue?.toFixed(2) || '0.00'} revenue</p>
+                  </div>
+                </div>
+
+                <div className="glass p-4 rounded-2xl border border-white/5 col-span-2 lg:col-span-1">
+                  <div className="flex justify-between items-center mb-3 w-full">
+                    <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                      Status Overview
+                    </p>
+                    <div className="p-1.5 bg-gold/10 text-gold rounded-xl">
+                      <BarChart3 size={12} />
+                    </div>
+                  </div>
+
+                  {/* One row, each column = icon + value */}
+                  <div className="grid mt-2 grid-cols-6 gap-x-4 text-center">
+                    {/* Pending */}
+                    <div className="flex flex-col items-center">
+                      <Clock size={12} className="text-gold mb-2" />
+                      <span className="text-xs font-display text-gold">{analytics.pendingBookings}</span>
+                    </div>
+
+                    {/* Confirmed */}
+                    <div className="flex flex-col items-center">
+                      <CheckCircle size={12} className="text-blue-400 mb-2" />
+                      <span className="text-xs font-display text-blue-400">{analytics.confirmedBookings}</span>
+                    </div>
+
+                    {/* Assigned */}
+                    <div className="flex flex-col items-center">
+                      <Truck size={12} className="text-purple-400 mb-2" />
+                      <span className="text-xs font-display text-purple-400">{analytics.assignedBookings}</span>
+                    </div>
+
+                    {/* Accepted */}
+                    <div className="flex flex-col items-center">
+                      <UserCheck size={12} className="text-cyan-400 mb-2" />
+                      <span className="text-xs font-display text-cyan-400">{analytics.acceptedBookings}</span>
+                    </div>
+
+                    {/* Completed */}
+                    <div className="flex flex-col items-center">
+                      <CheckSquare size={12} className="text-green-400 mb-2" />
+                      <span className="text-xs font-display text-green-400">{analytics.completedBookings}</span>
+                    </div>
+
+                    {/* Cancelled */}
+                    <div className="flex flex-col items-center">
+                      <XCircle size={12} className="text-red-400 mb-2" />
+                      <span className="text-xs font-display text-red-400">{analytics.cancelledBookings}</span>
                     </div>
                   </div>
                 </div>
@@ -816,28 +978,58 @@ export default function AppDashboard() {
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
-                        Booked on: {booking.createdAt?.seconds ? format(new Date(booking.createdAt.seconds * 1000), 'MMM dd, yyyy HH:mm') : 'N/A'}
+                        Booked on: {booking.createdAt?.seconds
+                          ? format(new Date(booking.createdAt.seconds * 1000), 'MMM dd, yyyy HH:mm')
+                          : 'N/A'}
                       </p>
                       <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors">
                         {booking.guestName || 'Guest Customer'}
                       </h3>
                     </div>
-                    <span className={cn(
-                      "text-[9px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full border",
-                      booking.status === 'completed' ? "bg-green-500/10 text-green-500 border-green-500/20" :
-                        booking.status === 'confirmed' ? "bg-blue-500/10 text-blue-400 border-blue-400/20" :
-                          booking.status === 'assigned' ? "bg-purple-500/10 text-purple-400 border-purple-400/20" :
-                            booking.status === 'accepted' ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20" :
-                              booking.status === 'cancelled' ? "bg-red-500/10 text-red-400 border-red-400/20" :
-                                "bg-gold/10 text-gold border-gold/20"
-                    )}>
-                      {booking.status}
+
+                    <span
+                      className={cn(
+                        "flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border",
+                        booking.status === 'completed'
+                          ? "bg-green-500/10 text-green-500 border-green-500/20"
+                          : booking.status === 'confirmed'
+                            ? "bg-blue-500/10 text-blue-400 border-blue-400/20"
+                            : booking.status === 'assigned'
+                              ? "bg-purple-500/10 text-purple-400 border-purple-400/20"
+                              : booking.status === 'accepted'
+                                ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20"
+                                : booking.status === 'cancelled'
+                                  ? "bg-red-500/10 text-red-400 border-red-400/20"
+                                  : "bg-gold/10 text-gold border-gold/20"
+                      )}
+                    >
+                      {/* Status icon + label */}
+                      {booking.status === 'completed' && (
+                        <CheckSquare className="h-3 w-3" />
+                      )}
+                      {booking.status === 'confirmed' && (
+                        <CheckCircle className="h-3 w-3" />
+                      )}
+                      {booking.status === 'assigned' && (
+                        <Truck className="h-3 w-3" />
+                      )}
+                      {booking.status === 'accepted' && (
+                        <UserCheck className="h-3 w-3" />
+                      )}
+                      {booking.status === 'cancelled' && (
+                        <XCircle className="h-3 w-3" />
+                      )}
+                      {booking.status === 'pending' && (
+                        <Clock className="h-3 w-3" />
+                      )}
+
+                      <span className="sm:inline">{booking.status}</span>
                     </span>
                   </div>
 
                   <div className="space-y-3 mb-4">
                     <div className="flex items-start gap-3">
-                      <div className="w-1.5 h-1.5 bg-gold rounded-full mt-1.5 shrink-0" />
+                      <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
                       <p className="text-xs text-white/70 truncate">{booking.pickup}</p>
                     </div>
                     <div className="flex items-start gap-3">
@@ -845,14 +1037,18 @@ export default function AppDashboard() {
                       <p className="text-xs text-white/70 truncate">{booking.dropoff}</p>
                     </div>
 
-                    <div className="flex items-center gap-4 mt-2">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-3">
                         <Calendar size={12} className="text-gold" />
                         <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.date}</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-3">
                         <Clock size={12} className="text-gold" />
-                        <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.time}</span>
+                        <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{formatTimeToAMPM(booking.time)}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Car size={12} className="text-gold" />
+                        <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.vehicleType || 'Sedan'}</span>
                       </div>
                     </div>
                   </div>
@@ -883,7 +1079,52 @@ export default function AppDashboard() {
                     </div>
                   </div>
 
-                  {booking.driverId && (
+                  {booking.status === 'completed' && booking.rating ? (
+                    <div className="mb-4 p-3 bg-gold/5 rounded-xl border border-gold/20">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
+                            <Star size={12} className="text-gold fill-gold" />
+                          </div>
+                          <div>
+                            <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">Customer Feedback</p>
+                            <div className="flex items-center gap-0.5">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star
+                                  key={s}
+                                  size={8}
+                                  className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>
+                      </div>
+                      {booking.ratingComment && (
+                        <div className="mt-2">
+                          <p className={cn(
+                            "text-[10px] text-white/60 leading-relaxed italic",
+                            !expandedFeedback.includes(booking.id) && "line-clamp-2"
+                          )}>
+                            "{booking.ratingComment}"
+                          </p>
+                          {booking.ratingComment.length > 60 && (
+                            <button
+                              onClick={() => setExpandedFeedback(prev =>
+                                prev.includes(booking.id)
+                                  ? prev.filter(id => id !== booking.id)
+                                  : [...prev, booking.id]
+                              )}
+                              className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
+                            >
+                              {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : booking.driverId && (
                     <div className="mb-4 p-3 bg-white/5 rounded-xl border border-white/10">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -925,7 +1166,17 @@ export default function AppDashboard() {
                   <div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4">
                     <div className="flex flex-col">
                       <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
-                      <span className="text-lg font-display text-gold">${booking.price}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-display text-gold">${booking.price}</span>
+                        <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
+                          {booking.paymentMethod === 'cash' ? (
+                            <DollarSign size={10} className="text-gold" />
+                          ) : (
+                            <CreditCard size={10} className="text-gold" />
+                          )}
+                          <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
+                        </div>
+                      </div>
                     </div>
                     <div className="text-right">
                       <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
@@ -936,34 +1187,39 @@ export default function AppDashboard() {
                   <div className="space-y-2">
                     {isAdmin && (
                       <div className="flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2 w-full">
                           {booking.status === 'pending' && (
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'confirmed')}
-                              className="bg-gold text-black py-2.5 px-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
+                              className="p-2 sm:p-2.5 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all shrink-0"
+                              title="Confirm"
                             >
-                              Confirm
+                              <CheckCircle size={16} />
                             </button>
                           )}
                           {booking.status === 'confirmed' && (
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'pending')}
-                              className="bg-white/10 text-white py-2.5 px-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
+                              className="p-2 sm:p-2.5 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all shrink-0"
+                              title="Unconfirm"
                             >
-                              Unconfirm
+                              <CircleX size={16} />
                             </button>
                           )}
                           {booking.status !== 'cancelled' && (
-                            <select
-                              onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
-                              value={booking.driverId || ''}
-                              className="flex-1 min-w-[100px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none"
-                            >
-                              <option value="" className="bg-black">Assign Driver</option>
-                              {drivers.map(driver => (
-                                <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
-                              ))}
-                            </select>
+                            <div className="flex-1 relative min-w-0">
+                              <select
+                                onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
+                                value={booking.driverId || ''}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-2 sm:px-3 py-2 sm:py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
+                              >
+                                <option value="" className="bg-black">Assign</option>
+                                {drivers.map(driver => (
+                                  <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
+                                ))}
+                              </select>
+                              <User size={12} className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" />
+                            </div>
                           )}
 
                           <button
@@ -971,10 +1227,10 @@ export default function AppDashboard() {
                               setViewingBooking(booking);
                               setShowViewModal(true);
                             }}
-                            className="p-2 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all"
+                            className="p-2 sm:p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all shrink-0"
                             title="View Details"
                           >
-                            <Search size={16} />
+                            <Eye size={16} />
                           </button>
 
                           <button
@@ -982,7 +1238,7 @@ export default function AppDashboard() {
                               setEditingBooking(booking);
                               setShowBookingModal(true);
                             }}
-                            className="p-2 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all"
+                            className="p-2 sm:p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all shrink-0"
                             title="Edit Booking"
                           >
                             <Edit2 size={16} />
@@ -990,7 +1246,7 @@ export default function AppDashboard() {
 
                           <button
                             onClick={() => handleDeleteBooking(booking.id)}
-                            className="p-2 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all"
+                            className="p-2 sm:p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all shrink-0"
                             title="Delete Booking"
                           >
                             <Trash2 size={16} />
@@ -1042,6 +1298,20 @@ export default function AppDashboard() {
                           </button>
                         )}
                       </div>
+                    )}
+
+                    {!isAdmin && !isDriver && booking.status === 'completed' && !booking.rating && (
+                      <button
+                        onClick={() => {
+                          setRatingBooking(booking);
+                          setRatingValue(0);
+                          setRatingComment('');
+                        }}
+                        className="w-full bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all flex items-center justify-center gap-2"
+                      >
+                        <Star size={14} className="fill-black" />
+                        Rate Your Experience
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1225,41 +1495,70 @@ export default function AppDashboard() {
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredUsers.map((u) => (
-                <div key={u.id} className="glass p-6 rounded-2xl flex items-center justify-between border border-white/5">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center border border-white/10">
-                      <User size={24} className="text-gold/50" />
+                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+                  <div className="flex justify-between items-center mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-10 h-10 rounded-full flex items-center justify-center border transition-all",
+                        u.role === 'admin' ? "bg-red-500/10 border-red-500/20 text-red-500" :
+                          u.role === 'driver' ? "bg-blue-500/10 border-blue-500/20 text-blue-500" :
+                            "bg-gold/10 border-gold/20 text-gold"
+                      )}>
+                        {u.role === 'admin' ? <Shield size={20} /> : u.role === 'driver' ? <Car size={20} /> : <User size={20} />}
+                      </div>
+                      <div className="flex flex-col">
+                        <h4 className="text-lg font-display text-white group-hover:text-gold transition-colors leading-tight">{u.name || 'No Name'}</h4>
+                        <span className="text-[9px] text-white/30 font-mono mt-0.5">ID: {u.id}</span>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-bold">{u.name}</p>
-                      <p className="text-xs text-white/40">{u.email}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
                     <span className={cn(
-                      "text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded",
-                      u.role === 'admin' ? "bg-red-500/20 text-red-500" :
-                        u.role === 'driver' ? "bg-blue-500/20 text-blue-500" :
-                          "bg-gold/20 text-gold"
+                      "text-[9px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border",
+                      u.role === 'admin' ? "bg-red-500/10 text-red-400 border-red-400/20" :
+                        u.role === 'driver' ? "bg-blue-500/10 text-blue-400 border-blue-400/20" :
+                          "bg-gold/10 text-gold border-gold/20"
                     )}>
                       {u.role}
                     </span>
+                  </div>
+
+                  <div className="space-y-3 mb-6">
+                    <div className="flex items-center gap-3">
+                      <Mail size={14} className="text-gold shrink-0" />
+                      <p className="text-xs text-white/60 truncate">{u.email || 'No Email'}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Phone size={14} className="text-gold shrink-0" />
+                      <p className="text-xs text-white/60">{u.phone || 'No Phone'}</p>
+                    </div>
+                    {u.createdAt && (
+                      <div className="flex items-center gap-3">
+                        <Calendar size={14} className="text-gold shrink-0" />
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                          Joined: {u.createdAt?.seconds ? format(new Date(u.createdAt.seconds * 1000), 'MMM dd, yyyy') : 'N/A'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-4 border-t border-white/5 flex items-center gap-2">
                     <button
                       onClick={() => {
                         setEditingUser(u);
                         setShowUserModal(true);
                       }}
-                      className="p-2 hover:bg-white/5 rounded-lg text-white/40 hover:text-gold"
+                      className="flex-1 px-3 py-2 border border-blue-500/30 bg-blue-500/5 text-blue-400 hover:bg-blue-500/20 hover:border-blue-500 transition-all rounded-xl flex items-center justify-center gap-2"
                     >
-                      <Edit2 size={16} />
+                      <Edit2 size={14} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
                     </button>
                     <button
                       onClick={() => handleDeleteUser(u.id)}
-                      className="p-2 hover:bg-red-500/10 rounded-lg text-white/20 hover:text-red-500"
+                      className="flex-1 px-3 py-2 border border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/20 hover:border-red-500 transition-all rounded-xl flex items-center justify-center gap-2"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={14} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
                     </button>
                   </div>
                 </div>
@@ -1338,7 +1637,7 @@ export default function AppDashboard() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Base Price</p>
+                        <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Price</p>
                         <p className="text-lg font-display text-gold">${v.price}</p>
                       </div>
                     </div>
@@ -1373,7 +1672,7 @@ export default function AppDashboard() {
             <div className="glass p-8 rounded-3xl border border-white/5 max-w-2xl">
               <div className="space-y-6">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Global Base Price ($)</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Global Price ($)</label>
                   <input
                     type="number"
                     value={systemSettings?.basePrice || 0}
@@ -1639,7 +1938,7 @@ export default function AppDashboard() {
                     <div className="p-2 bg-gold/10 text-gold rounded-lg">
                       <DollarSign size={18} />
                     </div>
-                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Base Price</span>
+                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Price</span>
                   </div>
                   <p className="text-2xl font-display">${systemSettings?.basePrice || 0}</p>
                 </div>
@@ -1686,7 +1985,7 @@ export default function AppDashboard() {
                 {fleet.map((v) => (
                   <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
                     <div className="h-40 relative overflow-hidden">
-                      <img src={v.img} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                      <img src={v.img || null} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
                       <div className="absolute bottom-4 left-4">
                         <p className="text-lg font-display">{v.name}</p>
@@ -1699,7 +1998,7 @@ export default function AppDashboard() {
                           <span className="text-white/40">Pax: <span className="text-white">{v.pax}</span></span>
                           <span className="text-white/40">Bags: <span className="text-white">{v.bags}</span></span>
                         </div>
-                        <span className="text-gold">${v.price} / base</span>
+                        <span className="text-gold">${v.price}</span>
                       </div>
 
                       {v.kmRanges && v.kmRanges.length > 0 && (
@@ -1763,7 +2062,7 @@ export default function AppDashboard() {
             <div className="flex flex-col items-center text-center">
               <div className="w-24 h-24 bg-gold/10 border-2 border-gold rounded-full flex items-center justify-center mb-4 overflow-hidden">
                 {user?.photoURL ? (
-                  <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
+                  <img src={user.photoURL || null} alt="Profile" className="w-full h-full object-cover" />
                 ) : (
                   <User size={48} className="text-gold" />
                 )}
@@ -1825,88 +2124,85 @@ export default function AppDashboard() {
   }
 
   return (
-    <div className="flex min-h-screen bg-black text-white overflow-hidden">
-      {/* Sidebar */}
-      <aside className="hidden lg:flex flex-col w-64 bg-zinc-900/50 border-r border-white/5 backdrop-blur-xl sticky top-0 h-screen">
-        <div className="p-8">
-          <Logo className="h-10" />
-        </div>
+    <div className="flex flex-col min-h-screen bg-black text-white overflow-hidden">
+      {/* Top Navigation Bar */}
+      <header className="bg-black/50 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
+        <div className="p-4 lg:px-8 lg:py-4 flex flex-col gap-4">
+          {/* Top Row: Logo & User Actions */}
+          <div className="flex items-center justify-between">
+            <Logo className="h-8 lg:h-10" />
 
-        <nav className="flex-1 px-4 space-y-2">
-          {filteredNavItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={cn(
-                "w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all group",
-                activeTab === item.id
-                  ? "bg-gold text-black font-bold"
-                  : "text-white/40 hover:bg-white/5 hover:text-white"
-              )}
-            >
-              <item.icon size={20} className={cn(
-                "transition-colors",
-                activeTab === item.id ? "text-black" : "text-gold group-hover:text-gold"
-              )} />
-              <span className="text-xs uppercase tracking-widest">{item.label}</span>
-            </button>
-          ))}
-        </nav>
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="relative p-2 text-gold hover:bg-white/5 rounded-full transition-colors"
+                >
+                  <Bell size={22} />
+                  {bookings.filter(b => !b.read).length > 0 && (
+                    <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold text-white">
+                      {bookings.filter(b => !b.read).length}
+                    </span>
+                  )}
+                </button>
+              </div>
 
-        <div className="p-8 border-t border-white/5">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-4 text-white/40 hover:text-red-500 transition-colors w-full"
-          >
-            <LogOut size={20} />
-            <span className="text-xs uppercase tracking-widest font-bold">Logout</span>
-          </button>
+              <div className="flex items-center gap-3 pl-4 border-l border-white/10">
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs font-bold">{userProfile?.name || 'User'}</p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest">{userProfile?.role}</p>
+                </div>
+                <div className="w-9 h-9 bg-gold/10 border border-gold/20 rounded-full flex items-center justify-center">
+                  <User size={18} className="text-gold" />
+                </div>
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="p-2 text-white/40 hover:text-red-500 transition-colors"
+                title="Logout"
+              >
+                <LogOut size={22} />
+              </button>
+            </div>
+          </div>
+
+          {/* Bottom Row: Navigation Tabs */}
+          <div className="w-full">
+            <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5 overflow-x-auto no-scrollbar">
+              {filteredNavItems.map((item) => (
+                <button
+                  key={`top-${item.id}`}
+                  onClick={() => setActiveTab(item.id)}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 px-3 lg:px-5 py-2.5 rounded-xl transition-all group relative whitespace-nowrap",
+                    activeTab === item.id
+                      ? "text-black font-bold"
+                      : "text-white/40 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <item.icon size={18} className={cn(
+                    "transition-colors",
+                    activeTab === item.id ? "text-black" : "text-gold group-hover:text-gold"
+                  )} />
+                  <span className="hidden lg:inline text-[10px] uppercase tracking-widest font-bold">{item.label}</span>
+                  {activeTab === item.id && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute inset-0 bg-gold rounded-xl -z-10"
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                    />
+                  )}
+                </button>
+              ))}
+            </nav>
+          </div>
         </div>
-      </aside>
+      </header>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-screen overflow-y-auto">
-        {/* Header */}
-        <header className="p-6 flex justify-between items-center bg-black/50 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
-          <div className="flex items-center gap-4">
-            <div className="lg:hidden">
-              <Logo className="h-8" />
-            </div>
-            <div className="hidden lg:block">
-              <h1 className="text-sm font-bold uppercase tracking-[0.3em] text-white/40">
-                Dashboard / <span className="text-gold">{activeTab}</span>
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <button
-                onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-2 text-gold hover:bg-white/5 rounded-full transition-colors"
-              >
-                <Bell size={24} />
-                {bookings.filter(b => !b.read).length > 0 && (
-                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold text-white">
-                    {bookings.filter(b => !b.read).length}
-                  </span>
-                )}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 pl-4 border-l border-white/10">
-              <div className="text-right hidden sm:block">
-                <p className="text-xs font-bold">{userProfile?.name || 'User'}</p>
-                <p className="text-[10px] text-white/40 uppercase tracking-widest">{userProfile?.role}</p>
-              </div>
-              <div className="w-10 h-10 bg-gold/10 border border-gold/20 rounded-full flex items-center justify-center">
-                <User size={20} className="text-gold" />
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto pb-32">
+        <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -1920,22 +2216,6 @@ export default function AppDashboard() {
           </AnimatePresence>
         </main>
       </div>
-
-      {/* Mobile Bottom Nav */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-black/80 backdrop-blur-xl border-t border-white/5 px-6 py-4 flex justify-between items-center z-50">
-        {filteredNavItems.slice(0, 5).map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id)}
-            className={cn(
-              "p-2 transition-all",
-              activeTab === item.id ? "text-gold scale-110" : "text-white/30"
-            )}
-          >
-            <item.icon size={24} />
-          </button>
-        ))}
-      </nav>
 
       {/* Rating Modal */}
       <AnimatePresence>
@@ -1957,7 +2237,7 @@ export default function AppDashboard() {
               <h3 className="text-2xl font-display mb-2">Rate Your Driver</h3>
               <p className="text-white/40 text-xs mb-8 uppercase tracking-widest">How was your ride to {ratingBooking.dropoff}?</p>
 
-              <div className="flex justify-center gap-3 mb-8">
+              <div className="flex justify-center gap-3 mb-6">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     key={star}
@@ -1976,16 +2256,28 @@ export default function AppDashboard() {
                 ))}
               </div>
 
+              <div className="mb-6">
+                <textarea
+                  value={ratingComment}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                  placeholder="Share your experience (optional)..."
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-gold transition-all resize-none h-24"
+                />
+              </div>
+
               <div className="flex gap-4">
                 <button
-                  onClick={() => setRatingBooking(null)}
+                  onClick={() => {
+                    setRatingBooking(null);
+                    setRatingComment('');
+                  }}
                   className="flex-1 py-4 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   disabled={ratingValue === 0}
-                  onClick={() => handleRateDriver(ratingBooking.id, ratingValue)}
+                  onClick={() => handleRateDriver(ratingBooking.id, ratingValue, ratingComment)}
                   className="flex-1 bg-gold text-black py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50 disabled:hover:bg-gold"
                 >
                   Submit
@@ -2075,6 +2367,37 @@ export default function AppDashboard() {
                       onChange={(e) => setEditingBooking({ ...editingBooking, time: e.target.value })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Service Type</label>
+                    <select
+                      value={editingBooking?.serviceType || 'standard'}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, serviceType: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                    >
+                      <option value="standard" className="bg-black">Standard</option>
+                      <option value="wedding" className="bg-black">Wedding</option>
+                      <option value="tour" className="bg-black">Tour</option>
+                      <option value="hourly" className="bg-black">Hourly</option>
+                      <option value="airport" className="bg-black">Airport</option>
+                      <option value="corporate" className="bg-black">Corporate</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Vehicle Type</label>
+                    <select
+                      value={editingBooking?.vehicleType || 'sedan'}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, vehicleType: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                    >
+                      <option value="sedan" className="bg-black">Sedan</option>
+                      <option value="suv" className="bg-black">SUV</option>
+                      <option value="van" className="bg-black">Van</option>
+                      <option value="luxury" className="bg-black">Luxury</option>
+                    </select>
                   </div>
                 </div>
 
@@ -2411,7 +2734,7 @@ export default function AppDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Base Price ($)</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price ($)</label>
                   <input
                     type="number"
                     value={editingVehicle?.price || 0}
@@ -2421,19 +2744,25 @@ export default function AppDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Image URL</label>
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={editingVehicle?.img || ''}
-                      onChange={(e) => setEditingVehicle({ ...editingVehicle, img: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                      placeholder="https://images.unsplash.com/..."
-                    />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Vehicle Image</label>
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editingVehicle?.img || ''}
+                        onChange={(e) => setEditingVehicle({ ...editingVehicle, img: e.target.value })}
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                        placeholder="Image URL..."
+                      />
+                      <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
+                        <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={isUploading} />
+                        {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                      </label>
+                    </div>
                     {editingVehicle?.img && (
                       <div className="relative aspect-video rounded-xl overflow-hidden border border-white/10 bg-white/5">
                         <img
-                          src={editingVehicle.img}
+                          src={editingVehicle.img || null}
                           alt="Preview"
                           className="w-full h-full object-cover"
                           referrerPolicy="no-referrer"
@@ -2546,7 +2875,7 @@ export default function AppDashboard() {
 
               <div className="space-y-4">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Global Base Price ($)</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Global Price ($)</label>
                   <input
                     type="number"
                     value={systemSettings?.basePrice || 0}
@@ -2621,7 +2950,7 @@ export default function AppDashboard() {
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="text-sm font-bold">{booking.guestName}</p>
-                        <p className="text-[10px] text-gold font-bold uppercase tracking-widest">{booking.time} | {booking.serviceType}</p>
+                        <p className="text-[10px] text-gold font-bold uppercase tracking-widest">{formatTimeToAMPM(booking.time)} | {booking.serviceType}</p>
                       </div>
                       <span className={cn(
                         "text-[8px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border",

@@ -764,7 +764,7 @@ export default function Booking() {
                           : "border-white/10 hover:border-gold/50 bg-white/5"
                       )}
                     >
-                      <img src={v.img} alt={v.name} className="w-full md:w-48 h-32 object-cover rounded-sm" referrerPolicy="no-referrer" />
+                      <img src={v.img || null} alt={v.name} className="w-full md:w-48 h-32 object-cover rounded-sm" referrerPolicy="no-referrer" />
                       <div className="flex-1 p-2">
                         <div className="flex justify-between items-start mb-2">
                           <h3 className="font-display text-2xl">{v.name}</h3>

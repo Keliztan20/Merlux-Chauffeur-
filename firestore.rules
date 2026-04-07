@@ -106,20 +106,10 @@ service cloud.firestore {
     }
 
     function isValidBooking(data) {
-      let commonFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 'stripeSessionId', 'read', 'rating'];
-      let authFields = commonFields.concat(['userId']);
-      let guestFields = commonFields.concat(['guestName', 'guestEmail', 'guestPhone']);
+      let allowedFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 'stripeSessionId', 'read', 'rating', 'userId', 'guestName', 'guestEmail', 'guestPhone'];
       
-      let isAuthBooking = isAuthenticated() && 
-                          hasOnlyAllowedFields(authFields) && 
-                          (!('userId' in data) || data.userId == request.auth.uid);
-      
-      let isGuestBooking = hasOnlyAllowedFields(guestFields) &&
-                           data.guestName is string && data.guestName.size() > 0 &&
-                           isValidEmail(data.guestEmail) &&
-                           data.guestPhone is string && data.guestPhone.size() > 0;
-
-      return (isAuthBooking || isGuestBooking) &&
+      return hasOnlyAllowedFields(allowedFields) &&
+             (!('userId' in data) || data.userId == request.auth.uid) &&
              data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly'] &&
              data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 200 &&
              data.dropoff is string && data.dropoff.size() >= 5 && data.dropoff.size() <= 200 &&
