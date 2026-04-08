@@ -1,6 +1,6 @@
 import { useState, FormEvent, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Mail, Lock, LogIn, UserPlus, AlertCircle, ChevronRight } from 'lucide-react';
+import { Mail, Lock, LogIn, UserPlus, AlertCircle, ChevronRight, Phone, MapPin } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
   signInWithPopup, 
@@ -9,7 +9,7 @@ import {
   createUserWithEmailAndPassword,
   onAuthStateChanged
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
 
@@ -18,6 +18,8 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
   const [role, setRole] = useState('customer');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,7 +34,7 @@ export default function Login() {
     return () => unsubscribe();
   }, [navigate]);
 
-  const createUserProfile = async (user: any, displayName?: string, selectedRole?: string) => {
+  const createUserProfile = async (user: any, displayName?: string, selectedRole?: string, phone?: string, address?: string) => {
     const userRef = doc(db, 'users', user.uid);
     try {
       const userSnap = await getDoc(userRef);
@@ -42,11 +44,46 @@ export default function Login() {
           id: user.uid,
           name: displayName || user.displayName || 'New User',
           email: user.email,
+          phone: phone || '',
+          address: address || '',
           role: selectedRole || 'customer',
           createdAt: serverTimestamp()
         });
+
+        // Associate guest bookings with this email to the new user
+        const bookingsRef = collection(db, 'bookings');
+        const userEmailLower = user.email?.toLowerCase();
+        
+        if (userEmailLower) {
+          const qLower = query(bookingsRef, where('guestEmail', '==', userEmailLower));
+          const qOriginal = query(bookingsRef, where('guestEmail', '==', user.email));
+          
+          const [snapLower, snapOriginal] = await Promise.all([
+            getDocs(qLower),
+            getDocs(qOriginal)
+          ]);
+          
+          const allDocs = [...snapLower.docs, ...snapOriginal.docs];
+          // Remove duplicates if any
+          const uniqueDocs = Array.from(new Set(allDocs.map(d => d.id)))
+            .map(id => allDocs.find(d => d.id === id)!);
+
+          console.log(`Found ${uniqueDocs.length} guest bookings for ${user.email}`);
+          
+          const updatePromises = uniqueDocs.map(docSnap => {
+            if (!docSnap.data().userId) {
+              return updateDoc(doc(db, 'bookings', docSnap.id), {
+                userId: user.uid
+              });
+            }
+            return Promise.resolve();
+          });
+          
+          await Promise.all(updatePromises);
+        }
       }
     } catch (err) {
+      console.error('Error in createUserProfile:', err);
       handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
     }
   };
@@ -57,8 +94,8 @@ export default function Login() {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      // Don't await profile creation here, let the dashboard handle it or do it in background
-      createUserProfile(result.user);
+      // Await profile creation to ensure guest bookings are linked before navigation
+      await createUserProfile(result.user);
       navigate('/app');
     } catch (error: any) {
       console.error('Login error:', error);
@@ -81,7 +118,7 @@ export default function Login() {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         const result = await createUserWithEmailAndPassword(auth, email, password);
-        await createUserProfile(result.user, name, role);
+        await createUserProfile(result.user, name, role, phone, address);
       }
       navigate('/app');
     } catch (err: any) {
@@ -177,18 +214,35 @@ export default function Login() {
                   />
                 </div>
                 <div className="relative">
+                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gold/50" size={18} />
+                  <input 
+                    type="tel" 
+                    required
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Phone Number*"
+                    className="w-full bg-white/5 border border-white/10 py-4 pl-12 pr-4 focus:border-gold outline-none transition-all"
+                  />
+                </div>
+                <div className="relative">
+                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gold/50" size={18} />
+                  <input 
+                    type="text" 
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Address (Optional)"
+                    className="w-full bg-white/5 border border-white/10 py-4 pl-12 pr-4 focus:border-gold outline-none transition-all"
+                  />
+                </div>
+                <div className="relative">
                   <select
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 py-4 px-4 focus:border-gold outline-none transition-all text-white/70 appearance-none"
+                    className="custom-select w-full py-4"
                   >
-                    <option value="customer" className="bg-black text-white">Customer</option>
-                    <option value="driver" className="bg-black text-white">Driver</option>
-                    <option value="admin" className="bg-black text-white">Admin</option>
+                    <option value="customer">Customer</option>
+                    <option value="driver">Driver</option>
                   </select>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gold/50">
-                    <ChevronRight size={18} className="rotate-90" />
-                  </div>
                 </div>
               </>
             )}

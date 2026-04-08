@@ -4,7 +4,7 @@ import {
   Settings, Bell, CreditCard, History,
   ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft,
   Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown,
-  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye,
+  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock,
   Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
@@ -102,6 +102,7 @@ export default function AppDashboard() {
   // Profile Edit State
   const [profileName, setProfileName] = useState('');
   const [profilePhone, setProfilePhone] = useState('');
+  const [profileAddress, setProfileAddress] = useState('');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
   // Calendar State
@@ -194,6 +195,7 @@ export default function AppDashboard() {
       setRatingComment('');
     } catch (err) {
       console.error('Error rating driver:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `bookings/${bookingId}`);
     }
   };
 
@@ -262,6 +264,7 @@ export default function AppDashboard() {
     if (userProfile) {
       setProfileName(userProfile.name || user?.displayName || '');
       setProfilePhone(userProfile.phone || '');
+      setProfileAddress(userProfile.address || '');
     }
   }, [userProfile, user]);
 
@@ -273,9 +276,10 @@ export default function AppDashboard() {
       await updateDoc(doc(db, 'users', user.uid), {
         name: profileName,
         phone: profilePhone,
+        address: profileAddress,
         updatedAt: serverTimestamp()
       });
-      setUserProfile((prev: any) => ({ ...prev, name: profileName, phone: profilePhone }));
+      setUserProfile((prev: any) => ({ ...prev, name: profileName, phone: profilePhone, address: profileAddress }));
       alert('Profile updated successfully!');
     } catch (err) {
       console.error('Error updating profile:', err);
@@ -730,148 +734,10 @@ export default function AppDashboard() {
       case 'bookings':
         return (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-display text-gold">Bookings</h2>
-                <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Manage and track all rides</p>
-              </div>
-            </div>
-
-            {/* Filters Row - Relocated from Header */}
-            <div className="flex flex-wrap items-center gap-3 bg-white/5 p-2 rounded-2xl border border-white/5">
-              <div className="flex items-center gap-2 px-3 border-r border-white/10 hidden md:flex">
-                <Filter size={14} className="text-gold" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Filters</span>
-              </div>
-
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
-                <input
-                  type="text"
-                  placeholder="Search bookings..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-black/20 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-2">
-                  <Filter size={12} className="text-white/20" />
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="bg-transparent py-2 text-[10px] text-white outline-none focus:ring-0 appearance-none min-w-[90px] font-bold uppercase tracking-widest cursor-pointer"
-                  >
-                    <option value="all" className="bg-black">All Status</option>
-                    <option value="pending" className="bg-black">Pending</option>
-                    <option value="confirmed" className="bg-black">Confirmed</option>
-                    <option value="assigned" className="bg-black">Assigned</option>
-                    <option value="accepted" className="bg-black">Accepted</option>
-                    <option value="completed" className="bg-black">Completed</option>
-                    <option value="cancelled" className="bg-black">Cancelled</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-2">
-                  <Shield size={12} className="text-white/20" />
-                  <select
-                    value={serviceFilter}
-                    onChange={(e) => setServiceFilter(e.target.value)}
-                    className="bg-transparent py-2 text-[10px] text-white outline-none focus:ring-0 appearance-none min-w-[90px] font-bold uppercase tracking-widest cursor-pointer"
-                  >
-                    <option value="all" className="bg-black">All Services</option>
-                    <option value="wedding" className="bg-black">Wedding</option>
-                    <option value="tour" className="bg-black">Tour</option>
-                    <option value="hourly" className="bg-black">Hourly</option>
-                    <option value="airport" className="bg-black">Airport</option>
-                    <option value="corporate" className="bg-black">Corporate</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-2">
-                  <Car size={12} className="text-white/20" />
-                  <select
-                    value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value)}
-                    className="bg-transparent py-2 text-[10px] text-white outline-none focus:ring-0 appearance-none min-w-[90px] font-bold uppercase tracking-widest cursor-pointer"
-                  >
-                    <option value="all" className="bg-black">All Vehicles</option>
-                    <option value="sedan" className="bg-black">Sedan</option>
-                    <option value="suv" className="bg-black">SUV</option>
-                    <option value="van" className="bg-black">Van</option>
-                    <option value="luxury" className="bg-black">Luxury</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => {
-                      setPriceSort(prev => prev === 'asc' ? 'desc' : 'asc');
-                      setDateSort(null);
-                    }}
-                    className={cn(
-                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
-                      priceSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
-                    )}
-                    title={priceSort === 'asc' ? 'Price: Low to High' : priceSort === 'desc' ? 'Price: High to Low' : 'Sort by Price'}
-                  >
-                    <div className="flex items-center gap-1">
-                      <DollarSign size={14} />
-                      {priceSort === 'asc' ? <ArrowUp size={10} /> : priceSort === 'desc' ? <ArrowDown size={10} /> : null}
-                    </div>
-                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Price</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setDateSort(prev => prev === 'asc' ? 'desc' : 'asc');
-                      setPriceSort(null);
-                    }}
-                    className={cn(
-                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
-                      dateSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
-                    )}
-                    title={dateSort === 'asc' ? 'Date: Oldest First' : 'Date: Newest First'}
-                  >
-                    <div className="flex items-center gap-1">
-                      {dateSort === 'asc' ? <CalendarArrowUp size={16} /> : dateSort === 'desc' ? <CalendarArrowDown size={16} /> : <Calendar size={14} />}
-                    </div>
-                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Pickup</span>
-                  </button>
-                </div>
-
-                <button
-                  onClick={handleRefresh}
-                  className="p-2 rounded-xl border border-white/10 bg-black/20 text-white/40 hover:text-gold transition-all"
-                  title="Refresh Data"
-                >
-                  <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
-                </button>
-
-                {(searchQuery || priceSort || dateSort || statusFilter !== 'all' || typeFilter !== 'all' || serviceFilter !== 'all') && (
-                  <button
-                    onClick={clearFilters}
-                    className="p-2 rounded-xl border border-gold/20 bg-gold/5 text-gold hover:bg-gold/10 transition-all"
-                    title="Reset All Filters"
-                  >
-                    <RotateCcw size={14} />
-                  </button>
-                )}
-              </div>
-            </div>
-
             {/* Booking Stats Section */}
             {isAdmin && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
                 {/* Total Bookings */}
                 <div className="glass p-4 rounded-2xl border border-white/5">
                   <div className="flex justify-between items-center mb-1 w-full">
@@ -884,7 +750,7 @@ export default function AppDashboard() {
                   </div>
                   <div className="space-y-1">
                     <h3 className="text-2xl font-bold text-gold font-display">{bookings.length}</h3>
-                    <p className="text-[10px] text-white/60">All Bookings</p>
+                    <p className="text-[10px] text-white/60">All Time</p>
                   </div>
                 </div>
 
@@ -920,7 +786,8 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
-                <div className="glass p-4 rounded-2xl border border-white/5 col-span-2 lg:col-span-1">
+                {/* Status Overview */}
+                <div className="glass p-4 rounded-2xl border border-white/5">
                   <div className="flex justify-between items-center mb-3 w-full">
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       Status Overview
@@ -930,38 +797,32 @@ export default function AppDashboard() {
                     </div>
                   </div>
 
-                  {/* One row, each column = icon + value */}
-                  <div className="grid mt-2 grid-cols-6 gap-x-4 text-center">
+                  <div className="grid mt-2 grid-cols-3 sm:grid-cols-6 gap-x-4 text-center">
                     {/* Pending */}
                     <div className="flex flex-col items-center">
                       <Clock size={12} className="text-gold mb-2" />
                       <span className="text-xs font-display text-gold">{analytics.pendingBookings}</span>
                     </div>
-
                     {/* Confirmed */}
                     <div className="flex flex-col items-center">
                       <CheckCircle size={12} className="text-blue-400 mb-2" />
                       <span className="text-xs font-display text-blue-400">{analytics.confirmedBookings}</span>
                     </div>
-
                     {/* Assigned */}
                     <div className="flex flex-col items-center">
                       <Truck size={12} className="text-purple-400 mb-2" />
                       <span className="text-xs font-display text-purple-400">{analytics.assignedBookings}</span>
                     </div>
-
                     {/* Accepted */}
                     <div className="flex flex-col items-center">
                       <UserCheck size={12} className="text-cyan-400 mb-2" />
                       <span className="text-xs font-display text-cyan-400">{analytics.acceptedBookings}</span>
                     </div>
-
                     {/* Completed */}
                     <div className="flex flex-col items-center">
                       <CheckSquare size={12} className="text-green-400 mb-2" />
                       <span className="text-xs font-display text-green-400">{analytics.completedBookings}</span>
                     </div>
-
                     {/* Cancelled */}
                     <div className="flex flex-col items-center">
                       <XCircle size={12} className="text-red-400 mb-2" />
@@ -971,10 +832,176 @@ export default function AppDashboard() {
                 </div>
               </div>
             )}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-display text-gold">Bookings</h2>
+                <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Manage and track all rides</p>
+              </div>
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredAndSortedBookings.map((booking) => (
-                <div key={booking.id} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+            {/* Filters Row - Relocated from Header */}
+            <div className="flex flex-wrap items-center gap-3 bg-white/5 p-2 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-2 px-3 border-r border-white/10 hidden md:flex">
+                <Filter size={14} className="text-gold" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Filters</span>
+              </div>
+
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                <input
+                  type="text"
+                  placeholder="Search bookings..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="custom-select min-w-[120px]"
+                >
+                  <option value="all">All Status</option>
+                  <option value="pending">Pending</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="assigned">Assigned</option>
+                  <option value="accepted">Accepted</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+
+                <select
+                  value={serviceFilter}
+                  onChange={(e) => setServiceFilter(e.target.value)}
+                  className="custom-select min-w-[120px]"
+                >
+                  <option value="all">All Services</option>
+                  <option value="wedding">Wedding</option>
+                  <option value="tour">Tour</option>
+                  <option value="hourly">Hourly</option>
+                  <option value="airport">Airport</option>
+                  <option value="corporate">Corporate</option>
+                </select>
+
+                <select
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value)}
+                  className="custom-select min-w-[120px]"
+                >
+                  <option value="all">All Vehicles</option>
+                  <option value="sedan">Sedan</option>
+                  <option value="suv">SUV</option>
+                  <option value="van">Van</option>
+                  <option value="luxury">Luxury</option>
+                </select>
+              </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setPriceSort(prev => prev === 'asc' ? 'desc' : 'asc');
+                      setDateSort(null);
+                    }}
+                    className={cn(
+                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
+                      priceSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
+                    )}
+                    title={priceSort === 'asc' ? 'Price: Low to High' : priceSort === 'desc' ? 'Price: High to Low' : 'Sort by Price'}
+                  >
+                    <div className="flex items-center gap-1">
+                      <DollarSign size={14} />
+                      {priceSort === 'asc' ? <ArrowDown size={10} /> : priceSort === 'desc' ? <ArrowUp size={10} /> : null}
+                    </div>
+                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Price</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setDateSort(prev => prev === 'asc' ? 'desc' : 'asc');
+                      setPriceSort(null);
+                    }}
+                    className={cn(
+                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
+                      dateSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
+                    )}
+                    title={dateSort === 'asc' ? 'Date: Oldest First' : 'Date: Newest First'}
+                  >
+                    <div className="flex items-center gap-1">
+                      {dateSort === 'asc' ? <CalendarArrowDown size={16} /> : dateSort === 'desc' ? <CalendarArrowUp size={16} /> : <Calendar size={14} />}
+                    </div>
+                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Pickup</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={handleRefresh}
+                  className="p-2 rounded-xl border border-white/10 bg-black/20 text-white/40 hover:text-gold transition-all"
+                  title="Refresh Data"
+                >
+                  <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+                </button>
+
+                {(searchQuery || priceSort || dateSort || statusFilter !== 'all' || typeFilter !== 'all' || serviceFilter !== 'all') && (
+                  <button
+                    onClick={clearFilters}
+                    className="p-2 rounded-xl border border-gold/20 bg-gold/5 text-gold hover:bg-gold/10 transition-all"
+                    title="Reset All Filters"
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                )}
+              </div>
+
+            {bookings.length === 0 ? (
+              <div className="glass p-12 rounded-3xl border border-white/5 text-center space-y-6">
+                <div className="w-20 h-20 bg-gold/10 text-gold rounded-full flex items-center justify-center mx-auto">
+                  <Calendar size={40} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-display text-white">No Bookings Found</h3>
+                  <p className="text-white/40 text-sm max-w-xs mx-auto">
+                    You haven't made any bookings yet. Start your luxury journey today.
+                  </p>
+                </div>
+                <button
+                  onClick={() => navigate('/booking')}
+                  className="btn-primary px-10 py-4 mx-auto block"
+                >
+                  Book Now
+                </button>
+              </div>
+            ) : filteredAndSortedBookings.length === 0 ? (
+              <div className="glass p-12 rounded-3xl border border-white/5 text-center space-y-6">
+                <div className="w-20 h-20 bg-white/5 text-white/20 rounded-full flex items-center justify-center mx-auto">
+                  <Search size={40} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-display text-white">No Results Found</h3>
+                  <p className="text-white/40 text-sm max-w-xs mx-auto">
+                    We couldn't find any bookings matching your current filters.
+                  </p>
+                </div>
+                <button
+                  onClick={clearFilters}
+                  className="btn-outline px-10 py-4 mx-auto block"
+                >
+                  Reset Filters
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredAndSortedBookings.map((booking, index) => (
+                  <div key={`${booking.id}-${index}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
@@ -1000,7 +1027,9 @@ export default function AppDashboard() {
                                 ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20"
                                 : booking.status === 'cancelled'
                                   ? "bg-red-500/10 text-red-400 border-red-400/20"
-                                  : "bg-gold/10 text-gold border-gold/20"
+                                  : booking.status === 'rejected'
+                                    ? "bg-red-500/10 text-pink-400 border-pink-400/20"
+                                    : "bg-gold/10 text-gold border-gold/20"
                       )}
                     >
                       {/* Status icon + label */}
@@ -1021,6 +1050,9 @@ export default function AppDashboard() {
                       )}
                       {booking.status === 'pending' && (
                         <Clock className="h-3 w-3" />
+                      )}
+                      {booking.status === 'rejected' && (
+                        <X className="h-3 w-3" />
                       )}
 
                       <span className="sm:inline">{booking.status}</span>
@@ -1079,91 +1111,119 @@ export default function AppDashboard() {
                     </div>
                   </div>
 
-                  {booking.status === 'completed' && booking.rating ? (
-                    <div className="mb-4 p-3 bg-gold/5 rounded-xl border border-gold/20">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
-                            <Star size={12} className="text-gold fill-gold" />
-                          </div>
-                          <div>
-                            <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">Customer Feedback</p>
-                            <div className="flex items-center gap-0.5">
-                              {[1, 2, 3, 4, 5].map((s) => (
-                                <Star
-                                  key={s}
-                                  size={8}
-                                  className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
-                                />
-                              ))}
+                  {/* Driver & Feedback Section */}
+                  <div className="space-y-3 mb-4">
+                    {booking.driverId && booking.status !== 'completed' && (
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
+                              <UserLock size={12} className="text-blue-500" />
+                            </div>
+                            <div>
+                              <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Assigned Driver</p>
+                              <div className="flex gap-2 items-center">
+                                <p className="text-[10px] text-white font-bold">
+                                  {allUsers.find(u => u.id === booking.driverId)?.name || 'Unknown Driver'}
+                                </p>
+                                {(isAdmin && !isDriver) && (
+                                  <p className="text-[9px] text-gold font-bold">
+                                    {allUsers.find(u => u.id === booking.driverId)?.phone || 'No Contact'}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>
-                      </div>
-                      {booking.ratingComment && (
-                        <div className="mt-2">
-                          <p className={cn(
-                            "text-[10px] text-white/60 leading-relaxed italic",
-                            !expandedFeedback.includes(booking.id) && "line-clamp-2"
-                          )}>
-                            "{booking.ratingComment}"
-                          </p>
-                          {booking.ratingComment.length > 60 && (
-                            <button
-                              onClick={() => setExpandedFeedback(prev =>
-                                prev.includes(booking.id)
-                                  ? prev.filter(id => id !== booking.id)
-                                  : [...prev, booking.id]
-                              )}
-                              className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
-                            >
-                              {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
-                            </button>
+                          {booking.status === 'accepted' ? (
+                            <div className="flex items-center gap-1 text-cyan-500">
+                              <UserCheck size={10} />
+                              <span className="text-[9px] font-bold uppercase">Accepted</span>
+                            </div>
+                          ) : booking.status === 'rejected' ? (
+                            <div className="flex items-center gap-1 text-pink-400">
+                              <X size={10} />
+                              <span className="text-[9px] font-bold uppercase">Rejected</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 text-gold">
+                              <Clock size={10} />
+                              <span className="text-[9px] font-bold uppercase">Request ?</span>
+                            </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  ) : booking.driverId && (
-                    <div className="mb-4 p-3 bg-white/5 rounded-xl border border-white/10">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-gold/20 flex items-center justify-center">
-                            <User size={12} className="text-gold" />
-                          </div>
-                          <div>
-                            <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Assigned Driver</p>
-                            <p className="text-[10px] text-white font-bold">
-                              {allUsers.find(u => u.id === booking.driverId)?.name || 'Unknown Driver'}
-                            </p>
-                            {(!isAdmin && !isDriver) && (
-                              <p className="text-[9px] text-gold font-bold">
-                                {allUsers.find(u => u.id === booking.driverId)?.phone || 'No Contact'}
+                      </div>
+                    )}
+
+                    {booking.status === 'completed' && (
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/20 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
+                              <Star size={12} className={cn(booking.rating ? "text-gold fill-gold" : "text-white/20")} />
+                            </div>
+                            <div>
+                              <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">
+                                Feedback for <span className="text-blue-500">{allUsers.find(u => u.id === booking.driverId)?.name || 'Driver'}</span>
                               </p>
+                              {booking.rating ? (
+                                <div className="flex items-center gap-0.5">
+                                  {[1, 2, 3, 4, 5].map((s) => (
+                                    <Star
+                                      key={s}
+                                      size={8}
+                                      className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
+                                    />
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[9px] text-white/40 font-bold uppercase">Not Rated Yet</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {booking.rating && <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>}
+                            {!isAdmin && !isDriver && (
+                              <button
+                                onClick={() => {
+                                  setRatingBooking(booking);
+                                  setRatingValue(booking.rating || 0);
+                                  setRatingComment(booking.ratingComment || '');
+                                }}
+                                className="p-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg text-gold transition-all"
+                                title={booking.rating ? "Edit Rating" : "Rate Now"}
+                              >
+                                <Edit2 size={10} />
+                              </button>
                             )}
                           </div>
                         </div>
-                        {booking.status === 'accepted' ? (
-                          <div className="flex items-center gap-1 text-green-500">
-                            <CheckCircle size={10} />
-                            <span className="text-[8px] font-bold uppercase">Confirmed</span>
-                          </div>
-                        ) : booking.status === 'rejected' ? (
-                          <div className="flex items-center gap-1 text-red-500">
-                            <X size={10} />
-                            <span className="text-[8px] font-bold uppercase">Rejected</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1 text-white/20">
-                            <Clock size={10} />
-                            <span className="text-[8px] font-bold uppercase">Pending</span>
+                        {booking.ratingComment && (
+                          <div className="mt-2">
+                            <p className={cn(
+                              "text-[10px] text-white/60 leading-relaxed italic",
+                              !expandedFeedback.includes(booking.id) && "line-clamp-2"
+                            )}>
+                              "{booking.ratingComment}"
+                            </p>
+                            {booking.ratingComment.length > 60 && (
+                              <button
+                                onClick={() => setExpandedFeedback(prev =>
+                                  prev.includes(booking.id)
+                                    ? prev.filter(id => id !== booking.id)
+                                    : [...prev, booking.id]
+                                )}
+                                className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
+                              >
+                                {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  <div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4">
+                  < div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4" >
                     <div className="flex flex-col">
                       <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
                       <div className="flex items-center gap-2">
@@ -1187,11 +1247,11 @@ export default function AppDashboard() {
                   <div className="space-y-2">
                     {isAdmin && (
                       <div className="flex flex-col gap-3">
-                        <div className="flex items-center gap-1.5 sm:gap-2 w-full">
+                        <div className="flex items-center gap-2 w-full">
                           {booking.status === 'pending' && (
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'confirmed')}
-                              className="p-2 sm:p-2.5 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all shrink-0"
+                              className="p-2.5 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all shrink-0"
                               title="Confirm"
                             >
                               <CheckCircle size={16} />
@@ -1200,57 +1260,80 @@ export default function AppDashboard() {
                           {booking.status === 'confirmed' && (
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'pending')}
-                              className="p-2 sm:p-2.5 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all shrink-0"
+                              className="p-2.5 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all shrink-0"
                               title="Unconfirm"
                             >
                               <CircleX size={16} />
                             </button>
                           )}
-                          {booking.status !== 'cancelled' && (
+                          {booking.status !== 'cancelled' && booking.status !== 'completed' && (
                             <div className="flex-1 relative min-w-0">
                               <select
                                 onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
                                 value={booking.driverId || ''}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-2 sm:px-3 py-2 sm:py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
                               >
                                 <option value="" className="bg-black">Assign</option>
-                                {drivers.map(driver => (
-                                  <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
+                                {drivers.map((driver, index) => (
+                                  <option key={`${driver.id}-${index}`} value={driver.id} className="bg-black">{driver.name}</option>
                                 ))}
                               </select>
-                              <User size={12} className="absolute right-1.5 sm:right-3 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" />
+                              <User size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white pointer-events-none" />
                             </div>
                           )}
 
-                          <button
-                            onClick={() => {
-                              setViewingBooking(booking);
-                              setShowViewModal(true);
-                            }}
-                            className="p-2 sm:p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all shrink-0"
-                            title="View Details"
-                          >
-                            <Eye size={16} />
-                          </button>
+                          <div className={cn(
+                            "flex items-center gap-2",
+                            (booking.status === 'cancelled' || booking.status === 'completed') ? "w-full" : "shrink-0"
+                          )}>
+                            <button
+                              onClick={() => {
+                                setViewingBooking(booking);
+                                setShowViewModal(true);
+                              }}
+                              className={cn(
+                                "p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2",
+                                (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
+                              )}
+                              title="View Details"
+                            >
+                              <Eye size={16} />
+                              {(booking.status === 'cancelled' || booking.status === 'completed') && (
+                                <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
+                              )}
+                            </button>
 
-                          <button
-                            onClick={() => {
-                              setEditingBooking(booking);
-                              setShowBookingModal(true);
-                            }}
-                            className="p-2 sm:p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all shrink-0"
-                            title="Edit Booking"
-                          >
-                            <Edit2 size={16} />
-                          </button>
+                            <button
+                              onClick={() => {
+                                setEditingBooking(booking);
+                                setShowBookingModal(true);
+                              }}
+                              className={cn(
+                                "p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2",
+                                (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
+                              )}
+                              title="Edit Booking"
+                            >
+                              <Edit2 size={16} />
+                              {(booking.status === 'cancelled' || booking.status === 'completed') && (
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
+                              )}
+                            </button>
 
-                          <button
-                            onClick={() => handleDeleteBooking(booking.id)}
-                            className="p-2 sm:p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all shrink-0"
-                            title="Delete Booking"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                            <button
+                              onClick={() => handleDeleteBooking(booking.id)}
+                              className={cn(
+                                "p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2",
+                                (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
+                              )}
+                              title="Delete Booking"
+                            >
+                              <Trash2 size={16} />
+                              {(booking.status === 'cancelled' || booking.status === 'completed') && (
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1263,7 +1346,7 @@ export default function AppDashboard() {
                               onClick={() => updateBookingStatus(booking.id, 'accepted')}
                               className="bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
                             >
-                              Confirm Ride
+                              Accept Ride
                             </button>
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'rejected')}
@@ -1274,18 +1357,18 @@ export default function AppDashboard() {
                           </div>
                         )}
                         {booking.status === 'accepted' && (
-                          <div className="space-y-2">
+                          <div className="flex gap-2">
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'completed')}
-                              className="w-full bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
+                              className="flex-1 bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
                             >
                               Complete Ride
                             </button>
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'assigned')}
-                              className="w-full bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
+                              className="flex-1 bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
                             >
-                              Unconfirm Ride
+                              UnAccept Ride
                             </button>
                           </div>
                         )}
@@ -1301,24 +1384,16 @@ export default function AppDashboard() {
                     )}
 
                     {!isAdmin && !isDriver && booking.status === 'completed' && !booking.rating && (
-                      <button
-                        onClick={() => {
-                          setRatingBooking(booking);
-                          setRatingValue(0);
-                          setRatingComment('');
-                        }}
-                        className="w-full bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all flex items-center justify-center gap-2"
-                      >
-                        <Star size={14} className="fill-black" />
-                        Rate Your Experience
-                      </button>
+                      <div className="h-0 overflow-hidden" />
                     )}
                   </div>
                 </div>
-              ))}
+              ))
+              }
             </div>
-          </div>
-        );
+          )}
+        </div>
+      );
       case 'analytics':
         return (
           <div className="space-y-8">
@@ -1496,8 +1571,8 @@ export default function AppDashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredUsers.map((u) => (
-                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+              {filteredUsers.map((u, index) => (
+                <div key={`${u.id}-${index}`} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
                   <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-4">
                       <div className={cn(
@@ -1509,7 +1584,7 @@ export default function AppDashboard() {
                         {u.role === 'admin' ? <Shield size={20} /> : u.role === 'driver' ? <Car size={20} /> : <User size={20} />}
                       </div>
                       <div className="flex flex-col">
-                        <h4 className="text-lg font-display text-white group-hover:text-gold transition-colors leading-tight">{u.name || 'No Name'}</h4>
+                        <h4 className="text-[14px] font-bold font-display text-white group-hover:text-gold transition-colors leading-tight">{u.name || 'No Name'}</h4>
                         <span className="text-[9px] text-white/30 font-mono mt-0.5">ID: {u.id}</span>
                       </div>
                     </div>
@@ -1531,6 +1606,10 @@ export default function AppDashboard() {
                     <div className="flex items-center gap-3">
                       <Phone size={14} className="text-gold shrink-0" />
                       <p className="text-xs text-white/60">{u.phone || 'No Phone'}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <MapPin size={14} className="text-gold shrink-0" />
+                      <p className="text-xs text-white/60">{u.address || 'No Adrress'}</p>
                     </div>
                     {u.createdAt && (
                       <div className="flex items-center gap-3">
@@ -1614,8 +1693,8 @@ export default function AppDashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {filteredFleet.map((v) => (
-                <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+              {filteredFleet.map((v, index) => (
+                <div key={`${v.id}-${index}`} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
                   <div className="h-48 relative overflow-hidden">
                     <img src={v.img || 'https://picsum.photos/seed/car/800/400'} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
@@ -1746,6 +1825,15 @@ export default function AppDashboard() {
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                   />
                 </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Address (Optional)</label>
+                  <input
+                    type="text"
+                    value={profileAddress}
+                    onChange={(e) => setProfileAddress(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                  />
+                </div>
                 <button
                   onClick={handleUpdateProfile}
                   disabled={isUpdatingProfile}
@@ -1798,8 +1886,8 @@ export default function AppDashboard() {
             <section>
               <h4 className="text-sm uppercase tracking-widest font-bold text-white/40 mb-4">Payment History</h4>
               <div className="space-y-4">
-                {bookings.map((booking) => (
-                  <div key={booking.id} className="glass p-4 rounded-xl flex items-center justify-between">
+                {bookings.map((booking, index) => (
+                  <div key={`${booking.id}-${index}`} className="glass p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center">
                         <CreditCard size={18} className="text-white/40" />
@@ -1840,7 +1928,7 @@ export default function AppDashboard() {
                   setEditingUser({ role: 'customer', name: '', email: '', phone: '' });
                   setShowUserModal(true);
                 }}
-                className="btn-primary px-6 py-2 flex items-center gap-2"
+                className="btn-primary w-full max-w-xs px-6 py-2 flex items-center gap-2 rounded-full"
               >
                 <UserPlus size={18} />
                 <span className="text-xs font-bold uppercase tracking-widest">Add User</span>
@@ -1848,8 +1936,8 @@ export default function AppDashboard() {
             </div>
 
             <div className="space-y-4">
-              {allUsers.map((u) => (
-                <div key={u.id} className={cn(
+              {allUsers.map((u, index) => (
+                <div key={`${u.id}-${index}`} className={cn(
                   "glass p-6 rounded-2xl flex items-center justify-between border transition-all",
                   u.blocked ? "border-red-500/30 bg-red-500/5" : "border-white/5"
                 )}>
@@ -1982,8 +2070,8 @@ export default function AppDashboard() {
                 </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {fleet.map((v) => (
-                  <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+                {fleet.map((v, index) => (
+                  <div key={`${v.id}-${index}`} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
                     <div className="h-40 relative overflow-hidden">
                       <img src={v.img || null} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
@@ -2044,8 +2132,8 @@ export default function AppDashboard() {
                 <p className="text-xs text-white/40 uppercase tracking-widest">Configure available service categories</p>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {systemSettings?.services?.map((service: any) => (
-                  <div key={service.id} className="glass p-6 rounded-2xl border border-white/5 text-center space-y-3">
+                {systemSettings?.services?.map((service: any, index: number) => (
+                  <div key={`${service.id}-${index}`} className="glass p-6 rounded-2xl border border-white/5 text-center space-y-3">
                     <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mx-auto text-gold">
                       <Shield size={24} />
                     </div>
@@ -2159,43 +2247,12 @@ export default function AppDashboard() {
 
               <button
                 onClick={handleLogout}
-                className="p-2 text-white/40 hover:text-red-500 transition-colors"
+                className="p-2 text-red-400 hover:text-red-600 transition-colors"
                 title="Logout"
               >
                 <LogOut size={22} />
               </button>
             </div>
-          </div>
-
-          {/* Bottom Row: Navigation Tabs */}
-          <div className="w-full">
-            <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5 overflow-x-auto no-scrollbar">
-              {filteredNavItems.map((item) => (
-                <button
-                  key={`top-${item.id}`}
-                  onClick={() => setActiveTab(item.id)}
-                  className={cn(
-                    "flex-1 flex items-center justify-center gap-2 px-3 lg:px-5 py-2.5 rounded-xl transition-all group relative whitespace-nowrap",
-                    activeTab === item.id
-                      ? "text-black font-bold"
-                      : "text-white/40 hover:bg-white/5 hover:text-white"
-                  )}
-                >
-                  <item.icon size={18} className={cn(
-                    "transition-colors",
-                    activeTab === item.id ? "text-black" : "text-gold group-hover:text-gold"
-                  )} />
-                  <span className="hidden lg:inline text-[10px] uppercase tracking-widest font-bold">{item.label}</span>
-                  {activeTab === item.id && (
-                    <motion.div
-                      layoutId="activeTab"
-                      className="absolute inset-0 bg-gold rounded-xl -z-10"
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                    />
-                  )}
-                </button>
-              ))}
-            </nav>
           </div>
         </div>
       </header>
@@ -2203,6 +2260,37 @@ export default function AppDashboard() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-screen overflow-y-auto">
         <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto">
+          {/* Navigation Tabs - Relocated from Header */}
+          <div className="w-full mb-8">
+            <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5 overflow-x-auto no-scrollbar">
+              {filteredNavItems.map((item) => (
+                <button
+                  key={`top-${item.id}`}
+                  onClick={() => setActiveTab(item.id)}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 px-3 lg:px-5 py-3 rounded-xl transition-all group relative whitespace-nowrap",
+                    activeTab === item.id
+                      ? "text-white font-bold"
+                      : "text-white/60 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <item.icon size={16} className={cn(
+                    "transition-colors relative z-10",
+                    activeTab === item.id ? "text-white" : "text-gold group-hover:text-gold"
+                  )} />
+                  <span className="hidden lg:inline text-[10px] uppercase tracking-[0.2em] font-bold relative z-10">{item.label}</span>
+                  {activeTab === item.id && (
+                    <motion.div
+                      layoutId="activeTabIndicator"
+                      className="absolute inset-0 bg-gradient-to-br from-gold/95 to-gold-dark rounded-xl -z-0 shadow-[0_0_20px_rgba(153,101,21,0.4)]"
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                    />
+                  )}
+                </button>
+              ))}
+            </nav>
+          </div>
+
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -2376,14 +2464,14 @@ export default function AppDashboard() {
                     <select
                       value={editingBooking?.serviceType || 'standard'}
                       onChange={(e) => setEditingBooking({ ...editingBooking, serviceType: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                      className="custom-select w-full py-3 text-sm"
                     >
-                      <option value="standard" className="bg-black">Standard</option>
-                      <option value="wedding" className="bg-black">Wedding</option>
-                      <option value="tour" className="bg-black">Tour</option>
-                      <option value="hourly" className="bg-black">Hourly</option>
-                      <option value="airport" className="bg-black">Airport</option>
-                      <option value="corporate" className="bg-black">Corporate</option>
+                      <option value="standard">Standard</option>
+                      <option value="wedding">Wedding</option>
+                      <option value="tour">Tour</option>
+                      <option value="hourly">Hourly</option>
+                      <option value="airport">Airport</option>
+                      <option value="corporate">Corporate</option>
                     </select>
                   </div>
                   <div>
@@ -2391,12 +2479,12 @@ export default function AppDashboard() {
                     <select
                       value={editingBooking?.vehicleType || 'sedan'}
                       onChange={(e) => setEditingBooking({ ...editingBooking, vehicleType: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                      className="custom-select w-full py-3 text-sm"
                     >
-                      <option value="sedan" className="bg-black">Sedan</option>
-                      <option value="suv" className="bg-black">SUV</option>
-                      <option value="van" className="bg-black">Van</option>
-                      <option value="luxury" className="bg-black">Luxury</option>
+                      <option value="sedan">Sedan</option>
+                      <option value="suv">SUV</option>
+                      <option value="van">Van</option>
+                      <option value="luxury">Luxury</option>
                     </select>
                   </div>
                 </div>
@@ -2416,14 +2504,14 @@ export default function AppDashboard() {
                     <select
                       value={editingBooking?.status || 'pending'}
                       onChange={(e) => setEditingBooking({ ...editingBooking, status: e.target.value })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                      className="custom-select w-full py-3 text-sm"
                     >
-                      <option value="pending" className="bg-black">Pending</option>
-                      <option value="confirmed" className="bg-black">Confirmed</option>
-                      <option value="assigned" className="bg-black">Assigned</option>
-                      <option value="accepted" className="bg-black">Accepted</option>
-                      <option value="completed" className="bg-black">Completed</option>
-                      <option value="cancelled" className="bg-black">Cancelled</option>
+                      <option value="pending">Pending</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="assigned">Assigned</option>
+                      <option value="accepted">Accepted</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
                     </select>
                   </div>
                 </div>
@@ -2539,7 +2627,7 @@ export default function AppDashboard() {
                 <div className="flex gap-4">
                   <button
                     onClick={() => setConfirmDelete(null)}
-                    className="flex-1 py-4 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors"
+                    className="flex-1 py-4 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white border border-white/30 rounded-lg transition-colors"
                   >
                     Cancel
                   </button>
@@ -2613,15 +2701,25 @@ export default function AppDashboard() {
                   />
                 </div>
                 <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Address (Optional)</label>
+                  <input
+                    type="text"
+                    value={editingUser?.address || ''}
+                    onChange={(e) => setEditingUser({ ...editingUser, address: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="123 Luxury St, Melbourne"
+                  />
+                </div>
+                <div>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Role</label>
                   <select
                     value={editingUser?.role || 'customer'}
                     onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                    className="custom-select w-full py-3 text-sm"
                   >
-                    <option value="customer" className="bg-black">Customer</option>
-                    <option value="driver" className="bg-black">Driver</option>
-                    <option value="admin" className="bg-black">Admin</option>
+                    <option value="customer">Customer</option>
+                    <option value="driver">Driver</option>
+                    <option value="admin">Admin</option>
                   </select>
                 </div>
 
@@ -2703,12 +2801,12 @@ export default function AppDashboard() {
                   <select
                     value={editingVehicle?.type || 'sedan'}
                     onChange={(e) => setEditingVehicle({ ...editingVehicle, type: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all appearance-none"
+                    className="custom-select w-full py-3 text-sm"
                   >
-                    <option value="sedan" className="bg-black">Sedan</option>
-                    <option value="suv" className="bg-black">SUV</option>
-                    <option value="van" className="bg-black">Van</option>
-                    <option value="limo" className="bg-black">Limousine</option>
+                    <option value="sedan">Sedan</option>
+                    <option value="suv">SUV</option>
+                    <option value="van">Van</option>
+                    <option value="limo">Limousine</option>
                   </select>
                 </div>
 
@@ -2945,8 +3043,8 @@ export default function AppDashboard() {
               </div>
 
               <div className="space-y-4">
-                {getBookingsForDate(selectedDate).map((booking) => (
-                  <div key={booking.id} className="glass p-4 rounded-xl border border-white/5 space-y-3">
+                {getBookingsForDate(selectedDate).map((booking, index) => (
+                  <div key={`${booking.id}-${index}`} className="glass p-4 rounded-xl border border-white/5 space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="text-sm font-bold">{booking.guestName}</p>

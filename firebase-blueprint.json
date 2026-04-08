@@ -9,6 +9,7 @@
         "name": { "type": "string", "description": "Full name of the user." },
         "email": { "type": "string", "format": "email", "description": "Email address." },
         "phone": { "type": "string", "description": "Contact phone number." },
+        "address": { "type": "string", "description": "User address (optional)." },
         "role": { "type": "string", "enum": ["customer", "driver", "admin"], "description": "User role." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of account creation." }
       },
@@ -42,6 +43,8 @@
         "paymentMethod": { "type": "string", "enum": ["card", "cash"], "description": "Method of payment." },
         "stripeSessionId": { "type": "string", "description": "Stripe Checkout Session ID." },
         "driverId": { "type": "string", "description": "ID of the assigned driver." },
+        "rating": { "type": "integer", "description": "Customer rating (1-5)." },
+        "ratingComment": { "type": "string", "description": "Customer feedback comment." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of booking creation." }
       },
       "required": ["serviceType", "pickup", "dropoff", "date", "time", "vehicleId", "price", "status"]

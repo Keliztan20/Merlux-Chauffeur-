@@ -358,7 +358,7 @@ export default function Booking() {
         paymentStatus: 'unpaid',
         paymentMethod: paymentMethod,
         guestName: formData.guestName,
-        guestEmail: formData.guestEmail,
+        guestEmail: formData.guestEmail.toLowerCase(),
         guestPhone: formData.guestPhone,
       };
 

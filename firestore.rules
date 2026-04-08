@@ -63,6 +63,12 @@ service cloud.firestore {
       return isAuthenticated() && 'userId' in resource.data && request.auth.uid == resource.data.userId;
     }
 
+    function isGuestOwner() {
+      return isAuthenticated() && 
+             'guestEmail' in resource.data && 
+             request.auth.token.email.lower() == resource.data.guestEmail.lower();
+    }
+
     function isBookingSessionOwner(bookingId) {
       return 'stripeSessionId' in resource.data && resource.data.stripeSessionId == bookingId;
     }
@@ -106,7 +112,7 @@ service cloud.firestore {
     }
 
     function isValidBooking(data) {
-      let allowedFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 'stripeSessionId', 'read', 'rating', 'userId', 'guestName', 'guestEmail', 'guestPhone'];
+      let allowedFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 'stripeSessionId', 'read', 'rating', 'ratingComment', 'userId', 'guestName', 'guestEmail', 'guestPhone'];
       
       return hasOnlyAllowedFields(allowedFields) &&
              (!('userId' in data) || data.userId == request.auth.uid) &&
@@ -119,6 +125,7 @@ service cloud.firestore {
              data.paymentStatus in ['unpaid', 'paid', 'refunded'] &&
              data.paymentMethod in ['card', 'cash'] &&
              (!('rating' in data) || (data.rating is int && data.rating >= 1 && data.rating <= 5)) &&
+             (!('ratingComment' in data) || (data.ratingComment is string && data.ratingComment.size() <= 1000)) &&
              (data.createdAt is timestamp || data.createdAt is string);
     }
 
@@ -132,21 +139,30 @@ service cloud.firestore {
       allow update: if (isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin())) || isAdmin();
       allow delete: if isAdmin();
     }
-
-    match /bookings/{bookingId} {
-      allow read: if isDocOwner() || isAdmin() || isDriver() || isBookingSessionOwner(bookingId);
-      allow create: if isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
-      allow update: if isAuthenticated() && (
-        (isDocOwner() && isValidBooking(request.resource.data) && 
-          (request.resource.data.status == resource.data.status || 
-           (resource.data.status == 'completed' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'updatedAt'])))) ||
-        isAdmin() ||
-        (isDriver() && 
-         request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'driverId', 'read', 'updatedAt']) &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
-         (request.resource.data.driverId == request.auth.uid || resource.data.driverId == request.auth.uid))
-      );
-    }
+match /bookings/{bookingId} {
+  allow read: if isDocOwner() || isAdmin() || isDriver() || isBookingSessionOwner(bookingId);
+  allow create: if isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
+  allow update: if isAuthenticated() && (
+    ((isDocOwner() || isGuestOwner()) && isValidBooking(resource.data.merge(request.resource.data)) &&
+      (request.resource.data.status == resource.data.status ||
+      (resource.data.status == 'completed' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'ratingComment', 'updatedAt'])))) ||
+      (isGuestOwner() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId']) &&
+        request.resource.data.userId == request.auth.uid
+      ) ||
+    isAdmin() ||
+    (
+      isDriver() &&
+      request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['status', 'driverId', 'read', 'updatedAt']) &&
+      request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
+      (request.resource.data.driverId == request.auth.uid ||
+       resource.data.driverId == request.auth.uid)
+    )
+  );
+}
 
     match /settings/system {
       allow read: if true;

@@ -171,16 +171,16 @@ export default function Navbar() {
                     )}
                   </AnimatePresence>
                 </div>
-                <button onClick={handleLogout} className="text-white/40 hover:text-white transition-colors">
+                <button onClick={handleLogout} className="text-red-400 hover:text-red-600 transition-colors">
                   <LogOut size={20} />
                 </button>
               </div>
             ) : (
-              <Link to="/login" className="text-white/70 hover:text-gold transition-colors" title="Login">
+              <Link to="/login" className="text-blue-400 hover:text-blue-600 transition-colors" title="Login">
                 <LogIn size={20} />
               </Link>
             )}
-            <Link to="/booking" className="btn-primary py-2 px-6 text-xs">
+            <Link to="/booking" className="btn-primary py-2 px-6 text-xs rounded-sm">
               Book Now
             </Link>
           </div>
