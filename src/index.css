@@ -29,7 +29,7 @@
   }
 
   .btn-primary {
-    @apply bg-gold text-black px-8 py-3 rounded-none font-semibold uppercase tracking-widest transition-all hover:bg-gold-light active:scale-95;
+    @apply bg-gold text-black px-8 py-3 rounded-lg font-semibold uppercase tracking-widest transition-all hover:bg-gold-light active:scale-95;
   }
 
   .btn-outline {

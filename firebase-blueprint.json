@@ -21,33 +21,60 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Auto-generated document ID." },
-        "userId": { "type": "string", "description": "Reference to the user who booked (optional for guest bookings)." },
-        "guestName": { "type": "string", "description": "Name of the guest (if not logged in)." },
-        "guestEmail": { "type": "string", "format": "email", "description": "Email of the guest (if not logged in)." },
-        "guestPhone": { "type": "string", "description": "Phone of the guest (if not logged in)." },
+        "userId": { "type": "string", "description": "Reference to the user who booked." },
         "serviceType": { "type": "string", "enum": ["airport", "corporate", "wedding", "tour", "hourly"], "description": "Type of service." },
         "pickup": { "type": "string", "description": "Pickup address." },
-        "dropoff": { "type": "string", "description": "Dropoff address." },
+        "dropoff": { "type": "string", "description": "Dropoff address (optional for hourly)." },
         "date": { "type": "string", "format": "date", "description": "Booking date." },
         "time": { "type": "string", "description": "Booking time." },
+        "isReturn": { "type": "boolean", "description": "If it is a return trip." },
+        "returnDate": { "type": "string", "format": "date", "description": "Return date." },
+        "returnTime": { "type": "string", "description": "Return time." },
+        "waypoints": { "type": "array", "items": { "type": "string" }, "description": "Intermediate stops." },
+        "hourlyHours": { "type": "integer", "description": "Number of hours for hourly service." },
+        "purpose": { "type": "string", "description": "Purpose of the trip." },
         "vehicleId": { "type": "string", "description": "ID of the selected vehicle." },
         "passengers": { "type": "integer", "description": "Number of passengers." },
+        "bags": { "type": "integer", "description": "Number of bags." },
         "distance": { "type": "string", "description": "Distance of the trip." },
         "duration": { "type": "string", "description": "Duration of the trip." },
-        "flightNumber": { "type": "string", "description": "Optional flight number for airport transfers." },
-        "flightStatus": { "type": "string", "description": "Real-time status of the flight." },
-        "flightETA": { "type": "string", "format": "date-time", "description": "Estimated time of arrival for the flight." },
-        "status": { "type": "string", "enum": ["pending", "confirmed", "in-progress", "completed", "cancelled"], "description": "Current status of the booking." },
-        "price": { "type": "number", "description": "Total price of the booking." },
-        "paymentStatus": { "type": "string", "enum": ["unpaid", "paid", "refunded"], "description": "Status of the payment." },
-        "paymentMethod": { "type": "string", "enum": ["card", "cash"], "description": "Method of payment." },
-        "stripeSessionId": { "type": "string", "description": "Stripe Checkout Session ID." },
-        "driverId": { "type": "string", "description": "ID of the assigned driver." },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "in-progress", "completed", "cancelled"], "description": "Current status." },
+        "basePrice": { "type": "number", "description": "Base price of vehicle." },
+        "kmPrice": { "type": "number", "description": "Price per km/hour." },
+        "taxAmount": { "type": "number", "description": "Tax amount." },
+        "discountAmount": { "type": "number", "description": "Discount amount." },
+        "couponCode": { "type": "string", "description": "Applied coupon code." },
+        "netPrice": { "type": "number", "description": "Price before tax and discount." },
+        "grossPrice": { "type": "number", "description": "Final price." },
+        "price": { "type": "number", "description": "Total price (legacy field)." },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "paid", "refunded"], "description": "Payment status." },
+        "paymentMethod": { "type": "string", "enum": ["card", "cash"], "description": "Payment method." },
+        "driverId": { "type": "string", "description": "Assigned driver ID." },
         "rating": { "type": "integer", "description": "Customer rating (1-5)." },
-        "ratingComment": { "type": "string", "description": "Customer feedback comment." },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of booking creation." }
+        "ratingComment": { "type": "string", "description": "Customer feedback." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
       },
-      "required": ["serviceType", "pickup", "dropoff", "date", "time", "vehicleId", "price", "status"]
+      "required": ["serviceType", "pickup", "date", "time", "vehicleId", "grossPrice", "status", "userId"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Discount coupon code.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "type": { "type": "string", "enum": ["percentage", "fixed"] },
+        "value": { "type": "number" },
+        "minBookingAmount": { "type": "number" },
+        "maxDiscount": { "type": "number" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "usageLimit": { "type": "integer" },
+        "usedCount": { "type": "integer" },
+        "active": { "type": "boolean" },
+        "serviceIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["code", "type", "value", "active"]
     },
     "SystemSettings": {
       "title": "SystemSettings",
@@ -105,6 +132,10 @@
     "/fleet/{vehicleId}": {
       "schema": "Vehicle",
       "description": "Fleet vehicles."
+    },
+    "/coupons/{couponId}": {
+      "schema": "Coupon",
+      "description": "Discount coupons."
     }
   }
 }

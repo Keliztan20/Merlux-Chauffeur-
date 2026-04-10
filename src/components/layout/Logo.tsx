@@ -10,11 +10,11 @@ export default function Logo({ className, variant = 'navbar' }: LogoProps) {
   return (
     <Link to="/" className={cn("flex items-center gap-2", className)}>
       <img 
-        src="https://ais-pre-xwsnmumd354ls6vgkngt3m-395523807260.asia-east1.run.app/logo.png" 
+        src="assets/Logo.webp" 
         alt="Merlux Chauffeur" 
         className={cn(
           "object-contain",
-          variant === 'navbar' ? "h-14" : "h-20"
+          variant === 'navbar' ? "h-10" : "h-16"
         )}
         referrerPolicy="no-referrer"
         onError={(e) => {

@@ -20,30 +20,46 @@ service cloud.firestore {
     // Collection: bookings
     // Document ID: {bookingId} (auto-generated)
     // Fields:
-    //   - userId: string (optional, matches creator's uid)
-    //   - guestName: string (required if userId missing)
-    //   - guestEmail: string (required if userId missing)
-    //   - guestPhone: string (required if userId missing)
+    //   - userId: string (required, matches creator's uid)
     //   - serviceType: string (required, enum)
     //   - pickup: string (required, 5-200 chars)
-    //   - dropoff: string (required, 5-200 chars)
+    //   - dropoff: string (optional, 5-200 chars)
     //   - date: string (required, format)
     //   - time: string (required)
+    //   - isReturn: boolean (optional)
+    //   - returnDate: string (optional)
+    //   - returnTime: string (optional)
+    //   - waypoints: list (optional)
+    //   - hourlyHours: int (optional)
+    //   - purpose: string (optional)
     //   - vehicleId: string (required)
     //   - passengers: int (required, 1-20)
+    //   - bags: int (optional)
     //   - distance: string (optional)
     //   - duration: string (optional)
-    //   - flightNumber: string (optional)
-    //   - flightStatus: string (optional)
-    //   - flightETA: string (optional)
     //   - status: string (required, enum)
-    //   - price: number (required, positive)
+    //   - basePrice: number (required)
+    //   - kmPrice: number (required)
+    //   - taxAmount: number (required)
+    //   - discountAmount: number (optional)
+    //   - couponCode: string (optional)
+    //   - netPrice: number (required)
+    //   - grossPrice: number (required)
     //   - paymentStatus: string (required, enum)
-    //   - stripeSessionId: string (optional)
+    //   - paymentMethod: string (required, enum)
     //   - driverId: string (optional)
-    //   - read: boolean (optional)
     //   - rating: int (optional, 1-5)
+    //   - ratingComment: string (optional)
     //   - createdAt: timestamp (required)
+    //
+    // Collection: coupons
+    // Document ID: {couponId} (auto-generated)
+    // Fields:
+    //   - code: string (required, unique)
+    //   - type: string (required, percentage/fixed)
+    //   - value: number (required)
+    //   - active: boolean (required)
+    //   ...
     //
     // ===============================================================
 
@@ -61,16 +77,6 @@ service cloud.firestore {
 
     function isDocOwner() {
       return isAuthenticated() && 'userId' in resource.data && request.auth.uid == resource.data.userId;
-    }
-
-    function isGuestOwner() {
-      return isAuthenticated() && 
-             'guestEmail' in resource.data && 
-             request.auth.token.email.lower() == resource.data.guestEmail.lower();
-    }
-
-    function isBookingSessionOwner(bookingId) {
-      return 'stripeSessionId' in resource.data && resource.data.stripeSessionId == bookingId;
     }
 
     function isAdmin() {
@@ -101,7 +107,7 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['id', 'name', 'email', 'phone', 'role', 'blocked', 'createdAt', 'updatedAt']) &&
+      return hasOnlyAllowedFields(['id', 'name', 'email', 'phone', 'role', 'blocked', 'createdAt', 'updatedAt', 'address']) &&
              (!('id' in data) || data.id is string) &&
              (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 100)) &&
              (!('email' in data) || isValidEmail(data.email)) &&
@@ -112,21 +118,36 @@ service cloud.firestore {
     }
 
     function isValidBooking(data) {
-      let allowedFields = ['serviceType', 'pickup', 'dropoff', 'date', 'time', 'vehicleId', 'passengers', 'distance', 'duration', 'flightNumber', 'flightStatus', 'flightETA', 'status', 'price', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 'stripeSessionId', 'read', 'rating', 'ratingComment', 'userId', 'guestName', 'guestEmail', 'guestPhone'];
+      let allowedFields = [
+        'serviceType', 'pickup', 'dropoff', 'date', 'time', 'isReturn', 'returnDate', 'returnTime', 
+        'waypoints', 'hours', 'purpose', 'vehicleId', 'passengers', 'bags', 'distance', 'duration', 
+        'status', 'basePrice', 'kmPrice', 'taxAmount', 'discountAmount', 'couponCode', 'netPrice', 
+        'grossPrice', 'price', 'priceBreakdown', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 
+        'read', 'rating', 'ratingComment', 'userId', 'guestName', 'guestEmail', 'guestPhone', 'flightNumber', 'flightStatus', 'flightETA',
+        'selectedExtras'
+      ];
       
       return hasOnlyAllowedFields(allowedFields) &&
-             (!('userId' in data) || data.userId == request.auth.uid) &&
+             data.userId == request.auth.uid &&
              data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly'] &&
-             data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 200 &&
-             data.dropoff is string && data.dropoff.size() >= 5 && data.dropoff.size() <= 200 &&
-             data.passengers is int && data.passengers >= 1 && data.passengers <= 20 &&
+             data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 500 &&
+             (!('dropoff' in data) || (data.dropoff is string && data.dropoff.size() <= 500)) &&
+             (!('passengers' in data) || (data.passengers is int && data.passengers >= 1 && data.passengers <= 50)) &&
              data.status in ['pending', 'confirmed', 'assigned', 'accepted', 'rejected', 'completed', 'cancelled'] &&
-             data.price is number && data.price > 0 &&
+             (!('price' in data) || (data.price is number && data.price >= 0)) &&
              data.paymentStatus in ['unpaid', 'paid', 'refunded'] &&
-             data.paymentMethod in ['card', 'cash'] &&
+             (!('paymentMethod' in data) || data.paymentMethod in ['card', 'cash']) &&
              (!('rating' in data) || (data.rating is int && data.rating >= 1 && data.rating <= 5)) &&
-             (!('ratingComment' in data) || (data.ratingComment is string && data.ratingComment.size() <= 1000)) &&
+             (!('ratingComment' in data) || (data.ratingComment is string && data.ratingComment.size() <= 2000)) &&
              (data.createdAt is timestamp || data.createdAt is string);
+    }
+
+    function isValidCoupon(data) {
+      return hasOnlyAllowedFields(['id', 'code', 'type', 'value', 'minBookingAmount', 'maxDiscount', 'startDate', 'endDate', 'usageLimit', 'usedCount', 'active', 'serviceIds', 'createdAt', 'updatedAt']) &&
+             data.code is string && data.code.size() >= 3 &&
+             data.type in ['percentage', 'fixed'] &&
+             data.value is number && data.value > 0 &&
+             data.active is bool;
     }
 
     // ===============================================================
@@ -135,34 +156,39 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if (isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role in ['customer', 'driver', 'admin'] || isAdmin())) || isAdmin();
+      allow create: if (isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role == 'customer' || isAdmin())) || isAdmin();
       allow update: if (isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin())) || isAdmin();
       allow delete: if isAdmin();
     }
-match /bookings/{bookingId} {
-  allow read: if isDocOwner() || isAdmin() || isDriver() || isBookingSessionOwner(bookingId);
-  allow create: if isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
-  allow update: if isAuthenticated() && (
-    ((isDocOwner() || isGuestOwner()) && isValidBooking(resource.data.merge(request.resource.data)) &&
-      (request.resource.data.status == resource.data.status ||
-      (resource.data.status == 'completed' &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'ratingComment', 'updatedAt'])))) ||
-      (isGuestOwner() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId']) &&
-        request.resource.data.userId == request.auth.uid
-      ) ||
-    isAdmin() ||
-    (
-      isDriver() &&
-      request.resource.data.diff(resource.data).affectedKeys()
-        .hasAny(['status', 'driverId', 'read', 'updatedAt']) &&
-      request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
-      (request.resource.data.driverId == request.auth.uid ||
-       resource.data.driverId == request.auth.uid)
-    )
-  );
-}
+
+    match /bookings/{bookingId} {
+      allow read: if isDocOwner() || isAdmin() || isDriver();
+      allow create: if isAuthenticated() && isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
+      allow update: if isAuthenticated() && (
+        (isDocOwner() && isValidBooking(resource.data.merge(request.resource.data)) &&
+          (request.resource.data.status == resource.data.status ||
+          (resource.data.status == 'completed' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'ratingComment', 'updatedAt'])))) ||
+        isAdmin() ||
+        (
+          isDriver() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
+          (request.resource.data.driverId == request.auth.uid ||
+           resource.data.driverId == request.auth.uid)
+        )
+      );
+    }
+
+    match /coupons/{couponId} {
+      allow read: if isAuthenticated();
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount']) &&
+        request.resource.data.usedCount == resource.data.usedCount + 1
+      );
+      allow create, delete: if isAdmin();
+    }
 
     match /settings/system {
       allow read: if true;
@@ -170,6 +196,11 @@ match /bookings/{bookingId} {
     }
 
     match /fleet/{vehicleId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /extras/{extraId} {
       allow read: if true;
       allow write: if isAdmin();
     }

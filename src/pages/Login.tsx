@@ -166,7 +166,7 @@ export default function Login() {
         animate={{ opacity: 1, y: 0 }}
         className="glass p-8 md:p-12 max-w-md w-full text-center"
       >
-        <Logo className="justify-center mb-8" />
+        <Logo className="justify-center mb-4 h-12" />
         <span className="text-gold uppercase tracking-[0.3em] text-xs font-bold mb-4 block">
           {isLogin ? 'Welcome Back' : 'Join Merlux'}
         </span>

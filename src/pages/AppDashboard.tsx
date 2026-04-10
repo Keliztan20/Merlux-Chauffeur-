@@ -3,9 +3,9 @@ import {
   Home, MapPin, Clock, User,
   Settings, Bell, CreditCard, History,
   ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft,
-  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown,
+  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
   Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { cn } from '../lib/utils';
@@ -78,6 +78,7 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 
 export default function AppDashboard() {
   const [activeTab, setActiveTab] = useState('bookings');
+  const [activeSubTab, setActiveSubTab] = useState('fleet');
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -115,6 +116,16 @@ export default function AppDashboard() {
   const [editingVehicle, setEditingVehicle] = useState<any>(null);
   const [showVehicleModal, setShowVehicleModal] = useState(false);
 
+  // Extras State
+  const [extras, setExtras] = useState<any[]>([]);
+  const [editingExtra, setEditingExtra] = useState<any>(null);
+  const [showExtraModal, setShowExtraModal] = useState(false);
+
+  // Coupon State
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [editingCoupon, setEditingCoupon] = useState<any>(null);
+  const [showCouponModal, setShowCouponModal] = useState(false);
+
   // User Management State
   const [editingUser, setEditingUser] = useState<any>(null);
   const [showUserModal, setShowUserModal] = useState(false);
@@ -130,7 +141,7 @@ export default function AppDashboard() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   // Confirmation State
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle', id: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra', id: string } | null>(null);
 
   const navigate = useNavigate();
 
@@ -142,9 +153,8 @@ export default function AppDashboard() {
     { id: 'analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
     { id: 'calendar', label: 'Calendar', icon: Calendar, adminOnly: false },
     { id: 'users', label: 'Users', icon: Users, adminOnly: true },
-    { id: 'fleet', label: 'Fleet', icon: Truck, adminOnly: true },
-    { id: 'settings', label: 'Settings', icon: Settings, adminOnly: true },
     { id: 'profile', label: 'Profile', icon: User, adminOnly: false },
+    { id: 'management', label: 'Management', icon: Settings, adminOnly: true },
   ];
 
   const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
@@ -394,6 +404,8 @@ export default function AppDashboard() {
     let q;
     let unsubscribeUsers: (() => void) | undefined;
     let unsubscribeFleet: (() => void) | undefined;
+    let unsubscribeExtras: (() => void) | undefined;
+    let unsubscribeCoupons: (() => void) | undefined;
     let unsubscribeSettings: (() => void) | undefined;
 
     if (isAdmin) {
@@ -437,6 +449,18 @@ export default function AppDashboard() {
         handleFirestoreError(err, OperationType.LIST, 'fleet');
       });
 
+      // Fetch extras
+      const extrasQ = query(collection(db, 'extras'), orderBy('name', 'asc'));
+      unsubscribeExtras = onSnapshot(extrasQ, (snapshot) => {
+        const extrasData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setExtras(extrasData);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'extras');
+      });
+
       // Fetch system settings
       const settingsRef = doc(db, 'settings', 'system');
       unsubscribeSettings = onSnapshot(settingsRef, (docSnap) => {
@@ -460,6 +484,18 @@ export default function AppDashboard() {
         }
       }, (err) => {
         handleFirestoreError(err, OperationType.GET, 'settings/system');
+      });
+
+      // Fetch coupons
+      const couponsQ = query(collection(db, 'coupons'), orderBy('createdAt', 'desc'));
+      unsubscribeCoupons = onSnapshot(couponsQ, (snapshot) => {
+        const couponsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setCoupons(couponsData);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'coupons');
       });
     }
 
@@ -512,6 +548,8 @@ export default function AppDashboard() {
       unsubscribeBookings();
       if (unsubscribeUsers) unsubscribeUsers();
       if (unsubscribeFleet) unsubscribeFleet();
+      if (unsubscribeExtras) unsubscribeExtras();
+      if (unsubscribeCoupons) unsubscribeCoupons();
       if (unsubscribeSettings) unsubscribeSettings();
     };
   }, [user, userProfile, isAdmin, isDriver]);
@@ -663,6 +701,41 @@ export default function AppDashboard() {
     }
   };
 
+  const handleCreateCoupon = async (data: any) => {
+    try {
+      await addDoc(collection(db, 'coupons'), {
+        ...data,
+        createdAt: serverTimestamp(),
+        active: true
+      });
+      setShowCouponModal(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'coupons');
+    }
+  };
+
+  const handleUpdateCoupon = async (id: string, data: any) => {
+    try {
+      await updateDoc(doc(db, 'coupons', id), data);
+      setShowCouponModal(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `coupons/${id}`);
+    }
+  };
+
+  const handleDeleteCoupon = (id: string) => {
+    setConfirmDelete({ id, type: 'coupon' });
+  };
+
+  const executeDeleteCoupon = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'coupons', id));
+      setConfirmDelete(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `coupons/${id}`);
+    }
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -707,6 +780,38 @@ export default function AppDashboard() {
       setEditingVehicle(null);
     } catch (err) {
       console.error('Error creating vehicle:', err);
+    }
+  };
+
+  const handleUpdateExtra = async (id: string | null, data: any) => {
+    try {
+      if (!id || id === 'new') {
+        const newRef = doc(collection(db, 'extras'));
+        await setDoc(newRef, { ...data, id: newRef.id, createdAt: serverTimestamp() });
+      } else {
+        await updateDoc(doc(db, 'extras', id), {
+          ...data,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setShowExtraModal(false);
+      setEditingExtra(null);
+    } catch (err) {
+      console.error('Error updating extra:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'extras');
+    }
+  };
+
+  const handleDeleteExtra = async (id: string) => {
+    setConfirmDelete({ type: 'extra', id: id });
+  };
+
+  const executeDeleteExtra = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'extras', id));
+      setConfirmDelete(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `extras/${id}`);
     }
   };
 
@@ -906,61 +1011,61 @@ export default function AppDashboard() {
                 </select>
               </div>
 
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => {
-                      setPriceSort(prev => prev === 'asc' ? 'desc' : 'asc');
-                      setDateSort(null);
-                    }}
-                    className={cn(
-                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
-                      priceSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
-                    )}
-                    title={priceSort === 'asc' ? 'Price: Low to High' : priceSort === 'desc' ? 'Price: High to Low' : 'Sort by Price'}
-                  >
-                    <div className="flex items-center gap-1">
-                      <DollarSign size={14} />
-                      {priceSort === 'asc' ? <ArrowDown size={10} /> : priceSort === 'desc' ? <ArrowUp size={10} /> : null}
-                    </div>
-                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Price</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setDateSort(prev => prev === 'asc' ? 'desc' : 'asc');
-                      setPriceSort(null);
-                    }}
-                    className={cn(
-                      "p-2 rounded-xl border transition-all flex items-center gap-1.5",
-                      dateSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
-                    )}
-                    title={dateSort === 'asc' ? 'Date: Oldest First' : 'Date: Newest First'}
-                  >
-                    <div className="flex items-center gap-1">
-                      {dateSort === 'asc' ? <CalendarArrowDown size={16} /> : dateSort === 'desc' ? <CalendarArrowUp size={16} /> : <Calendar size={14} />}
-                    </div>
-                    <span className="text-[8px] font-bold uppercase hidden xl:inline">Pickup</span>
-                  </button>
-                </div>
-
+              <div className="flex items-center gap-1">
                 <button
-                  onClick={handleRefresh}
-                  className="p-2 rounded-xl border border-white/10 bg-black/20 text-white/40 hover:text-gold transition-all"
-                  title="Refresh Data"
+                  onClick={() => {
+                    setPriceSort(prev => prev === 'asc' ? 'desc' : 'asc');
+                    setDateSort(null);
+                  }}
+                  className={cn(
+                    "p-2 rounded-xl border transition-all flex items-center gap-1.5",
+                    priceSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
+                  )}
+                  title={priceSort === 'asc' ? 'Price: Low to High' : priceSort === 'desc' ? 'Price: High to Low' : 'Sort by Price'}
                 >
-                  <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+                  <div className="flex items-center gap-1">
+                    <DollarSign size={14} />
+                    {priceSort === 'asc' ? <ArrowDown size={10} /> : priceSort === 'desc' ? <ArrowUp size={10} /> : null}
+                  </div>
+                  <span className="text-[8px] font-bold uppercase hidden xl:inline">Price</span>
                 </button>
 
-                {(searchQuery || priceSort || dateSort || statusFilter !== 'all' || typeFilter !== 'all' || serviceFilter !== 'all') && (
-                  <button
-                    onClick={clearFilters}
-                    className="p-2 rounded-xl border border-gold/20 bg-gold/5 text-gold hover:bg-gold/10 transition-all"
-                    title="Reset All Filters"
-                  >
-                    <RotateCcw size={14} />
-                  </button>
-                )}
+                <button
+                  onClick={() => {
+                    setDateSort(prev => prev === 'asc' ? 'desc' : 'asc');
+                    setPriceSort(null);
+                  }}
+                  className={cn(
+                    "p-2 rounded-xl border transition-all flex items-center gap-1.5",
+                    dateSort ? "border-gold/50 bg-gold/10 text-gold" : "border-white/10 bg-black/20 text-white/40"
+                  )}
+                  title={dateSort === 'asc' ? 'Date: Oldest First' : 'Date: Newest First'}
+                >
+                  <div className="flex items-center gap-1">
+                    {dateSort === 'asc' ? <CalendarArrowDown size={16} /> : dateSort === 'desc' ? <CalendarArrowUp size={16} /> : <Calendar size={14} />}
+                  </div>
+                  <span className="text-[8px] font-bold uppercase hidden xl:inline">Pickup</span>
+                </button>
               </div>
+
+              <button
+                onClick={handleRefresh}
+                className="p-2 rounded-xl border border-white/10 bg-black/20 text-white/40 hover:text-gold transition-all"
+                title="Refresh Data"
+              >
+                <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+              </button>
+
+              {(searchQuery || priceSort || dateSort || statusFilter !== 'all' || typeFilter !== 'all' || serviceFilter !== 'all') && (
+                <button
+                  onClick={clearFilters}
+                  className="p-2 rounded-xl border border-gold/20 bg-gold/5 text-gold hover:bg-gold/10 transition-all"
+                  title="Reset All Filters"
+                >
+                  <RotateCcw size={14} />
+                </button>
+              )}
+            </div>
 
             {bookings.length === 0 ? (
               <div className="glass p-12 rounded-3xl border border-white/5 text-center space-y-6">
@@ -1000,400 +1105,400 @@ export default function AppDashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAndSortedBookings.map((booking, index) => (
-                  <div key={`${booking.id}-${index}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
-                        Booked on: {booking.createdAt?.seconds
-                          ? format(new Date(booking.createdAt.seconds * 1000), 'MMM dd, yyyy HH:mm')
-                          : 'N/A'}
-                      </p>
-                      <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors">
-                        {booking.guestName || 'Guest Customer'}
-                      </h3>
-                    </div>
-
-                    <span
-                      className={cn(
-                        "flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border",
-                        booking.status === 'completed'
-                          ? "bg-green-500/10 text-green-500 border-green-500/20"
-                          : booking.status === 'confirmed'
-                            ? "bg-blue-500/10 text-blue-400 border-blue-400/20"
-                            : booking.status === 'assigned'
-                              ? "bg-purple-500/10 text-purple-400 border-purple-400/20"
-                              : booking.status === 'accepted'
-                                ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20"
-                                : booking.status === 'cancelled'
-                                  ? "bg-red-500/10 text-red-400 border-red-400/20"
-                                  : booking.status === 'rejected'
-                                    ? "bg-red-500/10 text-pink-400 border-pink-400/20"
-                                    : "bg-gold/10 text-gold border-gold/20"
-                      )}
-                    >
-                      {/* Status icon + label */}
-                      {booking.status === 'completed' && (
-                        <CheckSquare className="h-3 w-3" />
-                      )}
-                      {booking.status === 'confirmed' && (
-                        <CheckCircle className="h-3 w-3" />
-                      )}
-                      {booking.status === 'assigned' && (
-                        <Truck className="h-3 w-3" />
-                      )}
-                      {booking.status === 'accepted' && (
-                        <UserCheck className="h-3 w-3" />
-                      )}
-                      {booking.status === 'cancelled' && (
-                        <XCircle className="h-3 w-3" />
-                      )}
-                      {booking.status === 'pending' && (
-                        <Clock className="h-3 w-3" />
-                      )}
-                      {booking.status === 'rejected' && (
-                        <X className="h-3 w-3" />
-                      )}
-
-                      <span className="sm:inline">{booking.status}</span>
-                    </span>
-                  </div>
-
-                  <div className="space-y-3 mb-4">
-                    <div className="flex items-start gap-3">
-                      <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
-                      <p className="text-xs text-white/70 truncate">{booking.pickup}</p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <MapPin size={12} className="text-gold shrink-0 mt-0.5" />
-                      <p className="text-xs text-white/70 truncate">{booking.dropoff}</p>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center gap-3">
-                        <Calendar size={12} className="text-gold" />
-                        <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.date}</span>
+                {filteredAndSortedBookings.map((booking) => (
+                  <div key={booking.id} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
+                          Booked on: {booking.createdAt?.seconds
+                            ? format(new Date(booking.createdAt.seconds * 1000), 'MMM dd, yyyy HH:mm')
+                            : 'N/A'}
+                        </p>
+                        <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors">
+                          {booking.guestName || 'Guest Customer'}
+                        </h3>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <Clock size={12} className="text-gold" />
-                        <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{formatTimeToAMPM(booking.time)}</span>
+
+                      <span
+                        className={cn(
+                          "flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border",
+                          booking.status === 'completed'
+                            ? "bg-green-500/10 text-green-500 border-green-500/20"
+                            : booking.status === 'confirmed'
+                              ? "bg-blue-500/10 text-blue-400 border-blue-400/20"
+                              : booking.status === 'assigned'
+                                ? "bg-purple-500/10 text-purple-400 border-purple-400/20"
+                                : booking.status === 'accepted'
+                                  ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20"
+                                  : booking.status === 'cancelled'
+                                    ? "bg-red-500/10 text-red-400 border-red-400/20"
+                                    : booking.status === 'rejected'
+                                      ? "bg-red-500/10 text-pink-400 border-pink-400/20"
+                                      : "bg-gold/10 text-gold border-gold/20"
+                        )}
+                      >
+                        {/* Status icon + label */}
+                        {booking.status === 'completed' && (
+                          <CheckSquare className="h-3 w-3" />
+                        )}
+                        {booking.status === 'confirmed' && (
+                          <CheckCircle className="h-3 w-3" />
+                        )}
+                        {booking.status === 'assigned' && (
+                          <Truck className="h-3 w-3" />
+                        )}
+                        {booking.status === 'accepted' && (
+                          <UserCheck className="h-3 w-3" />
+                        )}
+                        {booking.status === 'cancelled' && (
+                          <XCircle className="h-3 w-3" />
+                        )}
+                        {booking.status === 'pending' && (
+                          <Clock className="h-3 w-3" />
+                        )}
+                        {booking.status === 'rejected' && (
+                          <X className="h-3 w-3" />
+                        )}
+
+                        <span className="sm:inline">{booking.status}</span>
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 mb-4">
+                      <div className="flex items-start gap-3">
+                        <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
+                        <p className="text-xs text-white/70 truncate">{booking.pickup}</p>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <Car size={12} className="text-gold" />
-                        <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.vehicleType || 'Sedan'}</span>
+                      <div className="flex items-start gap-3">
+                        <MapPin size={12} className="text-gold shrink-0 mt-0.5" />
+                        <p className="text-xs text-white/70 truncate">{booking.dropoff}</p>
+                      </div>
+
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-3">
+                          <Calendar size={12} className="text-gold" />
+                          <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.date}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Clock size={12} className="text-gold" />
+                          <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{formatTimeToAMPM(booking.time)}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Car size={12} className="text-gold" />
+                          <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.vehicleType || 'Sedan'}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-3 gap-2 py-3 border-y border-white/5">
-                    <div className="flex flex-col">
-                      <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Service</span>
-                      <span className="text-[10px] text-gold font-bold truncate uppercase">{booking.serviceType || 'Standard'}</span>
+                    <div className="grid grid-cols-3 gap-2 py-3 border-y border-white/5">
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Service</span>
+                        <span className="text-[10px] text-gold font-bold truncate uppercase">{booking.serviceType || 'Standard'}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Distance</span>
+                        <span className="text-[10px] text-white/70 truncate">{booking.distance || 'N/A'}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">ETA</span>
+                        <span className="text-[10px] text-white/70 truncate">{booking.duration || 'N/A'}</span>
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Distance</span>
-                      <span className="text-[10px] text-white/70 truncate">{booking.distance || 'N/A'}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">ETA</span>
-                      <span className="text-[10px] text-white/70 truncate">{booking.duration || 'N/A'}</span>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 mb-4 py-3 border-b border-white/5">
-                    <div className="flex flex-col">
-                      <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Gmail</span>
-                      <span className="text-[10px] text-white/70 truncate">{booking.guestEmail || 'N/A'}</span>
+                    <div className="grid grid-cols-2 gap-2 mb-4 py-3 border-b border-white/5">
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Gmail</span>
+                        <span className="text-[10px] text-white/70 truncate">{booking.guestEmail || 'N/A'}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Phone</span>
+                        <span className="text-[10px] text-white/70 truncate">{booking.guestPhone || 'N/A'}</span>
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Phone</span>
-                      <span className="text-[10px] text-white/70 truncate">{booking.guestPhone || 'N/A'}</span>
-                    </div>
-                  </div>
 
-                  {/* Driver & Feedback Section */}
-                  <div className="space-y-3 mb-4">
-                    {booking.driverId && booking.status !== 'completed' && (
-                      <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
-                              <UserLock size={12} className="text-blue-500" />
-                            </div>
-                            <div>
-                              <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Assigned Driver</p>
-                              <div className="flex gap-2 items-center">
-                                <p className="text-[10px] text-white font-bold">
-                                  {allUsers.find(u => u.id === booking.driverId)?.name || 'Unknown Driver'}
-                                </p>
-                                {(isAdmin && !isDriver) && (
-                                  <p className="text-[9px] text-gold font-bold">
-                                    {allUsers.find(u => u.id === booking.driverId)?.phone || 'No Contact'}
+                    {/* Driver & Feedback Section */}
+                    <div className="space-y-3 mb-4">
+                      {booking.driverId && booking.status !== 'completed' && (
+                        <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
+                                <UserLock size={12} className="text-blue-500" />
+                              </div>
+                              <div>
+                                <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Assigned Driver</p>
+                                <div className="flex gap-2 items-center">
+                                  <p className="text-[10px] text-white font-bold">
+                                    {allUsers.find(u => u.id === booking.driverId)?.name || 'Unknown Driver'}
                                   </p>
+                                  {(isAdmin && !isDriver) && (
+                                    <p className="text-[9px] text-gold font-bold">
+                                      {allUsers.find(u => u.id === booking.driverId)?.phone || 'No Contact'}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {booking.status === 'accepted' ? (
+                              <div className="flex items-center gap-1 text-cyan-500">
+                                <UserCheck size={10} />
+                                <span className="text-[9px] font-bold uppercase">Accepted</span>
+                              </div>
+                            ) : booking.status === 'rejected' ? (
+                              <div className="flex items-center gap-1 text-pink-400">
+                                <X size={10} />
+                                <span className="text-[9px] font-bold uppercase">Rejected</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 text-gold">
+                                <Clock size={10} />
+                                <span className="text-[9px] font-bold uppercase">Request ?</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {booking.status === 'completed' && (
+                        <div className="p-3 bg-white/5 rounded-xl border border-white/20 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
+                                <Star size={12} className={cn(booking.rating ? "text-gold fill-gold" : "text-white/20")} />
+                              </div>
+                              <div>
+                                <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">
+                                  Feedback for <span className="text-blue-500">{allUsers.find(u => u.id === booking.driverId)?.name || 'Driver'}</span>
+                                </p>
+                                {booking.rating ? (
+                                  <div className="flex items-center gap-0.5">
+                                    {[1, 2, 3, 4, 5].map((s) => (
+                                      <Star
+                                        key={s}
+                                        size={8}
+                                        className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
+                                      />
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-[9px] text-white/40 font-bold uppercase">Not Rated Yet</p>
                                 )}
                               </div>
                             </div>
-                          </div>
-                          {booking.status === 'accepted' ? (
-                            <div className="flex items-center gap-1 text-cyan-500">
-                              <UserCheck size={10} />
-                              <span className="text-[9px] font-bold uppercase">Accepted</span>
-                            </div>
-                          ) : booking.status === 'rejected' ? (
-                            <div className="flex items-center gap-1 text-pink-400">
-                              <X size={10} />
-                              <span className="text-[9px] font-bold uppercase">Rejected</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1 text-gold">
-                              <Clock size={10} />
-                              <span className="text-[9px] font-bold uppercase">Request ?</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {booking.status === 'completed' && (
-                      <div className="p-3 bg-white/5 rounded-xl border border-white/20 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
-                              <Star size={12} className={cn(booking.rating ? "text-gold fill-gold" : "text-white/20")} />
-                            </div>
-                            <div>
-                              <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">
-                                Feedback for <span className="text-blue-500">{allUsers.find(u => u.id === booking.driverId)?.name || 'Driver'}</span>
-                              </p>
-                              {booking.rating ? (
-                                <div className="flex items-center gap-0.5">
-                                  {[1, 2, 3, 4, 5].map((s) => (
-                                    <Star
-                                      key={s}
-                                      size={8}
-                                      className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
-                                    />
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-[9px] text-white/40 font-bold uppercase">Not Rated Yet</p>
+                            <div className="flex items-center gap-2">
+                              {booking.rating && <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>}
+                              {!isAdmin && !isDriver && (
+                                <button
+                                  onClick={() => {
+                                    setRatingBooking(booking);
+                                    setRatingValue(booking.rating || 0);
+                                    setRatingComment(booking.ratingComment || '');
+                                  }}
+                                  className="p-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg text-gold transition-all"
+                                  title={booking.rating ? "Edit Rating" : "Rate Now"}
+                                >
+                                  <Edit2 size={10} />
+                                </button>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            {booking.rating && <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>}
-                            {!isAdmin && !isDriver && (
+                          {booking.ratingComment && (
+                            <div className="mt-2">
+                              <p className={cn(
+                                "text-[10px] text-white/60 leading-relaxed italic",
+                                !expandedFeedback.includes(booking.id) && "line-clamp-2"
+                              )}>
+                                "{booking.ratingComment}"
+                              </p>
+                              {booking.ratingComment.length > 60 && (
+                                <button
+                                  onClick={() => setExpandedFeedback(prev =>
+                                    prev.includes(booking.id)
+                                      ? prev.filter(id => id !== booking.id)
+                                      : [...prev, booking.id]
+                                  )}
+                                  className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
+                                >
+                                  {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    < div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4" >
+                      <div className="flex flex-col">
+                        <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-display text-gold">${booking.price}</span>
+                          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
+                            {booking.paymentMethod === 'cash' ? (
+                              <DollarSign size={10} className="text-gold" />
+                            ) : (
+                              <CreditCard size={10} className="text-gold" />
+                            )}
+                            <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
+                        <p className="text-[10px] font-bold text-white uppercase">{booking.paymentStatus}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {isAdmin && (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-center gap-2 w-full">
+                            {booking.status === 'pending' && (
+                              <button
+                                onClick={() => updateBookingStatus(booking.id, 'confirmed')}
+                                className="p-2.5 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all shrink-0"
+                                title="Confirm"
+                              >
+                                <CheckCircle size={16} />
+                              </button>
+                            )}
+                            {booking.status === 'confirmed' && (
+                              <button
+                                onClick={() => updateBookingStatus(booking.id, 'pending')}
+                                className="p-2.5 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all shrink-0"
+                                title="Unconfirm"
+                              >
+                                <CircleX size={16} />
+                              </button>
+                            )}
+                            {booking.status !== 'cancelled' && booking.status !== 'completed' && (
+                              <div className="flex-1 relative min-w-0">
+                                <select
+                                  onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
+                                  value={booking.driverId || ''}
+                                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
+                                >
+                                  <option value="" className="bg-black">Assign</option>
+                                  {drivers.map((driver) => (
+                                    <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
+                                  ))}
+                                </select>
+                                <User size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white pointer-events-none" />
+                              </div>
+                            )}
+
+                            <div className={cn(
+                              "flex items-center gap-2",
+                              (booking.status === 'cancelled' || booking.status === 'completed') ? "w-full" : "shrink-0"
+                            )}>
                               <button
                                 onClick={() => {
-                                  setRatingBooking(booking);
-                                  setRatingValue(booking.rating || 0);
-                                  setRatingComment(booking.ratingComment || '');
+                                  setViewingBooking(booking);
+                                  setShowViewModal(true);
                                 }}
-                                className="p-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg text-gold transition-all"
-                                title={booking.rating ? "Edit Rating" : "Rate Now"}
-                              >
-                                <Edit2 size={10} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        {booking.ratingComment && (
-                          <div className="mt-2">
-                            <p className={cn(
-                              "text-[10px] text-white/60 leading-relaxed italic",
-                              !expandedFeedback.includes(booking.id) && "line-clamp-2"
-                            )}>
-                              "{booking.ratingComment}"
-                            </p>
-                            {booking.ratingComment.length > 60 && (
-                              <button
-                                onClick={() => setExpandedFeedback(prev =>
-                                  prev.includes(booking.id)
-                                    ? prev.filter(id => id !== booking.id)
-                                    : [...prev, booking.id]
+                                className={cn(
+                                  "p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2",
+                                  (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
                                 )}
-                                className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
+                                title="View Details"
                               >
-                                {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
+                                <Eye size={16} />
+                                {(booking.status === 'cancelled' || booking.status === 'completed') && (
+                                  <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
+                                )}
                               </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
 
-                  < div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4" >
-                    <div className="flex flex-col">
-                      <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-display text-gold">${booking.price}</span>
-                        <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
-                          {booking.paymentMethod === 'cash' ? (
-                            <DollarSign size={10} className="text-gold" />
-                          ) : (
-                            <CreditCard size={10} className="text-gold" />
-                          )}
-                          <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
-                      <p className="text-[10px] font-bold text-white uppercase">{booking.paymentStatus}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    {isAdmin && (
-                      <div className="flex flex-col gap-3">
-                        <div className="flex items-center gap-2 w-full">
-                          {booking.status === 'pending' && (
-                            <button
-                              onClick={() => updateBookingStatus(booking.id, 'confirmed')}
-                              className="p-2.5 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all shrink-0"
-                              title="Confirm"
-                            >
-                              <CheckCircle size={16} />
-                            </button>
-                          )}
-                          {booking.status === 'confirmed' && (
-                            <button
-                              onClick={() => updateBookingStatus(booking.id, 'pending')}
-                              className="p-2.5 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all shrink-0"
-                              title="Unconfirm"
-                            >
-                              <CircleX size={16} />
-                            </button>
-                          )}
-                          {booking.status !== 'cancelled' && booking.status !== 'completed' && (
-                            <div className="flex-1 relative min-w-0">
-                              <select
-                                onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
-                                value={booking.driverId || ''}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
+                              <button
+                                onClick={() => {
+                                  setEditingBooking(booking);
+                                  setShowBookingModal(true);
+                                }}
+                                className={cn(
+                                  "p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2",
+                                  (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
+                                )}
+                                title="Edit Booking"
                               >
-                                <option value="" className="bg-black">Assign</option>
-                                {drivers.map((driver, index) => (
-                                  <option key={`${driver.id}-${index}`} value={driver.id} className="bg-black">{driver.name}</option>
-                                ))}
-                              </select>
-                              <User size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white pointer-events-none" />
+                                <Edit2 size={16} />
+                                {(booking.status === 'cancelled' || booking.status === 'completed') && (
+                                  <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
+                                )}
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteBooking(booking.id)}
+                                className={cn(
+                                  "p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2",
+                                  (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
+                                )}
+                                title="Delete Booking"
+                              >
+                                <Trash2 size={16} />
+                                {(booking.status === 'cancelled' || booking.status === 'completed') && (
+                                  <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {isDriver && booking.driverId === user.uid && (
+                        <div className="space-y-2">
+                          {booking.status === 'assigned' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => updateBookingStatus(booking.id, 'accepted')}
+                                className="bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
+                              >
+                                Accept Ride
+                              </button>
+                              <button
+                                onClick={() => updateBookingStatus(booking.id, 'rejected')}
+                                className="bg-red-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
+                              >
+                                Reject Ride
+                              </button>
                             </div>
                           )}
-
-                          <div className={cn(
-                            "flex items-center gap-2",
-                            (booking.status === 'cancelled' || booking.status === 'completed') ? "w-full" : "shrink-0"
-                          )}>
-                            <button
-                              onClick={() => {
-                                setViewingBooking(booking);
-                                setShowViewModal(true);
-                              }}
-                              className={cn(
-                                "p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2",
-                                (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
-                              )}
-                              title="View Details"
-                            >
-                              <Eye size={16} />
-                              {(booking.status === 'cancelled' || booking.status === 'completed') && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
-                              )}
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                setEditingBooking(booking);
-                                setShowBookingModal(true);
-                              }}
-                              className={cn(
-                                "p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2",
-                                (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
-                              )}
-                              title="Edit Booking"
-                            >
-                              <Edit2 size={16} />
-                              {(booking.status === 'cancelled' || booking.status === 'completed') && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
-                              )}
-                            </button>
-
-                            <button
-                              onClick={() => handleDeleteBooking(booking.id)}
-                              className={cn(
-                                "p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2",
-                                (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
-                              )}
-                              title="Delete Booking"
-                            >
-                              <Trash2 size={16} />
-                              {(booking.status === 'cancelled' || booking.status === 'completed') && (
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {isDriver && booking.driverId === user.uid && (
-                      <div className="space-y-2">
-                        {booking.status === 'assigned' && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              onClick={() => updateBookingStatus(booking.id, 'accepted')}
-                              className="bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
-                            >
-                              Accept Ride
-                            </button>
-                            <button
-                              onClick={() => updateBookingStatus(booking.id, 'rejected')}
-                              className="bg-red-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
-                            >
-                              Reject Ride
-                            </button>
-                          </div>
-                        )}
-                        {booking.status === 'accepted' && (
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => updateBookingStatus(booking.id, 'completed')}
-                              className="flex-1 bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
-                            >
-                              Complete Ride
-                            </button>
+                          {booking.status === 'accepted' && (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => updateBookingStatus(booking.id, 'completed')}
+                                className="flex-1 bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
+                              >
+                                Complete Ride
+                              </button>
+                              <button
+                                onClick={() => updateBookingStatus(booking.id, 'assigned')}
+                                className="flex-1 bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
+                              >
+                                UnAccept Ride
+                              </button>
+                            </div>
+                          )}
+                          {booking.status === 'rejected' && (
                             <button
                               onClick={() => updateBookingStatus(booking.id, 'assigned')}
-                              className="flex-1 bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
+                              className="w-full bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
                             >
-                              UnAccept Ride
+                              Unreject Ride
                             </button>
-                          </div>
-                        )}
-                        {booking.status === 'rejected' && (
-                          <button
-                            onClick={() => updateBookingStatus(booking.id, 'assigned')}
-                            className="w-full bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
-                          >
-                            Unreject Ride
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </div>
+                      )}
 
-                    {!isAdmin && !isDriver && booking.status === 'completed' && !booking.rating && (
-                      <div className="h-0 overflow-hidden" />
-                    )}
+                      {!isAdmin && !isDriver && booking.status === 'completed' && !booking.rating && (
+                        <div className="h-0 overflow-hidden" />
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
-              }
-            </div>
-          )}
-        </div>
-      );
+                ))
+                }
+              </div>
+            )}
+          </div>
+        );
       case 'analytics':
         return (
           <div className="space-y-8">
@@ -1404,7 +1509,7 @@ export default function AppDashboard() {
                 { label: 'Pending', value: analytics.pendingBookings, icon: Clock, color: 'text-gold' },
                 { label: 'Total Rides', value: bookings.length, icon: LayoutGrid, color: 'text-purple-500' },
               ].map((stat, i) => (
-                <div key={i} className="glass p-6 rounded-2xl border border-white/5">
+                <div key={`stat-${i}`} className="glass p-6 rounded-2xl border border-white/5">
                   <div className="flex justify-between items-start mb-4">
                     <div className={cn("p-2 rounded-lg bg-white/5", stat.color)}>
                       <stat.icon size={20} />
@@ -1464,16 +1569,27 @@ export default function AppDashboard() {
       case 'calendar':
         return (
           <div className="space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+              {/* Row 1: Title */}
               <h3 className="text-2xl font-display text-gold">Booking Calendar</h3>
-              <div className="flex items-center gap-4">
-                <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-white/5 rounded-full">
+
+              {/* Row 2: Month navigation */}
+              <div className="flex flex-row items-center justify-center md:justify-start gap-4">
+                <button
+                  onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+                  className="p-2 hover:bg-white/5 rounded-full"
+                >
                   <ChevronLeft size={20} />
                 </button>
+
                 <span className="text-sm font-bold uppercase tracking-widest min-w-[140px] text-center">
                   {format(currentMonth, 'MMMM yyyy')}
                 </span>
-                <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 hover:bg-white/5 rounded-full">
+
+                <button
+                  onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+                  className="p-2 hover:bg-white/5 rounded-full"
+                >
                   <ChevronRight size={20} />
                 </button>
               </div>
@@ -1488,11 +1604,12 @@ export default function AppDashboard() {
                 ))}
               </div>
               <div className="grid grid-cols-7 gap-4">
-                {calendarDays.map((day, i) => {
+                {calendarDays.map((day) => {
+                  const dayStr = day.toISOString();
                   const dayBookings = getBookingsForDate(day);
                   return (
                     <div
-                      key={i}
+                      key={dayStr}
                       onClick={() => {
                         setSelectedDate(day);
                         if (dayBookings.length > 0) setShowDayBookings(true);
@@ -1532,13 +1649,18 @@ export default function AppDashboard() {
         );
         return (
           <div className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+              {/* Row 1: Heading */}
               <div>
                 <h3 className="text-2xl font-display text-gold">User Management</h3>
-                <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage staff and customers</p>
+                <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                  Manage staff and customers
+                </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              {/* Row 2: Search + Add User */}
+              <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                {/* Search input */}
                 <div className="relative flex-1 min-w-[200px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
                   <input
@@ -1557,35 +1679,52 @@ export default function AppDashboard() {
                     </button>
                   )}
                 </div>
+
+                {/* Add User button */}
                 <button
                   onClick={() => {
                     setEditingUser({ role: 'customer', name: '', email: '', phone: '' });
                     setShowUserModal(true);
                   }}
-                  className="btn-primary px-6 py-2 flex items-center gap-2 shrink-0"
+                  className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
                 >
                   <UserPlus size={18} />
-                  <span className="text-xs font-bold uppercase tracking-widest">Add User</span>
+                  {/* Hide text on mobile, show on md+ */}
+                  <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                    Add User
+                  </span>
                 </button>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredUsers.map((u, index) => (
-                <div key={`${u.id}-${index}`} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+              {filteredUsers.map((u) => (
+                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
                   <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-4">
-                      <div className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center border transition-all",
-                        u.role === 'admin' ? "bg-red-500/10 border-red-500/20 text-red-500" :
-                          u.role === 'driver' ? "bg-blue-500/10 border-blue-500/20 text-blue-500" :
-                            "bg-gold/10 border-gold/20 text-gold"
-                      )}>
-                        {u.role === 'admin' ? <Shield size={20} /> : u.role === 'driver' ? <Car size={20} /> : <User size={20} />}
+                      <div
+                        className={cn(
+                          "w-10 h-10 rounded-full flex items-center justify-center border transition-all",
+                          u.role === "admin"
+                            ? "bg-red-500/10 border-red-500/20 text-red-500"
+                            : u.role === "driver"
+                              ? "bg-blue-500/10 border-blue-500/20 text-blue-500"
+                              : "bg-gold/10 border-gold/20 text-gold"
+                        )}
+                      >
+                        {u.role === "admin" ? (
+                          <Shield className="w-4 h-4 md:w-5 md:h-5" />
+                        ) : u.role === "driver" ? (
+                          <Car className="w-4 h-4 md:w-5 md:h-5" />
+                        ) : (
+                          <User className="w-4 h-4 md:w-5 md:h-5" />
+                        )}
                       </div>
+
                       <div className="flex flex-col">
-                        <h4 className="text-[14px] font-bold font-display text-white group-hover:text-gold transition-colors leading-tight">{u.name || 'No Name'}</h4>
-                        <span className="text-[9px] text-white/30 font-mono mt-0.5">ID: {u.id}</span>
+                        <h4 className="text-[14px] font-bold font-display text-white group-hover:text-gold transition-colors leading-tight">
+                          {u.name || "No Name"}
+                        </h4>
                       </div>
                     </div>
                     <span className={cn(
@@ -1645,147 +1784,599 @@ export default function AppDashboard() {
             </div>
           </div>
         );
-      case 'fleet':
+      case 'management':
         if (!isAdmin) return null;
-        const filteredFleet = fleet.filter(v =>
-          v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          v.model?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          v.type?.toLowerCase().includes(searchQuery.toLowerCase())
-        );
         return (
-          <div className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-2xl font-display text-gold">Fleet Management</h3>
-                <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your luxury vehicles</p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
-                  <input
-                    type="text"
-                    placeholder="Search fleet..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
+          <div className="space-y-4">
+            <div className="flex items-center gap-4 border-b border-white/5 p-1 bg-white/5 rounded-lg">
+              {[
+                { id: 'fleet', label: 'Fleet', icon: Truck },
+                { id: 'extras', label: 'Extras', icon: Plus },
+                { id: 'coupons', label: 'Coupons', icon: Percent },
+                { id: 'booking-mgmt', label: 'Booking', icon: CalendarCog },
+              ].map((sub) => (
                 <button
-                  onClick={() => {
-                    setEditingVehicle({ name: '', model: '', type: 'sedan', pax: 3, bags: 2, price: 95, img: '', kmRanges: [] });
-                    setShowVehicleModal(true);
-                  }}
-                  className="btn-primary px-6 py-2 flex items-center gap-2 shrink-0"
+                  key={sub.id}
+                  onClick={() => setActiveSubTab(sub.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
+                    activeSubTab === sub.id
+                      ? "bg-gold text-black"
+                      : "text-white/40 hover:text-white hover:bg-white/5"
+                  )}
                 >
-                  <Plus size={18} />
-                  <span className="text-xs font-bold uppercase tracking-widest">Add Vehicle</span>
+                  <sub.icon size={14} />
+                  {/* Hide labels on small screens, show on md+ */}
+                  <span className="hidden md:inline">{sub.label}</span>
                 </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {filteredFleet.map((v, index) => (
-                <div key={`${v.id}-${index}`} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
-                  <div className="h-48 relative overflow-hidden">
-                    <img src={v.img || 'https://picsum.photos/seed/car/800/400'} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
-                    <div className="absolute bottom-4 left-4">
-                      <p className="text-xl font-display">{v.name}</p>
-                      <p className="text-xs text-white/60">{v.model}</p>
-                    </div>
-                  </div>
-                  <div className="p-6">
-                    <div className="flex justify-between items-center mb-6">
-                      <div className="flex gap-4">
-                        <div className="flex items-center gap-2 text-white/40">
-                          <Users size={14} />
-                          <span className="text-xs font-bold">{v.pax}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-white/40">
-                          <Truck size={14} />
-                          <span className="text-xs font-bold">{v.bags}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Price</p>
-                        <p className="text-lg font-display text-gold">${v.price}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          setEditingVehicle(v);
-                          setShowVehicleModal(true);
-                        }}
-                        className="flex-1 bg-white/5 hover:bg-gold hover:text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
-                      >
-                        Edit Vehicle
-                      </button>
-                      <button
-                        onClick={() => handleDeleteVehicle(v.id)}
-                        className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
               ))}
             </div>
-          </div>
-        );
-      case 'settings':
-        if (!isAdmin) return null;
-        return (
-          <div className="space-y-8">
-            <h3 className="text-2xl font-display text-gold">System Settings</h3>
-            <div className="glass p-8 rounded-3xl border border-white/5 max-w-2xl">
-              <div className="space-y-6">
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Global Price ($)</label>
-                  <input
-                    type="number"
-                    value={systemSettings?.basePrice || 0}
-                    onChange={(e) => setSystemSettings({ ...systemSettings, basePrice: parseFloat(e.target.value) })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
+
+            {activeSubTab === 'fleet' && (
+              <div className="space-y-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                  {/* Heading */}
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Fleet Management</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                      Manage your luxury vehicles
+                    </p>
+                  </div>
+
+                  {/* Search + Add Vehicle */}
+                  <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                    {/* Search input */}
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                      <input
+                        type="text"
+                        placeholder="Search fleet..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Add Vehicle button */}
+                    <button
+                      onClick={() => {
+                        setEditingVehicle({ name: '', model: '', type: 'sedan', pax: 3, bags: 2, price: 95, img: '', kmRanges: [] });
+                        setShowVehicleModal(true);
+                      }}
+                      className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                    >
+                      <Plus size={18} />
+                      {/* Hide text on mobile, show on md+ */}
+                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                        Add Vehicle
+                      </span>
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Price per KM ($)</label>
-                  <input
-                    type="number"
-                    value={systemSettings?.kmPrice || 0}
-                    onChange={(e) => setSystemSettings({ ...systemSettings, kmPrice: parseFloat(e.target.value) })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {fleet.filter(v =>
+                    v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    v.model?.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).map((v) => (
+                    <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+                      <div className="h-48 relative overflow-hidden">
+                        <img src={v.img || 'https://picsum.photos/seed/car/800/400'} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
+                        <div className="absolute bottom-4 left-4">
+                          <p className="text-xl font-display">{v.name}</p>
+                          <p className="text-xs text-white/60">{v.model}</p>
+                        </div>
+                      </div>
+                      <div className="p-6">
+                        <div className="flex justify-between items-center mb-6">
+                          <div className="flex gap-4">
+                            <div className="flex items-center gap-2 text-white/40">
+                              <Users size={14} />
+                              <span className="text-xs font-bold">{v.pax}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-white/40">
+                              <Luggage size={14} />
+                              <span className="text-xs font-bold">{v.bags}</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Price</p>
+                            <p className="text-lg font-display text-gold">${v.basePrice}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingVehicle(v);
+                              setShowVehicleModal(true);
+                            }}
+                            className="flex-1 bg-white/5 hover:bg-gold hover:text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
+                          >
+                            Edit Vehicle
+                          </button>
+                          <button
+                            onClick={() => handleDeleteVehicle(v.id)}
+                            className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Tax Percentage (%)</label>
-                  <input
-                    type="number"
-                    value={systemSettings?.taxPercentage || 0}
-                    onChange={(e) => setSystemSettings({ ...systemSettings, taxPercentage: parseFloat(e.target.value) })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
-                </div>
-                <button
-                  onClick={() => handleUpdateSettings(systemSettings)}
-                  disabled={isSavingSettings}
-                  className="w-full bg-gold text-black py-4 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50"
-                >
-                  {isSavingSettings ? 'Saving...' : 'Save Settings'}
-                </button>
               </div>
-            </div>
+            )}
+
+            {activeSubTab === 'extras' && (
+              <div className="space-y-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                  {/* Row 1: Heading */}
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Extras Management</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                      Manage additional ride options
+                    </p>
+                  </div>
+
+                  {/* Row 2: Search + Add Extra */}
+                  <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                    {/* Search input */}
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                      <input
+                        type="text"
+                        placeholder="Search extras..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Add Extra button */}
+                    <button
+                      onClick={() => {
+                        setEditingExtra({ name: '', description: '', price: 0, active: true });
+                        setShowExtraModal(true);
+                      }}
+                      className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                    >
+                      <Plus size={18} />
+                      {/* Hide text on mobile, show on md+ */}
+                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                        Add Extra
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {extras.filter(e =>
+                    e.name?.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).map((e) => (
+                    <div key={e.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
+                      {e.active ? (
+                        <div className="absolute top-0 right-0 bg-green-600 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                          Active
+                        </div>
+                      ) : (
+                        <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                          Inactive
+                        </div>
+                      )}
+                      <div className="flex justify-between items-start mb-2 mt-2">
+                        <div>
+                          <h4 className="text-xl font-display font-bold text-gold mb-1">{e.name}</h4>
+                        </div>
+                        <div className="bg-gold/10 p-1.5 rounded-lg">
+                          <p className="text-[10px] text-gold uppercase tracking-widest font-bold">
+                            ${e.price}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-white/60 mb-6 line-clamp-2">{e.description}</p>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingExtra(e);
+                            setShowExtraModal(true);
+                          }}
+                          className="flex-1 py-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
+                        >
+                          <Edit2 size={14} />
+                          Edit
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteExtra(e.id)}
+                          className="flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'coupons' && (
+              <div className="space-y-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                  {/* Row 1: Heading */}
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Coupon Management</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                      Manage discount codes
+                    </p>
+                  </div>
+
+                  {/* Row 2: Search + Add Coupon */}
+                  <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                    {/* Search input */}
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                      <input
+                        type="text"
+                        placeholder="Search coupons..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Add Coupon button */}
+                    <button
+                      onClick={() => {
+                        setEditingCoupon({
+                          code: '',
+                          type: 'percentage',
+                          value: 0,
+                          startDate: '',
+                          endDate: '',
+                          usageLimit: 0,
+                          usedCount: 0,
+                          active: true,
+                          serviceIds: [],
+                        });
+                        setShowCouponModal(true);
+                      }}
+                      className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                    >
+                      <Plus size={18} />
+                      {/* Hide text on mobile, show on md+ */}
+                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                        Add Coupon
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {coupons.filter(c =>
+                    c.code?.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).map((c) => (
+                    <div key={c.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
+                      {c.active ? (
+                        <div className="absolute top-0 right-0 bg-green-600 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                          Active
+                        </div>
+                      ) : (
+                        <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                          Inactive
+                        </div>
+                      )}
+                      <div className="flex justify-between items-start mb-4 mt-2">
+                        <div>
+                          <h4 className="text-xl font-bold font-display text-gold mb-1">{c.code}</h4>
+                        </div>
+                        <div className="bg-gold/10 p-1.5 rounded-lg">
+                          <p className="text-[10px] uppercase font-bold text-gold">
+                            {c.type === 'percentage' ? `${c.value}% OFF` : `$${c.value} OFF`}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 mb-6">
+                        <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold">
+                          <span className="text-white/30">Validity</span>
+                          <span className="text-white/60">{c.startDate} - {c.endDate}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold">
+                          <span className="text-white/30">Usage</span>
+                          <span className="text-white/60">{c.usedCount || 0} / {c.usageLimit || '∞'}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px] tracking-widest font-bold">
+                          <span className="text-white/30 uppercase">Aplc. Services</span>
+
+                          {(!c.serviceIds || c.serviceIds.length === 0) ? (
+                            <span className="text-[9px] bg-white/10 text-white/80 px-2 py-1 rounded-lg">All Services</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1 justify-end">
+                              {c.serviceIds.map((service) => (
+                                <span
+                                  key={service}
+                                  className="text-[9px] bg-white/10 text-white/80 px-1.5 py-1 rounded-lg"
+                                >
+                                  {service.charAt(0).toUpperCase() + service.slice(1).toLowerCase()}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingCoupon(c);
+                            setShowCouponModal(true);
+                          }}
+                          className="flex-1 py-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
+                        >
+                          <Edit2 size={14} />
+                          Edit
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteCoupon(c.id)}
+                          className="flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/50 hover:text-white transition-all font-bold flex items-center justify-center gap-1"
+                        >
+                          <Trash2 size={14} />
+                          <span className="text-[12px] font-bold uppercase tracking-widest">Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'booking-mgmt' && (
+              <div className="space-y-8">
+                <div className="glass p-6 md:p-8 rounded-3xl border border-white/5 w-full">
+                  {/* Booking Configuration header row with Save button */}
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-display text-gold uppercase tracking-widest">
+                      Booking Configuration
+                    </h3>
+
+                    <button
+                      onClick={() => handleUpdateSettings(systemSettings)}
+                      disabled={isSavingSettings}
+                      className={cn(
+                        "bg-gold text-black rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2",
+                        "hover:bg-white",
+                        "w-auto py-2 px-4 md:py-3 md:px-6"
+                      )}
+                    >
+                      {/* Icon always visible */}
+                      {isSavingSettings ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-black" />
+                      ) : (
+                        <Save className="h-4 w-4 text-black" />
+                      )}
+
+                      {/* Text label only on desktop */}
+                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                        {isSavingSettings ? "Saving..." : "Save Settings"}
+                      </span>
+                    </button>
+                  </div>
+                  {/* Responsive two-column layout */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Price Component Visibility */}
+                    <div className="space-y-4">
+                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
+                        Price Component Visibility
+                      </h4>
+
+                      {/* Gross Price (always enabled) */}
+                      <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-gold">
+                        <div>
+                          <p className="text-sm font-bold">Show Gross Price (Always Enabled)</p>
+                          <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                            Final total price
+                          </p>
+                        </div>
+                        <button
+                          disabled
+                          className="w-12 h-6 rounded-full transition-all relative bg-gold"
+                        >
+                          <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white transition-all" />
+                        </button>
+                      </div>
+
+                      {/* Show Price Breakdown toggle + pills inside */}
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">Show Price Breakdown</p>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                              Enable detailed pricing options
+                            </p>
+                          </div>
+                          <button
+                            onClick={() =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                showPriceBreakdown: !systemSettings?.showPriceBreakdown,
+                              })
+                            }
+                            className={cn(
+                              "w-12 h-6 rounded-full transition-all relative",
+                              systemSettings?.showPriceBreakdown ? "bg-gold" : "bg-white/10"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                systemSettings?.showPriceBreakdown ? "right-1" : "left-1"
+                              )}
+                            />
+                          </button>
+                        </div>
+
+                        {/* Pills appear inside same div when enabled */}
+                        {systemSettings?.showPriceBreakdown && (
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { id: "showBasePrice", label: "Base Price" },
+                              { id: "showDistancePrice", label: "Distance/Hour Price" },
+                              { id: "showExtrasPrice", label: "Extras Price" },
+                              { id: "showTax", label: "Tax" },
+                              { id: "showDiscount", label: "Discount" },
+                              { id: "showNetPrice", label: "Net Price" },
+                              { id: "showStripeFees", label: "Stripe Fees" },
+                            ].map((pill) => (
+                              <button
+                                key={pill.id}
+                                onClick={() =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    [pill.id]: !systemSettings?.[pill.id],
+                                  })
+                                }
+                                className={cn(
+                                  "text-[10px] px-3 py-1 rounded-lg font-bold tracking-widest transition-all",
+                                  systemSettings?.[pill.id]
+                                    ? "bg-green-600 text-white"
+                                    : "bg-red-500/10 text-white hover:bg-red-500/30"
+                                )}
+                              >
+                                {pill.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Financial Settings */}
+                    <div className="space-y-6">
+                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
+                        Financial Settings
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Tax Percentage (%)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.taxPercentage || 0}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                taxPercentage: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Stripe Fee (%)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.stripeFeePercentage || 2.9}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                stripeFeePercentage: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Waypoint Price ($)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.waypointPrice || 0}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                waypointPrice: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Limit to Country (ISO Code)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. AU, US"
+                            value={systemSettings?.limitCountry || ""}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                limitCountry: e.target.value.toUpperCase(),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Limit to City (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Melbourne"
+                            value={systemSettings?.limitCity || ""}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                limitCity: e.target.value,
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       case 'profile':
@@ -1886,8 +2477,8 @@ export default function AppDashboard() {
             <section>
               <h4 className="text-sm uppercase tracking-widest font-bold text-white/40 mb-4">Payment History</h4>
               <div className="space-y-4">
-                {bookings.map((booking, index) => (
-                  <div key={`${booking.id}-${index}`} className="glass p-4 rounded-xl flex items-center justify-between">
+                {bookings.map((booking) => (
+                  <div key={booking.id} className="glass p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center">
                         <CreditCard size={18} className="text-white/40" />
@@ -1910,287 +2501,6 @@ export default function AppDashboard() {
                 ))}
               </div>
             </section>
-          </div>
-        );
-      case 'users':
-        if (!isAdmin) return null;
-        return (
-          <div className="space-y-8">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-4">
-                <button onClick={() => setActiveTab('home')} className="p-2 hover:bg-white/5 rounded-full">
-                  <ChevronLeft size={24} />
-                </button>
-                <h3 className="text-2xl font-display">User Management</h3>
-              </div>
-              <button
-                onClick={() => {
-                  setEditingUser({ role: 'customer', name: '', email: '', phone: '' });
-                  setShowUserModal(true);
-                }}
-                className="btn-primary w-full max-w-xs px-6 py-2 flex items-center gap-2 rounded-full"
-              >
-                <UserPlus size={18} />
-                <span className="text-xs font-bold uppercase tracking-widest">Add User</span>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {allUsers.map((u, index) => (
-                <div key={`${u.id}-${index}`} className={cn(
-                  "glass p-6 rounded-2xl flex items-center justify-between border transition-all",
-                  u.blocked ? "border-red-500/30 bg-red-500/5" : "border-white/5"
-                )}>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center border border-white/10">
-                      <User size={24} className={cn(u.blocked ? "text-red-500" : "text-gold/50")} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold">{u.name}</p>
-                        {u.blocked && (
-                          <span className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded uppercase font-bold">Blocked</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-white/40">{u.email}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={cn(
-                      "text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded",
-                      u.role === 'admin' ? "bg-red-500/20 text-red-500" :
-                        u.role === 'driver' ? "bg-blue-500/20 text-blue-500" :
-                          "bg-gold/20 text-gold"
-                    )}>
-                      {u.role}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setEditingUser(u);
-                        setShowUserModal(true);
-                      }}
-                      className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40 hover:text-gold"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleBlockUser(u.id, !u.blocked)}
-                      className={cn(
-                        "p-2 rounded-lg transition-colors",
-                        u.blocked ? "text-green-500 hover:bg-green-500/10" : "text-red-500 hover:bg-red-500/10"
-                      )}
-                      title={u.blocked ? "Unblock User" : "Block User"}
-                    >
-                      {u.blocked ? <CheckCircle size={16} /> : <Ban size={16} />}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(u.id)}
-                      className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-white/20 hover:text-red-500"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      case 'settings':
-        if (!isAdmin) return null;
-        return (
-          <div className="space-y-12">
-            <div className="flex items-center gap-4">
-              <button onClick={() => setActiveTab('home')} className="p-2 hover:bg-white/5 rounded-full">
-                <ChevronLeft size={24} />
-              </button>
-              <h3 className="text-2xl font-display">System Settings</h3>
-            </div>
-
-            {/* Pricing Settings */}
-            <section className="space-y-6">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h4 className="text-lg font-display text-gold">Pricing & Tax</h4>
-                  <p className="text-xs text-white/40 uppercase tracking-widest">Configure base rates and taxation</p>
-                </div>
-                <button
-                  onClick={() => setShowSettingsModal(true)}
-                  className="text-gold text-xs font-bold uppercase tracking-widest hover:underline"
-                >
-                  Edit Settings
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="glass p-6 rounded-2xl border border-white/5">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-gold/10 text-gold rounded-lg">
-                      <DollarSign size={18} />
-                    </div>
-                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Price</span>
-                  </div>
-                  <p className="text-2xl font-display">${systemSettings?.basePrice || 0}</p>
-                </div>
-                <div className="glass p-6 rounded-2xl border border-white/5">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg">
-                      <MapPin size={18} />
-                    </div>
-                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Price per KM</span>
-                  </div>
-                  <p className="text-2xl font-display">${systemSettings?.kmPrice || 0}</p>
-                </div>
-                <div className="glass p-6 rounded-2xl border border-white/5">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-purple-500/10 text-purple-500 rounded-lg">
-                      <Percent size={18} />
-                    </div>
-                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Tax Rate</span>
-                  </div>
-                  <p className="text-2xl font-display">{systemSettings?.taxPercentage || 0}%</p>
-                </div>
-              </div>
-            </section>
-
-            {/* Fleet Management */}
-            <section className="space-y-6">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h4 className="text-lg font-display text-gold">Fleet Management</h4>
-                  <p className="text-xs text-white/40 uppercase tracking-widest">Manage vehicles and availability</p>
-                </div>
-                <button
-                  onClick={() => {
-                    setEditingVehicle({ name: '', model: '', type: 'sedan', pax: 3, bags: 2, price: 95, img: '' });
-                    setShowVehicleModal(true);
-                  }}
-                  className="btn-primary px-6 py-2 flex items-center gap-2"
-                >
-                  <Plus size={18} />
-                  <span className="text-xs font-bold uppercase tracking-widest">Add Vehicle</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {fleet.map((v, index) => (
-                  <div key={`${v.id}-${index}`} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
-                    <div className="h-40 relative overflow-hidden">
-                      <img src={v.img || null} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
-                      <div className="absolute bottom-4 left-4">
-                        <p className="text-lg font-display">{v.name}</p>
-                        <p className="text-xs text-white/60">{v.model}</p>
-                      </div>
-                    </div>
-                    <div className="p-6 space-y-4">
-                      <div className="flex justify-between items-center text-xs uppercase tracking-widest font-bold">
-                        <div className="flex gap-4">
-                          <span className="text-white/40">Pax: <span className="text-white">{v.pax}</span></span>
-                          <span className="text-white/40">Bags: <span className="text-white">{v.bags}</span></span>
-                        </div>
-                        <span className="text-gold">${v.price}</span>
-                      </div>
-
-                      {v.kmRanges && v.kmRanges.length > 0 && (
-                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                          <p className="text-[8px] text-white/40 uppercase font-bold mb-2">KM Surcharges</p>
-                          <div className="flex flex-wrap gap-2">
-                            {v.kmRanges.map((r: any, i: number) => (
-                              <span key={i} className="text-[9px] bg-gold/10 text-gold px-2 py-0.5 rounded-full border border-gold/20">
-                                {r.label}km: +${r.surcharge}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex gap-2 pt-4 border-t border-white/5">
-                        <button
-                          onClick={() => {
-                            setEditingVehicle(v);
-                            setShowVehicleModal(true);
-                          }}
-                          className="flex-1 bg-white/5 hover:bg-gold hover:text-black py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
-                        >
-                          Edit Vehicle
-                        </button>
-                        <button
-                          onClick={() => handleDeleteVehicle(v.id)}
-                          className="p-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* Admin Services */}
-            <section className="space-y-6">
-              <div>
-                <h4 className="text-lg font-display text-gold">Admin Services</h4>
-                <p className="text-xs text-white/40 uppercase tracking-widest">Configure available service categories</p>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {systemSettings?.services?.map((service: any, index: number) => (
-                  <div key={`${service.id}-${index}`} className="glass p-6 rounded-2xl border border-white/5 text-center space-y-3">
-                    <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mx-auto text-gold">
-                      <Shield size={24} />
-                    </div>
-                    <p className="text-xs font-bold uppercase tracking-widest">{service.name}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        );
-      case 'profile':
-        return (
-          <div className="space-y-8">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-24 h-24 bg-gold/10 border-2 border-gold rounded-full flex items-center justify-center mb-4 overflow-hidden">
-                {user?.photoURL ? (
-                  <img src={user.photoURL || null} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <User size={48} className="text-gold" />
-                )}
-              </div>
-              <h3 className="text-2xl font-display">{userProfile?.name || user?.displayName || 'Merlux Client'}</h3>
-              <p className="text-white/40 text-sm">{user?.email}</p>
-              <div className="mt-4 flex gap-2">
-                <span className="text-[10px] bg-gold/10 text-gold px-3 py-1 rounded-full font-bold uppercase tracking-widest">
-                  {userProfile?.role || 'Customer'}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              {[
-                { icon: User, label: 'Personal Information' },
-                { icon: Bell, label: 'Notifications' },
-                { icon: CreditCard, label: 'Payment Methods' },
-                { icon: Settings, label: 'App Settings' },
-              ].map((item, i) => (
-                <button
-                  key={i}
-                  onClick={() => item.label === 'Notifications' ? setShowNotifications(true) : null}
-                  className="w-full glass p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <item.icon size={20} className="text-gold" />
-                    <span className="text-sm font-medium">{item.label}</span>
-                  </div>
-                  <ChevronRight size={16} className="text-white/20" />
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={handleLogout}
-              className="w-full bg-red-500/10 text-red-500 py-4 rounded-xl font-bold text-sm uppercase tracking-widest border border-red-500/20"
-            >
-              Sign Out
-            </button>
           </div>
         );
       default:
@@ -2328,7 +2638,7 @@ export default function AppDashboard() {
               <div className="flex justify-center gap-3 mb-6">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
-                    key={star}
+                    key={`star-${star}`}
                     onMouseEnter={() => setRatingValue(star)}
                     onClick={() => setRatingValue(star)}
                     className="transition-all hover:scale-125"
@@ -2359,7 +2669,7 @@ export default function AppDashboard() {
                     setRatingBooking(null);
                     setRatingComment('');
                   }}
-                  className="flex-1 py-4 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors"
+                  className="flex-1 py-4 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
                 >
                   Cancel
                 </button>
@@ -2519,7 +2829,7 @@ export default function AppDashboard() {
                 <div className="pt-4 flex gap-4">
                   <button
                     onClick={() => setShowBookingModal(false)}
-                    className="flex-1 py-3 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white"
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
                   >
                     Cancel
                   </button>
@@ -2636,6 +2946,8 @@ export default function AppDashboard() {
                       if (confirmDelete.type === 'booking') executeDeleteBooking(confirmDelete.id);
                       else if (confirmDelete.type === 'user') executeDeleteUser(confirmDelete.id);
                       else if (confirmDelete.type === 'vehicle') executeDeleteVehicle(confirmDelete.id);
+                      else if (confirmDelete.type === 'coupon') executeDeleteCoupon(confirmDelete.id);
+                      else if (confirmDelete.type === 'extra') executeDeleteExtra(confirmDelete.id);
                     }}
                     className="flex-1 bg-red-500 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
                   >
@@ -2726,7 +3038,7 @@ export default function AppDashboard() {
                 <div className="pt-4 flex gap-4">
                   <button
                     onClick={() => setShowUserModal(false)}
-                    className="flex-1 py-3 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white"
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
                   >
                     Cancel
                   </button>
@@ -2743,6 +3055,95 @@ export default function AppDashboard() {
                     className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
                   >
                     {editingUser?.id ? 'Save Changes' : 'Create User'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Extra Modal */}
+        {showExtraModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">
+                  {editingExtra?.id ? 'Edit Extra' : 'Add Extra'}
+                </h3>
+                <button onClick={() => setShowExtraModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Name</label>
+                  <input
+                    type="text"
+                    value={editingExtra?.name || ''}
+                    onChange={(e) => setEditingExtra({ ...editingExtra, name: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="Baby Seat"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Description</label>
+                  <textarea
+                    value={editingExtra?.description || ''}
+                    onChange={(e) => setEditingExtra({ ...editingExtra, description: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all min-h-[100px]"
+                    placeholder="Safe and comfortable baby seat for infants..."
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price ($)</label>
+                  <input
+                    type="number"
+                    value={editingExtra?.price || 0}
+                    onChange={(e) => setEditingExtra({ ...editingExtra, price: parseFloat(e.target.value) })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                  />
+                </div>
+                <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <div>
+                    <p className="text-sm font-bold">Active Status</p>
+                    <p className="text-[10px] text-white/40 uppercase tracking-widest">Toggle availability</p>
+                  </div>
+                  <button
+                    onClick={() => setEditingExtra({ ...editingExtra, active: !editingExtra.active })}
+                    className={cn(
+                      "w-12 h-6 rounded-full transition-all relative",
+                      editingExtra?.active ? "bg-gold" : "bg-white/10"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                      editingExtra?.active ? "right-1" : "left-1"
+                    )} />
+                  </button>
+                </div>
+
+                <div className="pt-4 flex gap-4">
+                  <button
+                    onClick={() => setShowExtraModal(false)}
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleUpdateExtra(editingExtra.id, editingExtra)}
+                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
+                  >
+                    Save Changes
                   </button>
                 </div>
               </div>
@@ -2831,12 +3232,33 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Base Fare ($)</label>
+                    <input
+                      type="number"
+                      value={editingVehicle?.basePrice || 0}
+                      onChange={(e) => setEditingVehicle({ ...editingVehicle, basePrice: parseFloat(e.target.value) })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price per KM ($)</label>
+                    <input
+                      type="number"
+                      value={editingVehicle?.price || 0}
+                      onChange={(e) => setEditingVehicle({ ...editingVehicle, price: parseFloat(e.target.value) })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price ($)</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Hourly Price ($/HR)</label>
                   <input
                     type="number"
-                    value={editingVehicle?.price || 0}
-                    onChange={(e) => setEditingVehicle({ ...editingVehicle, price: parseFloat(e.target.value) })}
+                    value={editingVehicle?.hourlyPrice || 0}
+                    onChange={(e) => setEditingVehicle({ ...editingVehicle, hourlyPrice: parseFloat(e.target.value) })}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                   />
                 </div>
@@ -2880,7 +3302,7 @@ export default function AppDashboard() {
                   <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">KM-Based Surcharges</label>
                   <div className="space-y-2">
                     {(editingVehicle?.kmRanges || []).map((range: any, index: number) => (
-                      <div key={index} className="flex gap-2 items-center">
+                      <div key={`km-${index}`} className="flex gap-2 items-center">
                         <input
                           type="text"
                           placeholder="0-25"
@@ -2929,7 +3351,7 @@ export default function AppDashboard() {
                 <div className="pt-4 flex gap-4">
                   <button
                     onClick={() => setShowVehicleModal(false)}
-                    className="flex-1 py-3 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white"
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
                   >
                     Cancel
                   </button>
@@ -2951,8 +3373,8 @@ export default function AppDashboard() {
           </motion.div>
         )}
 
-        {/* Settings Modal */}
-        {showSettingsModal && (
+        {/* Coupon Modal */}
+        {showCouponModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2962,64 +3384,203 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
+              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
             >
+              {/* Heading row: Title + Active toggle + Close button */}
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-display text-gold">System Pricing</h3>
-                <button onClick={() => setShowSettingsModal(false)} className="text-white/40 hover:text-white">
-                  <X size={20} />
-                </button>
+                <h3 className="text-xl font-display text-gold">
+                  {editingCoupon?.id ? "Edit Coupon" : "Add Coupon"}
+                </h3>
+
+                <div className="flex items-center gap-4">
+                  {/* Active toggle */}
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={editingCoupon?.active}
+                      onChange={(e) =>
+                        setEditingCoupon({ ...editingCoupon, active: e.target.checked })
+                      }
+                      className="w-5 h-5 rounded-lg border-white/10 bg-white/5 text-gold focus:ring-gold"
+                    />
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-white/40 group-hover:text-white transition-colors">
+                      {editingCoupon?.active ? "Active" : "Inactive"}
+                    </span>
+                  </label>
+
+                  {/* Close button */}
+                  <button
+                    onClick={() => setShowCouponModal(false)}
+                    className="text-white/40 hover:text-white transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
+                {/* Row 1: Coupon Code */}
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Global Price ($)</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                    Coupon Code
+                  </label>
                   <input
-                    type="number"
-                    value={systemSettings?.basePrice || 0}
-                    onChange={(e) => setSystemSettings({ ...systemSettings, basePrice: parseFloat(e.target.value) })}
+                    type="text"
+                    value={editingCoupon?.code || ""}
+                    onChange={(e) =>
+                      setEditingCoupon({
+                        ...editingCoupon,
+                        code: e.target.value.toUpperCase(),
+                      })
+                    }
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price per Kilometer ($)</label>
-                  <input
-                    type="number"
-                    value={systemSettings?.kmPrice || 0}
-                    onChange={(e) => setSystemSettings({ ...systemSettings, kmPrice: parseFloat(e.target.value) })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Tax Percentage (%)</label>
-                  <input
-                    type="number"
-                    value={systemSettings?.taxPercentage || 0}
-                    onChange={(e) => setSystemSettings({ ...systemSettings, taxPercentage: parseFloat(e.target.value) })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="SAVE20"
                   />
                 </div>
 
+                {/* Row 2: Value + Type + Usage Limit */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                      Value
+                    </label>
+                    <input
+                      type="number"
+                      value={editingCoupon?.value || 0}
+                      onChange={(e) =>
+                        setEditingCoupon({
+                          ...editingCoupon,
+                          value: parseFloat(e.target.value),
+                        })
+                      }
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                      Type
+                    </label>
+                    <select
+                      value={editingCoupon?.type || "percentage"}
+                      onChange={(e) =>
+                        setEditingCoupon({ ...editingCoupon, type: e.target.value })
+                      }
+                      className="custom-select w-full py-3 text-sm"
+                    >
+                      <option value="percentage">%</option>
+                      <option value="fixed">$</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                      Usage Limit
+                    </label>
+                    <input
+                      type="number"
+                      value={editingCoupon?.usageLimit || 0}
+                      onChange={(e) =>
+                        setEditingCoupon({
+                          ...editingCoupon,
+                          usageLimit: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="0 for unlimited"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 3: Dates */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={editingCoupon?.startDate || ""}
+                      onChange={(e) =>
+                        setEditingCoupon({ ...editingCoupon, startDate: e.target.value })
+                      }
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                      End Date
+                    </label>
+                    <input
+                      type="date"
+                      value={editingCoupon?.endDate || ""}
+                      onChange={(e) =>
+                        setEditingCoupon({ ...editingCoupon, endDate: e.target.value })
+                      }
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 4: Service Selection */}
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                    Applicable Services
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {["airport", "corporate", "wedding", "tour", "hourly"].map(
+                      (service) => (
+                        <label
+                          key={service}
+                          className="flex items-center gap-2 p-2 bg-white/5 rounded-lg border border-white/5 cursor-pointer hover:border-gold/30 transition-all"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editingCoupon?.serviceIds?.includes(service)}
+                            onChange={(e) => {
+                              const current = editingCoupon?.serviceIds || [];
+                              const next = e.target.checked
+                                ? [...current, service]
+                                : current.filter((s) => s !== service);
+                              setEditingCoupon({ ...editingCoupon, serviceIds: next });
+                            }}
+                            className="w-3 h-3 rounded border-white/10 bg-white/5 text-gold focus:ring-gold"
+                          />
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-white/60">
+                            {service}
+                          </span>
+                        </label>
+                      )
+                    )}
+                  </div>
+                  <p className="text-[8px] text-white/30 mt-2 italic">
+                    If none selected, coupon applies to all services.
+                  </p>
+                </div>
+
+                {/* Actions */}
                 <div className="pt-4 flex gap-4">
                   <button
-                    onClick={() => setShowSettingsModal(false)}
-                    className="flex-1 py-3 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white"
+                    onClick={() => setShowCouponModal(false)}
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={() => handleUpdateSettings(systemSettings)}
-                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
+                    onClick={() => {
+                      if (editingCoupon.id) {
+                        handleUpdateCoupon(editingCoupon.id, editingCoupon);
+                      } else {
+                        handleCreateCoupon(editingCoupon);
+                      }
+                    }}
+                    className="border border-white/5 flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
                   >
-                    Save Settings
+                    {editingCoupon?.id ? "Save Changes" : "Create Coupon"}
                   </button>
                 </div>
               </div>
             </motion.div>
           </motion.div>
         )}
-
-        {/* Day Bookings Modal */}
         {showDayBookings && selectedDate && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -3043,8 +3604,8 @@ export default function AppDashboard() {
               </div>
 
               <div className="space-y-4">
-                {getBookingsForDate(selectedDate).map((booking, index) => (
-                  <div key={`${booking.id}-${index}`} className="glass p-4 rounded-xl border border-white/5 space-y-3">
+                {getBookingsForDate(selectedDate).map((booking) => (
+                  <div key={booking.id} className="glass p-4 rounded-xl border border-white/5 space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="text-sm font-bold">{booking.guestName}</p>
