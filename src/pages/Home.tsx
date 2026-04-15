@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
+import { useSettings } from '../lib/SettingsContext';
 
 const HERO_IMAGES = [
   "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=2070&auto=format&fit=crop",
@@ -78,6 +79,14 @@ const BLOGS = [
 ];
 
 export default function Home() {
+  const { settings } = useSettings();
+  const contact = settings?.contact || {
+    address: 'Collins Street, Melbourne VIC 3000, Australia',
+    phone: '+61 3 9000 0000',
+    email: 'bookings@merlux.com.au',
+    bookingEmail: 'bookings@merlux.com.au'
+  };
+
   const navigate = useNavigate();
   const [currentHero, setCurrentHero] = useState(0);
   const [currentFleet, setCurrentFleet] = useState(0);
@@ -367,13 +376,13 @@ export default function Home() {
                   <div className="w-12 h-12 bg-black/10 rounded-full flex items-center justify-center">
                     <Phone size={20} />
                   </div>
-                  <p className="font-bold">+61 3 9000 0000</p>
+                  <p className="font-bold">{contact.phone}</p>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-black/10 rounded-full flex items-center justify-center">
                     <Mail size={20} />
                   </div>
-                  <p className="font-bold">bookings@merlux.com.au</p>
+                  <p className="font-bold">{contact.bookingEmail || contact.email}</p>
                 </div>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import Home from './pages/Home';
 import Booking from './pages/Booking';
 import Fleet from './pages/Fleet';
@@ -10,38 +10,54 @@ import AppDashboard from './pages/AppDashboard';
 import Login from './pages/Login';
 import Blog from './pages/Blog';
 import BlogPost from './pages/BlogPost';
+import DynamicPage from './pages/DynamicPage';
 import Offers from './pages/Offers';
 import Tours from './pages/Tours';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 
+import { SettingsProvider } from './lib/SettingsContext';
+
+function AppContent() {
+  const location = useLocation();
+  const isDashboard = location.pathname === '/app';
+
+  return (
+    <div className="min-h-screen bg-black text-white font-sans selection:bg-gold selection:text-black">
+      <Navbar />
+      <main className="w-full">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/booking" element={<Booking />} />
+          <Route path="/fleet" element={<Fleet />} />
+          <Route path="/services" element={<Services />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/blog" element={<Blog />} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/offers" element={<Offers />} />
+          <Route path="/tours" element={<Tours />} />
+          <Route path="/app" element={<AppDashboard />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/payment/success" element={<PaymentSuccess />} />
+          {/* Dynamic SEO Pages */}
+          <Route path="/:slug" element={<DynamicPage />} />
+        </Routes>
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
-      <Router>
-        <div className="min-h-screen bg-black text-white font-sans selection:bg-gold selection:text-black">
-          <Navbar />
-          <main>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/booking" element={<Booking />} />
-              <Route path="/fleet" element={<Fleet />} />
-              <Route path="/services" element={<Services />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/contact" element={<Contact />} />
-              <Route path="/blog" element={<Blog />} />
-              <Route path="/blog/:id" element={<BlogPost />} />
-              <Route path="/offers" element={<Offers />} />
-              <Route path="/tours" element={<Tours />} />
-              <Route path="/app" element={<AppDashboard />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/payment/success" element={<PaymentSuccess />} />
-            </Routes>
-          </main>
-          <Footer />
-        </div>
-      </Router>
+      <SettingsProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </SettingsProvider>
     </ErrorBoundary>
   );
 }

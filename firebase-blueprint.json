@@ -84,6 +84,30 @@
         "basePrice": { "type": "number", "description": "Base price for any ride." },
         "kmPrice": { "type": "number", "description": "Price per kilometer." },
         "taxPercentage": { "type": "number", "description": "Tax percentage to apply." },
+        "contact": {
+          "type": "object",
+          "properties": {
+            "address": { "type": "string" },
+            "phone": { "type": "string" },
+            "email": { "type": "string" },
+            "bookingEmail": { "type": "string" }
+          }
+        },
+        "seo": {
+          "type": "object",
+          "properties": {
+            "siteName": { "type": "string" },
+            "defaultTitle": { "type": "string" },
+            "titleTemplate": { "type": "string" },
+            "defaultDescription": { "type": "string" },
+            "defaultKeywords": { "type": "array", "items": { "type": "string" } },
+            "ogImage": { "type": "string" },
+            "twitterHandle": { "type": "string" },
+            "googleAnalyticsId": { "type": "string" },
+            "searchConsoleId": { "type": "string" },
+            "organizationSchema": { "type": "object" }
+          }
+        },
         "services": { 
           "type": "array", 
           "items": { 
@@ -114,6 +138,57 @@
         "img": { "type": "string" }
       },
       "required": ["name", "model", "type", "pax", "bags", "price", "img"]
+    },
+    "Extra": {
+      "title": "Extra",
+      "description": "Additional service option.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "icon": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["name", "price"]
+    },
+    "Page": {
+      "title": "Page",
+      "description": "A dynamic SEO-optimized page.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "content": { "type": "string" },
+        "metaTitle": { "type": "string" },
+        "metaDescription": { "type": "string" },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "canonicalUrl": { "type": "string" },
+        "ogImage": { "type": "string" },
+        "schema": { "type": "object" },
+        "noindex": { "type": "boolean" },
+        "includeInSitemap": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug", "content"]
+    },
+    "Blog": {
+      "title": "Blog",
+      "description": "A blog post.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "content": { "type": "string" },
+        "featuredImage": { "type": "string" },
+        "metaTitle": { "type": "string" },
+        "metaDescription": { "type": "string" },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug", "content"]
     }
   },
   "firestore": {
@@ -133,9 +208,21 @@
       "schema": "Vehicle",
       "description": "Fleet vehicles."
     },
+    "/extras/{extraId}": {
+      "schema": "Extra",
+      "description": "Additional service options."
+    },
     "/coupons/{couponId}": {
       "schema": "Coupon",
       "description": "Discount coupons."
+    },
+    "/pages/{pageId}": {
+      "schema": "Page",
+      "description": "Dynamic pages."
+    },
+    "/blogs/{blogId}": {
+      "schema": "Blog",
+      "description": "Blog posts."
     }
   }
 }

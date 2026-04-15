@@ -1,8 +1,17 @@
 import { Link } from 'react-router-dom';
 import { Facebook, Instagram, Linkedin, Mail, Phone, MapPin } from 'lucide-react';
 import Logo from './Logo';
+import { useSettings } from '../../lib/SettingsContext';
 
 export default function Footer() {
+  const { settings } = useSettings();
+  const contact = settings?.contact || {
+    address: 'Collins Street, Melbourne VIC 3000, Australia',
+    phone: '+61 3 0000 0000',
+    email: 'bookings@merlux.com.au',
+    bookingEmail: 'bookings@merlux.com.au'
+  };
+
   return (
     <footer className="bg-black border-t border-white/5 pt-20 pb-10">
       <div className="max-w-7xl mx-auto px-6">
@@ -52,15 +61,15 @@ export default function Footer() {
             <ul className="flex flex-col gap-4">
               <li className="flex items-start gap-3 text-white/60 text-sm">
                 <MapPin size={18} className="text-gold shrink-0" />
-                <span>Collins Street, Melbourne VIC 3000, Australia</span>
+                <span>{contact.address}</span>
               </li>
               <li className="flex items-center gap-3 text-white/60 text-sm">
                 <Phone size={18} className="text-gold shrink-0" />
-                <span>+61 3 0000 0000</span>
+                <span>{contact.phone}</span>
               </li>
               <li className="flex items-center gap-3 text-white/60 text-sm">
                 <Mail size={18} className="text-gold shrink-0" />
-                <span>bookings@merlux.com.au</span>
+                <span>{contact.bookingEmail || contact.email}</span>
               </li>
             </ul>
           </div>

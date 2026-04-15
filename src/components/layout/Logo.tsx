@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils';
+import { useState, useEffect } from 'react';
+import { db } from '../../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface LogoProps {
   className?: string;
@@ -7,10 +10,27 @@ interface LogoProps {
 }
 
 export default function Logo({ className, variant = 'navbar' }: LogoProps) {
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchLogo = async () => {
+      try {
+        const settingsSnap = await getDoc(doc(db, 'settings', 'system'));
+        if (settingsSnap.exists()) {
+          const url = settingsSnap.data()?.seo?.logo;
+          if (url) setLogoUrl(url);
+        }
+      } catch (e) {
+        // Silent error
+      }
+    };
+    fetchLogo();
+  }, []);
+
   return (
     <Link to="/" className={cn("flex items-center gap-2", className)}>
       <img 
-        src="assets/Logo.webp" 
+        src={logoUrl || "/assets/Logo.webp"} 
         alt="Merlux Chauffeur" 
         className={cn(
           "object-contain",
@@ -18,9 +38,11 @@ export default function Logo({ className, variant = 'navbar' }: LogoProps) {
         )}
         referrerPolicy="no-referrer"
         onError={(e) => {
-          // Fallback if image fails to load
-          e.currentTarget.style.display = 'none';
-          e.currentTarget.parentElement?.classList.add('fallback-logo');
+          if (logoUrl) {
+            setLogoUrl(null);
+          } else {
+            e.currentTarget.style.display = 'none';
+          }
         }}
       />
     </Link>

@@ -2,12 +2,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Home, MapPin, Clock, User,
   Settings, Bell, CreditCard, History,
-  ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft,
+  ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown,
   Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
-  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog
+  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, ShieldCheck, UserPlus, Edit2, Eye, UserLock, Copy, Code,
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, Cog, Navigation, Route, Settings2
 } from 'lucide-react';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
 import { cn } from '../lib/utils';
 import { auth, db, storage } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, getDocs, addDoc } from 'firebase/firestore';
@@ -33,6 +34,10 @@ enum OperationType {
   GET = 'get',
   WRITE = 'write',
 }
+
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+const libraries: ("places" | "drawing" | "geometry" | "visualization")[] = ["places", "geometry"];
+const BLOG_CATEGORIES = ["Travel Tips", "Business", "Weddings", "Tours", "Industry", "Safety"];
 
 interface FirestoreErrorInfo {
   error: string;
@@ -96,8 +101,69 @@ export default function AppDashboard() {
   const [serviceFilter, setServiceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [pages, setPages] = useState<any[]>([]);
+  const [blogs, setBlogs] = useState<any[]>([]);
+  const [showPageModal, setShowPageModal] = useState(false);
+  const [showBlogModal, setShowBlogModal] = useState(false);
+  const [editingPage, setEditingPage] = useState<any>(null);
+  const [editingBlog, setEditingBlog] = useState<any>(null);
+  const [cmsActiveSubTab, setCmsActiveSubTab] = useState('pages');
+  const [showGlobalPageCssModal, setShowGlobalPageCssModal] = useState(false);
+  const [showGlobalBlogCssModal, setShowGlobalBlogCssModal] = useState(false);
+  const [globalPageCss, setGlobalPageCss] = useState('');
+  const [globalBlogCss, setGlobalBlogCss] = useState('');
+
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries,
+  });
+
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showWaypointsPopup, setShowWaypointsPopup] = useState<string | null>(null);
+  const [showExtrasPopup, setShowExtrasPopup] = useState<string | null>(null);
+  const [showNotesPopup, setShowNotesPopup] = useState<string | null>(null);
+  const [showRouteModal, setShowRouteModal] = useState(false);
+  const [routeBooking, setRouteBooking] = useState<any>(null);
+  const [mapDirections, setMapDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const [isMapLoading, setIsMapLoading] = useState(false);
+
+  // Fetch directions when modal opens or booking changes
+  useEffect(() => {
+    if (showRouteModal && routeBooking && isLoaded) {
+      const fetchDirections = async () => {
+        if (!routeBooking.pickup || !routeBooking.dropoff) return;
+        setIsMapLoading(true);
+        try {
+          const service = new google.maps.DirectionsService();
+          const result = await service.route({
+            origin: routeBooking.pickup,
+            destination: routeBooking.dropoff,
+            waypoints: (routeBooking.waypoints || []).map((wp: string) => ({
+              location: wp,
+              stopover: true,
+            })),
+            travelMode: google.maps.TravelMode.DRIVING,
+          });
+
+          if (result) {
+            setMapDirections(result);
+          }
+        } catch (error) {
+          console.error('Error fetching directions:', error);
+        } finally {
+          setIsMapLoading(false);
+        }
+      };
+
+      fetchDirections();
+    } else if (!showRouteModal) {
+      setMapDirections(null);
+      setIsMapLoading(false);
+    }
+  }, [showRouteModal, routeBooking, isLoaded]);
+
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
   const [isUploading, setIsUploading] = useState(false);
 
   // Profile Edit State
@@ -129,19 +195,22 @@ export default function AppDashboard() {
   // User Management State
   const [editingUser, setEditingUser] = useState<any>(null);
   const [showUserModal, setShowUserModal] = useState(false);
+  const [userRoleFilter, setUserRoleFilter] = useState('all');
 
   // Booking Management State
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [viewingBooking, setViewingBooking] = useState<any>(null);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showDistanceBreakdown, setShowDistanceBreakdown] = useState(false);
 
   // Settings State
   const [systemSettings, setSystemSettings] = useState<any>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
 
   // Confirmation State
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra', id: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra' | 'page' | 'blog', id: string } | null>(null);
 
   const navigate = useNavigate();
 
@@ -158,6 +227,19 @@ export default function AppDashboard() {
   ];
 
   const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
+
+  const handleSaveSecuritySettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(db, 'settings', 'system'), systemSettings, { merge: true });
+      alert('Security settings saved successfully!');
+    } catch (err) {
+      console.error('Error saving security settings:', err);
+      alert('Failed to save security settings.');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -252,13 +334,21 @@ export default function AppDashboard() {
 
       // Fetch user profile for role
       try {
+        const idTokenResult = await user.getIdTokenResult();
+        const roleFromClaim = idTokenResult.claims.role;
+
         const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
-          setUserProfile(userSnap.data());
+          const profileData = userSnap.data();
+          // Sync role if claim exists and differs
+          if (roleFromClaim && roleFromClaim !== profileData.role) {
+            profileData.role = roleFromClaim;
+          }
+          setUserProfile(profileData);
         } else {
           // If no profile exists, set a default one to allow the app to load
-          setUserProfile({ role: 'customer', email: user.email });
+          setUserProfile({ role: (roleFromClaim as string) || 'customer', email: user.email });
         }
       } catch (err) {
         console.error('Error fetching user profile:', err);
@@ -407,6 +497,9 @@ export default function AppDashboard() {
     let unsubscribeExtras: (() => void) | undefined;
     let unsubscribeCoupons: (() => void) | undefined;
     let unsubscribeSettings: (() => void) | undefined;
+    let unsubscribeCmsSettings: (() => void) | undefined;
+    let unsubscribePages: (() => void) | undefined;
+    let unsubscribeBlogs: (() => void) | undefined;
 
     if (isAdmin) {
       q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
@@ -472,6 +565,8 @@ export default function AppDashboard() {
             basePrice: 50,
             kmPrice: 2.5,
             taxPercentage: 10,
+            distanceCalculationType: 'type1',
+            showDistanceEyeIcon: true,
             services: [
               { id: 'airport', name: 'Airport Transfer', desc: 'To or from Melbourne Airport', icon: 'Plane' },
               { id: 'corporate', name: 'Corporate Travel', desc: 'Professional business transport', icon: 'Briefcase' },
@@ -496,6 +591,32 @@ export default function AppDashboard() {
         setCoupons(couponsData);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'coupons');
+      });
+
+      // Fetch pages
+      const pagesQ = query(collection(db, 'pages'), orderBy('createdAt', 'desc'));
+      unsubscribePages = onSnapshot(pagesQ, (snapshot) => {
+        setPages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'pages');
+      });
+
+      // Fetch blogs
+      const blogsQ = query(collection(db, 'blogs'), orderBy('createdAt', 'desc'));
+      unsubscribeBlogs = onSnapshot(blogsQ, (snapshot) => {
+        setBlogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'blogs');
+      });
+
+      // Fetch CMS settings
+      const cmsSettingsRef = doc(db, 'settings', 'cms');
+      unsubscribeCmsSettings = onSnapshot(cmsSettingsRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setGlobalPageCss(data.globalPageCss || '');
+          setGlobalBlogCss(data.globalBlogCss || '');
+        }
       });
     }
 
@@ -551,6 +672,9 @@ export default function AppDashboard() {
       if (unsubscribeExtras) unsubscribeExtras();
       if (unsubscribeCoupons) unsubscribeCoupons();
       if (unsubscribeSettings) unsubscribeSettings();
+      if (unsubscribeCmsSettings) unsubscribeCmsSettings();
+      if (unsubscribePages) unsubscribePages();
+      if (unsubscribeBlogs) unsubscribeBlogs();
     };
   }, [user, userProfile, isAdmin, isDriver]);
 
@@ -586,11 +710,57 @@ export default function AppDashboard() {
         ...data,
         updatedAt: serverTimestamp()
       }, { merge: true });
+
+      // If role changed, update custom claims
+      if (data.role) {
+        await fetch('/api/admin/update-user-role', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: userId, role: data.role })
+        });
+      }
+
       setShowUserModal(false);
       setEditingUser(null);
     } catch (err) {
       console.error('Error updating user:', err);
       handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const handleCreateUser = async (userData: any) => {
+    if (!userData.email || !userData.password || !userData.name) {
+      alert('Email, Password and Name are required');
+      return;
+    }
+
+    setIsCreatingUser(true);
+    try {
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: userData.email,
+          password: userData.password,
+          displayName: userData.name,
+          role: userData.role,
+          phone: userData.phone,
+          address: userData.address
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create user');
+      }
+
+      setShowUserModal(false);
+      setEditingUser(null);
+    } catch (err: any) {
+      console.error('Error creating user:', err);
+      alert(err.message || 'Failed to create user');
+    } finally {
+      setIsCreatingUser(false);
     }
   };
 
@@ -615,11 +785,11 @@ export default function AppDashboard() {
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       result = result.filter(b =>
-        (b.guestName?.toLowerCase().includes(query)) ||
+        (b.customerName?.toLowerCase().includes(query)) ||
         (b.pickup?.toLowerCase().includes(query)) ||
         (b.dropoff?.toLowerCase().includes(query)) ||
-        (b.guestEmail?.toLowerCase().includes(query)) ||
-        (b.guestPhone?.toLowerCase().includes(query))
+        (b.customerEmail?.toLowerCase().includes(query)) ||
+        (b.customerPhone?.toLowerCase().includes(query))
       );
     }
 
@@ -666,12 +836,34 @@ export default function AppDashboard() {
   };
 
   const executeDeleteUser = async (userId: string) => {
-    try {
-      await deleteDoc(doc(db, 'users', userId));
+    if (userId === auth.currentUser?.uid) {
+      alert("You cannot delete your own account while logged in.");
       setConfirmDelete(null);
-    } catch (err) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: userId })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete user');
+      }
+
+      setConfirmDelete(null);
+      alert('User profile deleted successfully from Database. Authentication account remains active.');
+    } catch (err: any) {
       console.error('Error deleting user:', err);
-      handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
+      let message = err.message || 'Failed to delete user';
+      if (message.includes('identitytoolkit.googleapis.com')) {
+        message = 'The Identity Toolkit API is not enabled in your Google Cloud Project. Please enable it in the Google Cloud Console to perform administrative user actions.';
+      }
+      alert(message);
+      setConfirmDelete(null);
     }
   };
 
@@ -703,8 +895,11 @@ export default function AppDashboard() {
 
   const handleCreateCoupon = async (data: any) => {
     try {
-      await addDoc(collection(db, 'coupons'), {
-        ...data,
+      const { id, ...couponData } = data;
+      const newRef = doc(collection(db, 'coupons'));
+      await setDoc(newRef, {
+        ...couponData,
+        id: newRef.id,
         createdAt: serverTimestamp(),
         active: true
       });
@@ -749,6 +944,42 @@ export default function AppDashboard() {
     } catch (err) {
       console.error('Upload error:', err);
       alert('Failed to upload image');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const storageRef = ref(storage, `assets/logo_${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, logo: url } });
+    } catch (err) {
+      console.error('Logo upload error:', err);
+      alert('Failed to upload logo');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFaviconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const storageRef = ref(storage, `assets/favicon_${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, favicon: url } });
+    } catch (err) {
+      console.error('Favicon upload error:', err);
+      alert('Failed to upload favicon');
     } finally {
       setIsUploading(false);
     }
@@ -815,6 +1046,118 @@ export default function AppDashboard() {
     }
   };
 
+  const handleUpdatePage = async (id: string | null, data: any) => {
+    try {
+      // Convert keywords string to array if it's a string
+      const processedData = {
+        ...data,
+        keywords: typeof data.keywords === 'string'
+          ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
+          : data.keywords
+      };
+
+      if (!id || id === 'new') {
+        const newRef = doc(collection(db, 'pages'));
+        await setDoc(newRef, { ...processedData, id: newRef.id, createdAt: serverTimestamp() });
+      } else {
+        await updateDoc(doc(db, 'pages', id), {
+          ...processedData,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setShowPageModal(false);
+      setEditingPage(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'pages');
+    }
+  };
+
+  const handleUpdateBlog = async (id: string | null, data: any) => {
+    try {
+      // Convert keywords string to array if it's a string
+      const processedData = {
+        ...data,
+        keywords: typeof data.keywords === 'string'
+          ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
+          : data.keywords
+      };
+
+      if (!id || id === 'new') {
+        const newRef = doc(collection(db, 'blogs'));
+        await setDoc(newRef, { ...processedData, id: newRef.id, createdAt: serverTimestamp() });
+      } else {
+        await updateDoc(doc(db, 'blogs', id), {
+          ...processedData,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setShowBlogModal(false);
+      setEditingBlog(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'blogs');
+    }
+  };
+
+  const handleDeletePage = (id: string) => {
+    setConfirmDelete({ id, type: 'page' });
+  };
+
+  const handleDuplicatePage = async (page: any) => {
+    try {
+      const newPage = {
+        ...page,
+        title: `${page.title} (Copy)`,
+        slug: `${page.slug}-copy-${Math.floor(Math.random() * 1000)}`,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      delete newPage.id;
+      await addDoc(collection(db, 'pages'), newPage);
+      alert('Page duplicated successfully!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'pages');
+    }
+  };
+
+  const handleDeleteBlog = (id: string) => {
+    setConfirmDelete({ id, type: 'blog' });
+  };
+
+  const handleDuplicateBlog = async (blog: any) => {
+    try {
+      const newBlog = {
+        ...blog,
+        title: `${blog.title} (Copy)`,
+        slug: `${blog.slug}-copy-${Math.floor(Math.random() * 1000)}`,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      delete newBlog.id;
+      await addDoc(collection(db, 'blogs'), newBlog);
+      alert('Blog post duplicated successfully!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'blogs');
+    }
+  };
+
+  const executeDeletePage = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'pages', id));
+      setConfirmDelete(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `pages/${id}`);
+    }
+  };
+
+  const executeDeleteBlog = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'blogs', id));
+      setConfirmDelete(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `blogs/${id}`);
+    }
+  };
+
   const handleUpdateVehicle = async (vehicleId: string, data: any) => {
     try {
       if (vehicleId === 'new') {
@@ -838,7 +1181,7 @@ export default function AppDashboard() {
     switch (activeTab) {
       case 'bookings':
         return (
-          <div className="space-y-6">
+          <div className="space-y-6 w-full">
             {/* Booking Stats Section */}
             {isAdmin && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1105,8 +1448,8 @@ export default function AppDashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAndSortedBookings.map((booking) => (
-                  <div key={booking.id} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+                {filteredAndSortedBookings.map((booking, idx) => (
+                  <div key={`${booking.id}-${idx}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
@@ -1115,7 +1458,7 @@ export default function AppDashboard() {
                             : 'N/A'}
                         </p>
                         <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors">
-                          {booking.guestName || 'Guest Customer'}
+                          {booking.customerName || 'Customer'}
                         </h3>
                       </div>
 
@@ -1164,28 +1507,73 @@ export default function AppDashboard() {
                       </span>
                     </div>
 
-                    <div className="space-y-3 mb-4">
+                    <div className="space-y-2">
                       <div className="flex items-start gap-3">
                         <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
                         <p className="text-xs text-white/70 truncate">{booking.pickup}</p>
                       </div>
                       <div className="flex items-start gap-3">
                         <MapPin size={12} className="text-gold shrink-0 mt-0.5" />
-                        <p className="text-xs text-white/70 truncate">{booking.dropoff}</p>
+                        <p className={cn("text-xs truncate", booking.dropoff ? "text-white/70" : "text-white/60 italic")}>
+                          {booking.dropoff || (booking.serviceType === 'hourly' ? 'No Drop Off (Optional)' : 'N/A')}
+                        </p>
                       </div>
 
-                      <div className="flex items-center justify-between mt-2">
-                        <div className="flex items-center gap-3">
-                          <Calendar size={12} className="text-gold" />
-                          <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.date}</span>
+                      {/* Date + Info */}
+                      <div className="space-y-3 pt-2 border-t border-white/5 pb-2">
+
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div className="flex items-center gap-2">
+                            <Calendar size={12} className="text-gold" />
+                            <span className="text-[10px] text-white/60 font-bold uppercase">
+                              {booking.date} at {formatTimeToAMPM(booking.time)}
+                            </span>
+                          </div>
+
+                          {booking.isReturn && (
+                            <div className="flex items-center gap-2">
+                              <RotateCcw size={12} className="text-blue-500" />
+                              <span className="text-[10px] text-white/60 font-bold uppercase">
+                                {booking.returnDate} at {formatTimeToAMPM(booking.returnTime)}
+                              </span>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <Clock size={12} className="text-gold" />
-                          <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{formatTimeToAMPM(booking.time)}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <Car size={12} className="text-gold" />
-                          <span className="text-[10px] text-white/60 font-bold uppercase tracking-tighter">{booking.vehicleType || 'Sedan'}</span>
+
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div className="flex items-center gap-1.5">
+                            <Navigation size={12} className="text-gold" />
+                            <span className="text-[10px] text-white/60 font-bold uppercase">
+                              {(() => {
+                                if (!booking.distance) return 'N/A';
+                                if (!booking.isReturn) return booking.distance;
+                                const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
+                                return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
+                              })()}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <Clock size={12} className="text-gold" />
+                            <span className="text-[10px] text-white/60 font-bold uppercase">
+                              {booking.serviceType === 'hourly' ? `${booking.hours} Hours` : (() => {
+                                if (!booking.duration) return 'N/A';
+                                if (!booking.isReturn) return booking.duration;
+                                const match = booking.duration.match(/(\d+)\s*min/);
+                                if (match) {
+                                  return `${parseInt(match[1]) * 2} mins`;
+                                }
+                                return booking.duration;
+                              })()}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <Car size={12} className="text-gold" />
+                            <span className="text-[10px] text-white/60 font-bold uppercase">
+                              {booking.vehicleType || 'Sedan'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1195,164 +1583,336 @@ export default function AppDashboard() {
                         <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Service</span>
                         <span className="text-[10px] text-gold font-bold truncate uppercase">{booking.serviceType || 'Standard'}</span>
                       </div>
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Distance</span>
-                        <span className="text-[10px] text-white/70 truncate">{booking.distance || 'N/A'}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">ETA</span>
-                        <span className="text-[10px] text-white/70 truncate">{booking.duration || 'N/A'}</span>
-                      </div>
-                    </div>
+                      <div className="flex flex-col relative">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Waypoints</span>
+                          {booking.waypoints?.length > 0 && (
+                            <button
+                              onMouseEnter={() => setShowWaypointsPopup(booking.id)}
+                              onMouseLeave={() => setShowWaypointsPopup(null)}
+                              className="text-gold/50 hover:text-gold transition-colors"
+                            >
+                              <Eye size={10} />
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-white/70 truncate">{booking.waypoints?.length || 0} Stops</span>
 
-                    <div className="grid grid-cols-2 gap-2 mb-4 py-3 border-b border-white/5">
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Gmail</span>
-                        <span className="text-[10px] text-white/70 truncate">{booking.guestEmail || 'N/A'}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Phone</span>
-                        <span className="text-[10px] text-white/70 truncate">{booking.guestPhone || 'N/A'}</span>
-                      </div>
-                    </div>
-
-                    {/* Driver & Feedback Section */}
-                    <div className="space-y-3 mb-4">
-                      {booking.driverId && booking.status !== 'completed' && (
-                        <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
-                                <UserLock size={12} className="text-blue-500" />
+                        <AnimatePresence>
+                          {showWaypointsPopup === booking.id && booking.waypoints?.length > 0 && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                              className="absolute bottom-full left-0 mb-2 w-48 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
+                            >
+                              <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Stop Details</p>
+                              <div className="space-y-2">
+                                {booking.waypoints.map((wp: string, i: number) => (
+                                  <div key={`wp-pop-${i}`} className="flex gap-2 items-start">
+                                    <div className="w-1 h-1 rounded-full bg-gold mt-1.5 shrink-0" />
+                                    <p className="text-[9px] text-white/70 leading-tight">{wp}</p>
+                                  </div>
+                                ))}
                               </div>
-                              <div>
-                                <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Assigned Driver</p>
-                                <div className="flex gap-2 items-center">
-                                  <p className="text-[10px] text-white font-bold">
-                                    {allUsers.find(u => u.id === booking.driverId)?.name || 'Unknown Driver'}
-                                  </p>
-                                  {(isAdmin && !isDriver) && (
-                                    <p className="text-[9px] text-gold font-bold">
-                                      {allUsers.find(u => u.id === booking.driverId)?.phone || 'No Contact'}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                      <div className="flex flex-col relative">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Extras</span>
+                          {booking.selectedExtras?.length > 0 && (
+                            <button
+                              onMouseEnter={() => setShowExtrasPopup(booking.id)}
+                              onMouseLeave={() => setShowExtrasPopup(null)}
+                              className="text-gold/50 hover:text-gold transition-colors"
+                            >
+                              <Eye size={10} />
+                            </button>
+                          )}
+
+                        </div>
+                        <span className="text-[10px] text-white/70 truncate">{booking.selectedExtras?.length || 0} Added</span>
+
+                        <AnimatePresence>
+                          {showExtrasPopup === booking.id && booking.selectedExtras?.length > 0 && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                              className="absolute bottom-full right-0 mb-2 w-40 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
+                            >
+                              <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Selected Extras</p>
+                              <div className="space-y-1">
+                                {booking.selectedExtras.map((id: string, index: number) => {
+                                  const extra = extras.find(e => e.id === id);
+                                  return (
+                                    <p key={`${id}-${index}`} className="text-[9px] text-white/70 font-bold uppercase tracking-tighter">
+                                      • {extra?.name || 'Extra'}
                                     </p>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+
+                    <div className="py-3 border-b border-white/5 mb-3 space-y-2">
+                      {/* Row 1: Email & Phone */}
+                      <div className="flex flex-wrap gap-x-6 gap-y-2">
+                        <div className="flex items-center gap-2 min-w-fit">
+                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Email:</span>
+                          <span className="text-[10px] text-white/70 whitespace-nowrap">{booking.customerEmail || 'N/A'}</span>
+                        </div>
+                        <div className="flex items-center gap-2 min-w-fit">
+                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Phone:</span>
+                          <span className="text-[10px] text-white/70 whitespace-nowrap">{booking.customerPhone || 'N/A'}</span>
+                        </div>
+                      </div>
+
+                      {/* Row 2: Flight Number & Notes */}
+                      <div className="flex flex-wrap gap-x-6 gap-y-2 items-center">
+                        {booking.flightNumber && (
+                          <div className="flex items-center gap-2 min-w-fit">
+                            <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Flight:</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-white/70 font-bold uppercase">{booking.flightNumber}</span>
+                              <a
+                                href={`https://www.melbourneairport.com.au/flights/departures/${booking.flightNumber}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gold hover:text-white transition-colors"
+                                title="View on Melbourne Airport website"
+                              >
+                                <Globe size={10} />
+                              </a>
+                            </div>
+                          </div>
+                        )}
+
+                        {booking.purpose && (
+                          <div className="flex items-center gap-2 relative flex-1 min-w-[120px]">
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Notes:</span>
+                              <button
+                                onMouseEnter={() => setShowNotesPopup(booking.id)}
+                                onMouseLeave={() => setShowNotesPopup(null)}
+                                className="text-gold/50 hover:text-gold transition-colors"
+                              >
+                                <Eye size={10} />
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-white/60 truncate italic">"{booking.purpose}"</p>
+
+                            <AnimatePresence>
+                              {showNotesPopup === booking.id && booking.purpose && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                  className="absolute bottom-full right-0 mb-2 w-48 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
+                                >
+                                  <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Additional Info</p>
+                                  <p className="text-[9px] text-white/70 leading-relaxed italic">"{booking.purpose}"</p>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-auto space-y-3">
+
+                      {/* Driver & Feedback Section */}
+                      <div className="space-y-3 mb-3">
+                        {booking.status !== "completed" && (
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <div className="flex justify-between items-center">
+
+                              {/* Left side: Status badge + Driver details */}
+                              <div className="flex items-center gap-2">
+                                {/* Status badge (icon only) */}
+                                <div
+                                  className={cn(
+                                    "w-6 h-6 rounded-full flex items-center justify-center",
+                                    !booking.driverId
+                                      ? "bg-red-500/20"
+                                      : booking.status === "accepted"
+                                        ? "bg-cyan-500/20"
+                                        : booking.status === "rejected"
+                                          ? "bg-pink-400/20"
+                                          : "bg-purple-500/20"
+                                  )}
+                                >
+                                  {!booking.driverId ? (
+                                    <X size={12} className="text-red-500" />
+                                  ) : booking.status === "accepted" ? (
+                                    <UserCheck size={12} className="text-cyan-500" />
+                                  ) : booking.status === "rejected" ? (
+                                    <X size={12} className="text-pink-400" />
+                                  ) : (
+                                    <Truck size={12} className="text-purple-400" />
+                                  )}
+                                </div>
+
+                                {/* Driver info */}
+                                <div>
+                                  <p className="text-[8px] uppercase tracking-widest font-bold">
+                                    <span className="text-white/50">Driver: </span>{" "}
+                                    <span
+                                      className={cn(
+                                        !booking.driverId
+                                          ? "text-red-500"
+                                          : booking.status === "accepted"
+                                            ? "text-cyan-500/75"
+                                            : booking.status === "rejected"
+                                              ? "text-pink-400/75"
+                                              : "text-purple-400/75"
+                                      )}
+                                    >
+                                      {!booking.driverId
+                                        ? "Unassigned"
+                                        : booking.status === "accepted"
+                                          ? "Accepted"
+                                          : booking.status === "rejected"
+                                            ? "Rejected"
+                                            : "Assigned"}
+                                    </span>
+                                  </p>
+
+                                  <div className="flex gap-2 items-center">
+                                    <p className="text-[10px] text-white font-bold">
+                                      {booking.driverId ? (allUsers.find(u => u.id === booking.driverId)?.name || "Unknown Driver") : "No Driver Assigned"}
+                                    </p>
+                                    {(isAdmin && !isDriver && booking.driverId) && (
+                                      <p className="text-[9px] text-gold font-bold">
+                                        {allUsers.find(u => u.id === booking.driverId)?.phone || "No Contact"}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Right side: Route button */}
+                              <div>
+                                <button
+                                  onClick={() => {
+                                    setRouteBooking(booking);
+                                    setMapDirections(null);
+                                    setIsMapLoading(true);
+                                    setShowRouteModal(true);
+                                  }}
+                                  className="flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-red-500/20 via-green-500/20 to-blue-500/20 border border-green-500/30 rounded-md hover:from-red-500/30 hover:via-green-500/30 hover:to-blue-500/30 transition-all text-[9px] font-bold uppercase tracking-widest"
+                                >
+                                  <Route
+                                    size={12}
+                                    className="text-blue-500"
+                                  />
+                                  Route
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {booking.status === 'completed' && (
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/20 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
+                                  <Star size={12} className={cn(booking.rating ? "text-gold fill-gold" : "text-white/20")} />
+                                </div>
+                                <div>
+                                  <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">
+                                    Feedback for <span className="text-blue-500">{allUsers.find(u => u.id === booking.driverId)?.name || 'Driver'}</span>
+                                  </p>
+                                  {booking.rating ? (
+                                    <div className="flex items-center gap-0.5">
+                                      {[1, 2, 3, 4, 5].map((s) => (
+                                        <Star
+                                          key={s}
+                                          size={8}
+                                          className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
+                                        />
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-[9px] text-white/40 font-bold uppercase">Not Rated Yet</p>
                                   )}
                                 </div>
                               </div>
-                            </div>
-                            {booking.status === 'accepted' ? (
-                              <div className="flex items-center gap-1 text-cyan-500">
-                                <UserCheck size={10} />
-                                <span className="text-[9px] font-bold uppercase">Accepted</span>
-                              </div>
-                            ) : booking.status === 'rejected' ? (
-                              <div className="flex items-center gap-1 text-pink-400">
-                                <X size={10} />
-                                <span className="text-[9px] font-bold uppercase">Rejected</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1 text-gold">
-                                <Clock size={10} />
-                                <span className="text-[9px] font-bold uppercase">Request ?</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {booking.status === 'completed' && (
-                        <div className="p-3 bg-white/5 rounded-xl border border-white/20 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center">
-                                <Star size={12} className={cn(booking.rating ? "text-gold fill-gold" : "text-white/20")} />
-                              </div>
-                              <div>
-                                <p className="text-[8px] uppercase tracking-widest text-gold/40 font-bold">
-                                  Feedback for <span className="text-blue-500">{allUsers.find(u => u.id === booking.driverId)?.name || 'Driver'}</span>
-                                </p>
-                                {booking.rating ? (
-                                  <div className="flex items-center gap-0.5">
-                                    {[1, 2, 3, 4, 5].map((s) => (
-                                      <Star
-                                        key={s}
-                                        size={8}
-                                        className={cn(s <= booking.rating ? "text-gold fill-gold" : "text-white/10")}
-                                      />
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-[9px] text-white/40 font-bold uppercase">Not Rated Yet</p>
+                              <div className="flex items-center gap-2">
+                                {booking.rating && <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>}
+                                {!isAdmin && !isDriver && (
+                                  <button
+                                    onClick={() => {
+                                      setRatingBooking(booking);
+                                      setRatingValue(booking.rating || 0);
+                                      setRatingComment(booking.ratingComment || '');
+                                    }}
+                                    className="p-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg text-gold transition-all"
+                                    title={booking.rating ? "Edit Rating" : "Rate Now"}
+                                  >
+                                    <Edit2 size={10} />
+                                  </button>
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              {booking.rating && <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>}
-                              {!isAdmin && !isDriver && (
-                                <button
-                                  onClick={() => {
-                                    setRatingBooking(booking);
-                                    setRatingValue(booking.rating || 0);
-                                    setRatingComment(booking.ratingComment || '');
-                                  }}
-                                  className="p-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg text-gold transition-all"
-                                  title={booking.rating ? "Edit Rating" : "Rate Now"}
-                                >
-                                  <Edit2 size={10} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          {booking.ratingComment && (
-                            <div className="mt-2">
-                              <p className={cn(
-                                "text-[10px] text-white/60 leading-relaxed italic",
-                                !expandedFeedback.includes(booking.id) && "line-clamp-2"
-                              )}>
-                                "{booking.ratingComment}"
-                              </p>
-                              {booking.ratingComment.length > 60 && (
-                                <button
-                                  onClick={() => setExpandedFeedback(prev =>
-                                    prev.includes(booking.id)
-                                      ? prev.filter(id => id !== booking.id)
-                                      : [...prev, booking.id]
-                                  )}
-                                  className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
-                                >
-                                  {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    < div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4" >
-                      <div className="flex flex-col">
-                        <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-display text-gold">${booking.price}</span>
-                          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
-                            {booking.paymentMethod === 'cash' ? (
-                              <DollarSign size={10} className="text-gold" />
-                            ) : (
-                              <CreditCard size={10} className="text-gold" />
+                            {booking.ratingComment && (
+                              <div className="mt-2">
+                                <p className={cn(
+                                  "text-[10px] text-white/60 leading-relaxed italic",
+                                  !expandedFeedback.includes(booking.id) && "line-clamp-2"
+                                )}>
+                                  "{booking.ratingComment}"
+                                </p>
+                                {booking.ratingComment.length > 60 && (
+                                  <button
+                                    onClick={() => setExpandedFeedback(prev =>
+                                      prev.includes(booking.id)
+                                        ? prev.filter(id => id !== booking.id)
+                                        : [...prev, booking.id]
+                                    )}
+                                    className="text-[9px] text-gold font-bold uppercase mt-1 hover:underline"
+                                  >
+                                    {expandedFeedback.includes(booking.id) ? 'Show Less' : 'View Full Feedback'}
+                                  </button>
+                                )}
+                              </div>
                             )}
-                            <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      < div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4" >
+                        <div className="flex flex-col">
+                          <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-display text-gold">${booking.price}</span>
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
+                              {booking.paymentMethod === 'cash' ? (
+                                <DollarSign size={10} className="text-gold" />
+                              ) : (
+                                <CreditCard size={10} className="text-gold" />
+                              )}
+                              <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
+                            </div>
                           </div>
                         </div>
+                        <div className="text-right">
+                          <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
+                          <p className="text-[10px] font-bold text-white uppercase">{booking.paymentStatus}</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
-                        <p className="text-[10px] font-bold text-white uppercase">{booking.paymentStatus}</p>
-                      </div>
-                    </div>
 
-                    <div className="space-y-2">
-                      {isAdmin && (
-                        <div className="flex flex-col gap-3">
-                          <div className="flex items-center gap-2 w-full">
+                      <div className="space-y-2">
+                        {/* Admin-only quick actions (Confirm/Assign) */}
+                        {isAdmin && (
+                          <div className="flex items-center gap-2 w-full mb-2">
                             {booking.status === 'pending' && (
                               <button
                                 onClick={() => updateBookingStatus(booking.id, 'confirmed')}
@@ -1378,119 +1938,104 @@ export default function AppDashboard() {
                                   value={booking.driverId || ''}
                                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
                                 >
-                                  <option value="" className="bg-black">Assign</option>
-                                  {drivers.map((driver) => (
-                                    <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
+                                  <option value="" className="bg-black">Assign Driver</option>
+                                  {drivers.map((driver, dIdx) => (
+                                    <option key={`${driver.id}-${dIdx}`} value={driver.id} className="bg-black">{driver.name}</option>
                                   ))}
                                 </select>
                                 <User size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white pointer-events-none" />
                               </div>
                             )}
-
-                            <div className={cn(
-                              "flex items-center gap-2",
-                              (booking.status === 'cancelled' || booking.status === 'completed') ? "w-full" : "shrink-0"
-                            )}>
-                              <button
-                                onClick={() => {
-                                  setViewingBooking(booking);
-                                  setShowViewModal(true);
-                                }}
-                                className={cn(
-                                  "p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2",
-                                  (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
-                                )}
-                                title="View Details"
-                              >
-                                <Eye size={16} />
-                                {(booking.status === 'cancelled' || booking.status === 'completed') && (
-                                  <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
-                                )}
-                              </button>
-
-                              <button
-                                onClick={() => {
-                                  setEditingBooking(booking);
-                                  setShowBookingModal(true);
-                                }}
-                                className={cn(
-                                  "p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2",
-                                  (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
-                                )}
-                                title="Edit Booking"
-                              >
-                                <Edit2 size={16} />
-                                {(booking.status === 'cancelled' || booking.status === 'completed') && (
-                                  <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
-                                )}
-                              </button>
-
-                              <button
-                                onClick={() => handleDeleteBooking(booking.id)}
-                                className={cn(
-                                  "p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2",
-                                  (booking.status === 'cancelled' || booking.status === 'completed') ? "flex-1" : "aspect-square"
-                                )}
-                                title="Delete Booking"
-                              >
-                                <Trash2 size={16} />
-                                {(booking.status === 'cancelled' || booking.status === 'completed') && (
-                                  <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
-                                )}
-                              </button>
-                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {isDriver && booking.driverId === user.uid && (
-                        <div className="space-y-2">
-                          {booking.status === 'assigned' && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                onClick={() => updateBookingStatus(booking.id, 'accepted')}
-                                className="bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
-                              >
-                                Accept Ride
-                              </button>
-                              <button
-                                onClick={() => updateBookingStatus(booking.id, 'rejected')}
-                                className="bg-red-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
-                              >
-                                Reject Ride
-                              </button>
-                            </div>
-                          )}
-                          {booking.status === 'accepted' && (
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => updateBookingStatus(booking.id, 'completed')}
-                                className="flex-1 bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
-                              >
-                                Complete Ride
-                              </button>
+                        {/* General actions: View, Edit, Delete (Admin or Customer, NOT Driver) */}
+                        {(isAdmin || (!isDriver && booking.userId === user?.uid)) && (
+                          <div className="flex items-center gap-2 w-full">
+                            <button
+                              onClick={() => {
+                                setViewingBooking(booking);
+                                setShowViewModal(true);
+                              }}
+                              className="flex-1 p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2"
+                              title="View Details"
+                            >
+                              <Eye size={16} />
+                              <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setEditingBooking(booking);
+                                setShowBookingModal(true);
+                              }}
+                              className="flex-1 p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2"
+                              title="Edit Booking"
+                            >
+                              <Edit2 size={16} />
+                              <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteBooking(booking.id)}
+                              className="flex-1 p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"
+                              title="Delete Booking"
+                            >
+                              <Trash2 size={16} />
+                              <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {isDriver && booking.driverId === user.uid && (
+                          <div className="space-y-2">
+                            {booking.status === 'assigned' && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'accepted')}
+                                  className="bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
+                                >
+                                  Accept Ride
+                                </button>
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'rejected')}
+                                  className="bg-red-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
+                                >
+                                  Reject Ride
+                                </button>
+                              </div>
+                            )}
+                            {booking.status === 'accepted' && (
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'completed')}
+                                  className="flex-1 bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
+                                >
+                                  Complete Ride
+                                </button>
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'assigned')}
+                                  className="flex-1 bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
+                                >
+                                  UnAccept Ride
+                                </button>
+                              </div>
+                            )}
+                            {booking.status === 'rejected' && (
                               <button
                                 onClick={() => updateBookingStatus(booking.id, 'assigned')}
-                                className="flex-1 bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
+                                className="w-full bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
                               >
-                                UnAccept Ride
+                                Unreject Ride
                               </button>
-                            </div>
-                          )}
-                          {booking.status === 'rejected' && (
-                            <button
-                              onClick={() => updateBookingStatus(booking.id, 'assigned')}
-                              className="w-full bg-white/10 text-white border border-white/20 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-all"
-                            >
-                              Unreject Ride
-                            </button>
-                          )}
-                        </div>
-                      )}
+                            )}
+                          </div>
+                        )}
 
-                      {!isAdmin && !isDriver && booking.status === 'completed' && !booking.rating && (
-                        <div className="h-0 overflow-hidden" />
-                      )}
+                        {!isAdmin && !isDriver && booking.status === 'completed' && !booking.rating && (
+                          <div className="h-0 overflow-hidden" />
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -1642,13 +2187,17 @@ export default function AppDashboard() {
         );
       case 'users':
         if (!isAdmin) return null;
-        const filteredUsers = allUsers.filter(u =>
-          u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          u.role?.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+        const filteredUsers = allUsers.filter(u => {
+          const matchesSearch = (
+            u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            u.role?.toLowerCase().includes(searchQuery.toLowerCase())
+          );
+          const matchesRole = userRoleFilter === 'all' || u.role === userRoleFilter;
+          return matchesSearch && matchesRole;
+        });
         return (
-          <div className="space-y-8">
+          <div className="space-y-8 w-full">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
               {/* Row 1: Heading */}
               <div>
@@ -1658,17 +2207,17 @@ export default function AppDashboard() {
                 </p>
               </div>
 
-              {/* Row 2: Search + Add User */}
-              <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+              {/* Row 2: Search + Role Filter + Add User */}
+              <div className="flex flex-row items-center gap-3 w-full md:w-auto">
                 {/* Search input */}
-                <div className="relative flex-1 min-w-[200px]">
+                <div className="relative flex-1 md:w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
                   <input
                     type="text"
                     placeholder="Search users..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2.5 text-xs text-white outline-none focus:border-gold transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -1680,16 +2229,31 @@ export default function AppDashboard() {
                   )}
                 </div>
 
+                {/* Role Filter Dropdown */}
+                <div className="relative shrink-0">
+                  <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                  <select
+                    value={userRoleFilter}
+                    onChange={(e) => setUserRoleFilter(e.target.value)}
+                    className="appearance-none bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2.5 text-[10px] font-bold uppercase tracking-widest text-white outline-none focus:border-gold transition-all cursor-pointer"
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="admin">Admins</option>
+                    <option value="driver">Drivers</option>
+                    <option value="customer">Customers</option>
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" size={12} />
+                </div>
+
                 {/* Add User button */}
                 <button
                   onClick={() => {
                     setEditingUser({ role: 'customer', name: '', email: '', phone: '' });
                     setShowUserModal(true);
                   }}
-                  className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                  className="btn-primary px-6 py-2.5 flex items-center justify-center gap-2 shrink-0"
                 >
                   <UserPlus size={18} />
-                  {/* Hide text on mobile, show on md+ */}
                   <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
                     Add User
                   </span>
@@ -1698,8 +2262,8 @@ export default function AppDashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredUsers.map((u) => (
-                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+              {filteredUsers.map((u, idx) => (
+                <div key={`${u.id}-${idx}`} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
                   <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-4">
                       <div
@@ -1784,22 +2348,27 @@ export default function AppDashboard() {
             </div>
           </div>
         );
+      case 'cms':
+        return null;
       case 'management':
         if (!isAdmin) return null;
         return (
-          <div className="space-y-4">
-            <div className="flex items-center gap-4 border-b border-white/5 p-1 bg-white/5 rounded-lg">
+          <div className="space-y-4 w-full">
+            <div className="flex items-center justify-between w-full border-b border-white/5 p-1 bg-white/5 rounded-lg">
               {[
                 { id: 'fleet', label: 'Fleet', icon: Truck },
                 { id: 'extras', label: 'Extras', icon: Plus },
                 { id: 'coupons', label: 'Coupons', icon: Percent },
-                { id: 'booking-mgmt', label: 'Booking', icon: CalendarCog },
+                { id: 'settings', label: 'Settings', icon: Cog },
+                { id: 'pages', label: 'Pages', icon: LayoutGrid },
+                { id: 'blogs', label: 'Blogs', icon: Edit2 },
+                { id: 'global-seo', label: 'Global SEO', icon: Globe },
               ].map((sub) => (
                 <button
                   key={sub.id}
                   onClick={() => setActiveSubTab(sub.id)}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
+                    "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
                     activeSubTab === sub.id
                       ? "bg-gold text-black"
                       : "text-white/40 hover:text-white hover:bg-white/5"
@@ -1894,6 +2463,16 @@ export default function AppDashboard() {
                           </div>
                         </div>
                         <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingVehicle({ ...v, id: 'new' });
+                              setShowVehicleModal(true);
+                            }}
+                            className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                            title="Duplicate"
+                          >
+                            <Copy size={18} />
+                          </button>
                           <button
                             onClick={() => {
                               setEditingVehicle(v);
@@ -1994,6 +2573,16 @@ export default function AppDashboard() {
                       <p className="text-xs text-white/60 mb-6 line-clamp-2">{e.description}</p>
 
                       <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingExtra({ ...e, id: 'new' });
+                            setShowExtraModal(true);
+                          }}
+                          className="p-2 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                          title="Duplicate"
+                        >
+                          <Copy size={14} />
+                        </button>
                         <button
                           onClick={() => {
                             setEditingExtra(e);
@@ -2136,6 +2725,17 @@ export default function AppDashboard() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => {
+                            const { id, ...couponData } = c;
+                            setEditingCoupon({ ...couponData, code: c.code + '-COPY' });
+                            setShowCouponModal(true);
+                          }}
+                          className="p-2 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                          title="Duplicate"
+                        >
+                          <Copy size={14} />
+                        </button>
+                        <button
+                          onClick={() => {
                             setEditingCoupon(c);
                             setShowCouponModal(true);
                           }}
@@ -2159,218 +2759,789 @@ export default function AppDashboard() {
               </div>
             )}
 
-            {activeSubTab === 'booking-mgmt' && (
+            {activeSubTab === 'settings' && (
               <div className="space-y-8">
                 <div className="glass p-6 md:p-8 rounded-3xl border border-white/5 w-full">
                   {/* Booking Configuration header row with Save button */}
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-display text-gold uppercase tracking-widest">
-                      Booking Configuration
-                    </h3>
+                  <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
+                    <div>
+                      <h3 className="text-xl font-display text-gold uppercase tracking-widest">
+                        Website & Booking Configuration Settings
+                      </h3>
+                      <p className="text-[10px] text-white/40 uppercase tracking-widest mt-1">
+                        Manage pricing visibility, labels, and financial rules
+                      </p>
+                    </div>
 
                     <button
                       onClick={() => handleUpdateSettings(systemSettings)}
                       disabled={isSavingSettings}
                       className={cn(
-                        "bg-gold text-black rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2",
-                        "hover:bg-white",
+                        "bg-gold text-black rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-gold/20",
+                        "hover:bg-white hover:shadow-white/20",
                         "w-auto py-2 px-4 md:py-3 md:px-6"
                       )}
                     >
-                      {/* Icon always visible */}
                       {isSavingSettings ? (
                         <Loader2 className="h-4 w-4 animate-spin text-black" />
                       ) : (
                         <Save className="h-4 w-4 text-black" />
                       )}
 
-                      {/* Text label only on desktop */}
                       <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
-                        {isSavingSettings ? "Saving..." : "Save Settings"}
+                        {isSavingSettings ? "Saving..." : "Save All Settings"}
                       </span>
                     </button>
                   </div>
-                  {/* Responsive two-column layout */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Price Component Visibility */}
-                    <div className="space-y-4">
-                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
-                        Price Component Visibility
-                      </h4>
 
-                      {/* Gross Price (always enabled) */}
-                      <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-gold">
-                        <div>
-                          <p className="text-sm font-bold">Show Gross Price (Always Enabled)</p>
-                          <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                            Final total price
-                          </p>
+                  {/* Main Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                    {/* Left Column: Visibility & Financial */}
+                    <div className="space-y-10">
+                      {/* Price Component Visibility */}
+                      <div className="space-y-6">
+                        <div className="flex items-center gap-2">
+                          <Eye size={16} className="text-gold" />
+                          <h4 className="text-sm font-bold text-white uppercase tracking-widest">
+                            Price Visibility
+                          </h4>
                         </div>
-                        <button
-                          disabled
-                          className="w-12 h-6 rounded-full transition-all relative bg-gold"
-                        >
-                          <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white transition-all" />
-                        </button>
-                      </div>
 
-                      {/* Show Price Breakdown toggle + pills inside */}
-                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-bold">Show Price Breakdown</p>
-                            <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                              Enable detailed pricing options
-                            </p>
-                          </div>
-                          <button
-                            onClick={() =>
-                              setSystemSettings({
-                                ...systemSettings,
-                                showPriceBreakdown: !systemSettings?.showPriceBreakdown,
-                              })
-                            }
-                            className={cn(
-                              "w-12 h-6 rounded-full transition-all relative",
-                              systemSettings?.showPriceBreakdown ? "bg-gold" : "bg-white/10"
-                            )}
-                          >
-                            <div
+                        <div className="space-y-4">
+                          {/* Gross Price toggle */}
+                          <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-white/20 transition-all">
+                            <div>
+                              <p className="text-sm font-bold">Show Gross Price</p>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                Display subtotal before discounts
+                              </p>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  showGrossPrice: !systemSettings?.showGrossPrice,
+                                })
+                              }
                               className={cn(
-                                "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                                systemSettings?.showPriceBreakdown ? "right-1" : "left-1"
+                                "w-12 h-6 rounded-full transition-all relative",
+                                systemSettings?.showGrossPrice !== false ? "bg-gold" : "bg-white/10"
                               )}
-                            />
-                          </button>
-                        </div>
+                            >
+                              <div
+                                className={cn(
+                                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                  systemSettings?.showGrossPrice !== false ? "right-1" : "left-1"
+                                )}
+                              />
+                            </button>
+                          </div>
 
-                        {/* Pills appear inside same div when enabled */}
-                        {systemSettings?.showPriceBreakdown && (
-                          <div className="flex flex-wrap gap-2">
-                            {[
-                              { id: "showBasePrice", label: "Base Price" },
-                              { id: "showDistancePrice", label: "Distance/Hour Price" },
-                              { id: "showExtrasPrice", label: "Extras Price" },
-                              { id: "showTax", label: "Tax" },
-                              { id: "showDiscount", label: "Discount" },
-                              { id: "showNetPrice", label: "Net Price" },
-                              { id: "showStripeFees", label: "Stripe Fees" },
-                            ].map((pill) => (
+                          {/* Show Price Breakdown toggle + pills inside */}
+                          <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-4 hover:border-white/20 transition-all">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-bold">Detailed Price Breakdown</p>
+                                <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                  Enable granular pricing component visibility
+                                </p>
+                              </div>
                               <button
-                                key={pill.id}
                                 onClick={() =>
                                   setSystemSettings({
                                     ...systemSettings,
-                                    [pill.id]: !systemSettings?.[pill.id],
+                                    showPriceBreakdown: !systemSettings?.showPriceBreakdown,
                                   })
                                 }
                                 className={cn(
-                                  "text-[10px] px-3 py-1 rounded-lg font-bold tracking-widest transition-all",
-                                  systemSettings?.[pill.id]
-                                    ? "bg-green-600 text-white"
-                                    : "bg-red-500/10 text-white hover:bg-red-500/30"
+                                  "w-12 h-6 rounded-full transition-all relative",
+                                  systemSettings?.showPriceBreakdown ? "bg-gold" : "bg-white/10"
                                 )}
                               >
-                                {pill.label}
+                                <div
+                                  className={cn(
+                                    "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                    systemSettings?.showPriceBreakdown ? "right-1" : "left-1"
+                                  )}
+                                />
                               </button>
-                            ))}
+                            </div>
+
+                            {/* Pills appear inside same div when enabled */}
+                            {systemSettings?.showPriceBreakdown && (
+                              <div className="pt-4 border-t border-white/5">
+                                <p className="text-[9px] uppercase tracking-widest font-bold text-white/30 mb-3">Toggle Components:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {[
+                                    { id: "showBasePrice", label: "Base Price" },
+                                    { id: "showDistancePrice", label: "Distance/Hour Price" },
+                                    { id: "showWaypointPrice", label: "Waypoint Price" },
+                                    { id: "showExtrasPrice", label: "Extras Price" },
+                                    { id: "showTax", label: "Tax" },
+                                    { id: "showDiscount", label: "Discount" },
+                                    { id: "showNetPrice", label: "Net Price" },
+                                    { id: "showStripeFees", label: "Stripe Fees" },
+                                    { id: "showTotalPrice", label: "Total Price" },
+                                  ].map((pill) => (
+                                    <button
+                                      key={pill.id}
+                                      onClick={() =>
+                                        setSystemSettings({
+                                          ...systemSettings,
+                                          [pill.id]: systemSettings?.[pill.id] === false ? true : false,
+                                        })
+                                      }
+                                      className={cn(
+                                        "text-[9px] px-3 py-1.5 rounded-lg font-bold tracking-widest transition-all border",
+                                        systemSettings?.[pill.id] !== false
+                                          ? "bg-gold/20 text-gold border-gold/30"
+                                          : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
+                                      )}
+                                    >
+                                      {pill.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
+                      </div>
+
+                      {/* Financial Settings */}
+                      <div className="space-y-6">
+                        <div className="flex items-center gap-2">
+                          <DollarSign size={16} className="text-gold" />
+                          <h4 className="text-sm font-bold text-white uppercase tracking-widest">
+                            Financial Rules
+                          </h4>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                              Tax Percentage (%)
+                            </label>
+                            <input
+                              type="number"
+                              value={systemSettings?.taxPercentage || 0}
+                              onChange={(e) =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  taxPercentage: parseFloat(e.target.value),
+                                })
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                              Stripe Fee (%)
+                            </label>
+                            <input
+                              type="number"
+                              value={systemSettings?.stripeFeePercentage || 2.9}
+                              onChange={(e) =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  stripeFeePercentage: parseFloat(e.target.value),
+                                })
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                              Waypoint Price ($)
+                            </label>
+                            <input
+                              type="number"
+                              value={systemSettings?.waypointPrice || 0}
+                              onChange={(e) =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  waypointPrice: parseFloat(e.target.value),
+                                })
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                              Waypoint Limit
+                            </label>
+                            <input
+                              type="number"
+                              value={systemSettings?.waypointLimit || 5}
+                              onChange={(e) =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  waypointLimit: parseInt(e.target.value),
+                                })
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                              Limit to Country (ISO)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. AU, US"
+                              value={systemSettings?.limitCountry || ""}
+                              onChange={(e) =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  limitCountry: e.target.value.toUpperCase(),
+                                })
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                              Limit to City
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Melbourne"
+                              value={systemSettings?.limitCity || ""}
+                              onChange={(e) =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  limitCity: e.target.value,
+                                })
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Distance Calculation Settings (Moved here) */}
+                      <div className="space-y-6 pt-6 border-t border-white/5">
+                        <div className="flex items-center gap-2">
+                          <Navigation size={16} className="text-gold" />
+                          <h4 className="text-sm font-bold text-white uppercase tracking-widest">
+                            Distance Calculation
+                          </h4>
+                        </div>
+
+                        <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-6">
+                          <div className="space-y-3">
+                            <div>
+                              <p className="text-sm font-bold">Calculation Type</p>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                How distance price is calculated
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setSystemSettings({ ...systemSettings, distanceCalculationType: 'type1' })}
+                                className={cn(
+                                  "flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
+                                  systemSettings?.distanceCalculationType !== 'type2'
+                                    ? "bg-gold text-black border-gold"
+                                    : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
+                                )}
+                              >
+                                Type 1 (Range)
+                              </button>
+                              <button
+                                onClick={() => setSystemSettings({ ...systemSettings, distanceCalculationType: 'type2' })}
+                                className={cn(
+                                  "flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
+                                  systemSettings?.distanceCalculationType === 'type2'
+                                    ? "bg-gold text-black border-gold"
+                                    : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
+                                )}
+                              >
+                                Type 2 (Cumulative)
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                            <div>
+                              <p className="text-sm font-bold">Show Distance Eye Icon</p>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                Allow users to see breakdown on booking
+                              </p>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  showDistanceEyeIcon: !systemSettings?.showDistanceEyeIcon,
+                                })
+                              }
+                              className={cn(
+                                "w-12 h-6 rounded-full transition-all relative",
+                                systemSettings?.showDistanceEyeIcon ? "bg-gold" : "bg-white/10"
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                  systemSettings?.showDistanceEyeIcon ? "right-1" : "left-1"
+                                )}
+                              />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Financial Settings */}
+                    {/* Right Column: Label Customization */}
                     <div className="space-y-6">
-                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
-                        Financial Settings
-                      </h4>
+                      <div className="flex items-center gap-2">
+                        <Edit2 size={16} className="text-gold" />
+                        <h4 className="text-sm font-bold text-white uppercase tracking-widest">
+                          Label Customization
+                        </h4>
+                      </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="glass p-6 rounded-2xl border border-white/5 space-y-6">
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold border-b border-white/5 pb-2">
+                          Customize how price components are named in the UI
+                        </p>
+                        <div className="grid grid-cols-1 gap-6">
+                          {[
+                            { id: 'labelBasePrice', label: 'Base Price Label', default: 'Base Fare' },
+                            { id: 'labelDistancePrice', label: 'Distance Price Label', default: 'Distance Charge' },
+                            { id: 'labelWaypointPrice', label: 'Waypoint Price Label', default: 'Waypoints' },
+                            { id: 'labelExtrasPrice', label: 'Extras Label', default: 'Extras' },
+                            { id: 'labelTax', label: 'Tax Label', default: 'Tax' },
+                            { id: 'labelDiscount', label: 'Discount Label', default: 'Discount' },
+                            { id: 'labelNetPrice', label: 'Net Price Label', default: 'Net Price' },
+                            { id: 'labelGrossPrice', label: 'Gross Price Label', default: 'Gross Price' },
+                            { id: 'labelStripeFees', label: 'Stripe Fees Label', default: 'Stripe Fees' },
+                            { id: 'labelTotalPrice', label: 'Total Price Label', default: 'Total Price' },
+                          ].map((item) => (
+                            <div key={item.id} className="space-y-2">
+                              <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
+                                {item.label}
+                              </label>
+                              <input
+                                type="text"
+                                value={systemSettings?.[item.id] || item.default}
+                                onChange={(e) =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    [item.id]: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                                placeholder={item.default}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'pages' && (
+              <div className="space-y-8">
+                {/* System Pages Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Settings2 size={16} className="text-gold" />
+                    <h4 className="text-sm font-bold text-white uppercase tracking-widest">System Pages</h4>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                      { title: 'Home', slug: 'home' },
+                      { title: 'Fleet', slug: 'fleet' },
+                      { title: 'Services', slug: 'services' },
+                      { title: 'About Us', slug: 'about' },
+                      { title: 'Contact', slug: 'contact' },
+                      { title: 'Booking', slug: 'booking' },
+                      { title: 'Offers', slug: 'offers' },
+                      { title: 'Tours', slug: 'tours' }
+                    ].map(sysPage => {
+                      const existing = pages.find(p => p.slug === sysPage.slug);
+                      return (
+                        <div key={sysPage.slug} className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group">
+                          <div>
+                            <p className="text-xs font-bold text-white group-hover:text-gold transition-colors">{sysPage.title}</p>
+                            <p className="text-[8px] text-white/40 uppercase tracking-widest">/{sysPage.slug === 'home' ? '' : sysPage.slug}</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (existing) {
+                                setEditingPage(existing);
+                              } else {
+                                setEditingPage({ title: sysPage.title, slug: sysPage.slug, content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                              }
+                              setShowPageModal(true);
+                            }}
+                            className={cn(
+                              "p-2 rounded-lg transition-all",
+                              existing ? "bg-gold/10 text-gold hover:bg-gold hover:text-black" : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
+                            )}
+                            title={existing ? "Edit SEO" : "Setup SEO"}
+                          >
+                            {existing ? <Edit2 size={14} /> : <Plus size={14} />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t border-white/5 pt-8">
+                  <div className="flex justify-between items-center mb-6">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Dynamic Pages</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage custom landing pages</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <button
+                        onClick={() => setShowGlobalPageCssModal(true)}
+                        className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
+                      >
+                        <Code size={14} />
+                        Global CSS
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                          setShowPageModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                      >
+                        <Plus size={18} />
+                        <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).length > 0 ?
+                      pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).map((page, idx) => (
+                        <div key={`${page.id}-${idx}`} className="glass p-6 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-gold/30 transition-all">
+                          <div>
+                            <h4 className="text-lg font-bold text-white mb-1">{page.title}</h4>
+                            <p className="text-xs text-gold mb-2">/{page.slug}</p>
+                            <div className="flex gap-3">
+                              <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
+                                {page.noindex ? 'No Index' : 'Index'}
+                              </span>
+                              <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.includeInSitemap ? "bg-blue-500/10 text-blue-400" : "bg-white/5 text-white/40")}>
+                                {page.includeInSitemap ? 'In Sitemap' : 'Hidden'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Link
+                              to={`/${page.slug}`}
+                              target="_blank"
+                              className="p-3 bg-white/5 text-white/60 rounded-xl hover:bg-white/10 hover:text-white transition-all"
+                            >
+                              <Eye size={18} />
+                            </Link>
+                            <button
+                              onClick={() => handleDuplicatePage(page)}
+                              className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
+                              title="Duplicate"
+                            >
+                              <Copy size={18} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingPage(page);
+                                setShowPageModal(true);
+                              }}
+                              className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePage(page.id)}
+                              className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="text-center py-16 bg-white/5 rounded-3xl border border-dashed border-white/10">
+                          <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <LayoutGrid size={32} className="text-gold/40" />
+                          </div>
+                          <h4 className="text-lg font-display text-white mb-2">No Pages Found</h4>
+                          <p className="text-white/40 text-sm mb-8 max-w-xs mx-auto">You haven't created any custom landing pages yet. Start by adding your first one.</p>
+                          <button
+                            onClick={() => {
+                              setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                              setShowPageModal(true);
+                            }}
+                            className="px-6 py-3 bg-gold text-black rounded-xl font-bold uppercase tracking-widest text-[10px] hover:bg-white transition-all"
+                          >
+                            Create First Page
+                          </button>
+                        </div>
+                      )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'blogs' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Blog Posts</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your journal articles</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => setShowGlobalBlogCssModal(true)}
+                      className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
+                    >
+                      <Code size={14} />
+                      Global CSS
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                        setShowBlogModal(true);
+                      }}
+                      className="btn-primary px-6 py-2 flex items-center gap-2"
+                    >
+                      <Plus size={18} />
+                      <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {blogs.length > 0 ? blogs.map((blog, idx) => (
+                    <div key={`${blog.id}-${idx}`} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+                      <div className="h-32 relative overflow-hidden">
+                        <img src={blog.featuredImage || blog.image || 'https://picsum.photos/seed/blog/800/400'} alt={blog.title} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40" />
+                        <div className="absolute bottom-3 left-4">
+                          <p className="text-sm font-bold text-white line-clamp-1">{blog.title}</p>
+                          <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
+                        </div>
+                      </div>
+                      <div className="p-4 flex items-center justify-between">
+                        <div className="flex gap-2">
+                          <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", blog.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
+                            {blog.noindex ? 'No Index' : 'Index'}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <Link
+                            to={`/blog/${blog.slug}`}
+                            target="_blank"
+                            className="p-2 bg-white/5 text-white/60 rounded-lg hover:bg-white/10 hover:text-white transition-all"
+                          >
+                            <Eye size={14} />
+                          </Link>
+                          <button
+                            onClick={() => handleDuplicateBlog(blog)}
+                            className="p-2 bg-white/5 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
+                            title="Duplicate"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingBlog(blog);
+                              setShowBlogModal(true);
+                            }}
+                            className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBlog(blog.id)}
+                            className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="col-span-full text-center py-16 bg-white/5 rounded-3xl border border-dashed border-white/10">
+                      <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Globe size={32} className="text-gold/40" />
+                      </div>
+                      <h4 className="text-lg font-display text-white mb-2">No Blog Posts Found</h4>
+                      <p className="text-white/40 text-sm mb-8 max-w-xs mx-auto">Share your stories and updates with your audience. Create your first blog post now.</p>
+                      <button
+                        onClick={() => {
+                          setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                          setShowBlogModal(true);
+                        }}
+                        className="px-6 py-3 bg-gold text-black rounded-xl font-bold uppercase tracking-widest text-[10px] hover:bg-white transition-all"
+                      >
+                        Create First Post
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'global-seo' && (
+              <div className="space-y-8">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Global SEO & Contact</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage site-wide settings and contact info</p>
+                  </div>
+                  <button
+                    onClick={() => handleUpdateSettings(systemSettings)}
+                    disabled={isSavingSettings}
+                    className="btn-primary px-6 py-2 flex items-center gap-2"
+                  >
+                    {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                    <span className="text-xs font-bold uppercase tracking-widest">Save Changes</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Contact Details */}
+                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
+                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                      <Phone size={16} /> Contact Details
+                    </h4>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Website Address</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.contact?.address || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, address: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="123 Luxury Way, Melbourne VIC 3000"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone Number</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.contact?.phone || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, phone: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="+61 400 000 000"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
-                            Tax Percentage (%)
-                          </label>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Contact Email</label>
                           <input
-                            type="number"
-                            value={systemSettings?.taxPercentage || 0}
-                            onChange={(e) =>
-                              setSystemSettings({
-                                ...systemSettings,
-                                taxPercentage: parseFloat(e.target.value),
-                              })
-                            }
+                            type="email"
+                            value={systemSettings?.contact?.email || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, email: e.target.value } })}
                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="info@merlux.com.au"
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
-                            Stripe Fee (%)
-                          </label>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Booking Email</label>
                           <input
-                            type="number"
-                            value={systemSettings?.stripeFeePercentage || 2.9}
-                            onChange={(e) =>
-                              setSystemSettings({
-                                ...systemSettings,
-                                stripeFeePercentage: parseFloat(e.target.value),
-                              })
-                            }
+                            type="email"
+                            value={systemSettings?.contact?.bookingEmail || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, bookingEmail: e.target.value } })}
                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
-                            Waypoint Price ($)
-                          </label>
-                          <input
-                            type="number"
-                            value={systemSettings?.waypointPrice || 0}
-                            onChange={(e) =>
-                              setSystemSettings({
-                                ...systemSettings,
-                                waypointPrice: parseFloat(e.target.value),
-                              })
-                            }
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="bookings@merlux.com.au"
                           />
                         </div>
                       </div>
+                    </div>
+                  </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
-                            Limit to Country (ISO Code)
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. AU, US"
-                            value={systemSettings?.limitCountry || ""}
-                            onChange={(e) =>
-                              setSystemSettings({
-                                ...systemSettings,
-                                limitCountry: e.target.value.toUpperCase(),
-                              })
-                            }
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          />
+                  {/* Global SEO */}
+                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
+                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                      <Globe size={16} /> Global SEO
+                    </h4>
+                    <div className="space-y-4">
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {/* Site Logo */}
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">Site Logo</label>
+                            <div className="flex items-center gap-3">
+                              {systemSettings?.seo?.logo && (
+                                <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                                  <img src={systemSettings.seo.logo} alt="Logo Preview" className="max-w-full max-h-full object-contain" referrerPolicy="no-referrer" />
+                                </div>
+                              )}
+                              <div className="flex-1 flex gap-2">
+                                <input
+                                  type="text"
+                                  value={systemSettings?.seo?.logo || ''}
+                                  onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, logo: e.target.value } })}
+                                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                                  placeholder="Logo URL..."
+                                />
+                                <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
+                                  <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={isUploading} />
+                                  {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Favicon */}
+                          <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">Favicon (.ico/png)</label>
+                            <div className="flex items-center gap-3">
+                              {systemSettings?.seo?.favicon && (
+                                <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                                  <img src={systemSettings.seo.favicon} alt="Favicon Preview" className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
+                                </div>
+                              )}
+                              <div className="flex-1 flex gap-2">
+                                <input
+                                  type="text"
+                                  value={systemSettings?.seo?.favicon || ''}
+                                  onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, favicon: e.target.value } })}
+                                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                                  placeholder="Favicon URL..."
+                                />
+                                <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
+                                  <input type="file" className="hidden" accept="image/*" onChange={handleFaviconUpload} disabled={isUploading} />
+                                  {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                                </label>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
-                            Limit to City (Optional)
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. Melbourne"
-                            value={systemSettings?.limitCity || ""}
-                            onChange={(e) =>
-                              setSystemSettings({
-                                ...systemSettings,
-                                limitCity: e.target.value,
-                              })
-                            }
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          />
-                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Title</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.seo?.title || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, title: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="Merlux Chauffeurs | Luxury Transport Melbourne"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Description</label>
+                        <textarea
+                          value={systemSettings?.seo?.description || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, description: e.target.value } })}
+                          rows={3}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all resize-none"
+                          placeholder="Premium chauffeur services in Melbourne..."
+                        />
                       </div>
                     </div>
                   </div>
@@ -2381,7 +3552,7 @@ export default function AppDashboard() {
         );
       case 'profile':
         return (
-          <div className="space-y-8 max-w-2xl">
+          <div className="space-y-8 w-full">
             <h3 className="text-2xl font-display text-gold">Profile Settings</h3>
             <div className="glass p-8 rounded-3xl border border-white/5">
               <div className="flex items-center gap-6 mb-8">
@@ -2432,6 +3603,47 @@ export default function AppDashboard() {
                 >
                   {isUpdatingProfile ? 'Updating...' : 'Update Profile'}
                 </button>
+
+                {isAdmin && (
+                  <div className="pt-8 border-t border-white/5 space-y-6">
+                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest">Admin Controls</h4>
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                      <div>
+                        <p className="text-sm font-bold">Allow Admin Registration</p>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                          Show 'Admin' role option on public registration page
+                        </p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          setSystemSettings({
+                            ...systemSettings,
+                            allowAdminRegistration: !systemSettings?.allowAdminRegistration,
+                          })
+                        }
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          systemSettings?.allowAdminRegistration ? "bg-gold" : "bg-white/10"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                            systemSettings?.allowAdminRegistration ? "right-1" : "left-1"
+                          )}
+                        />
+                      </button>
+                    </div>
+                    <button
+                      onClick={handleSaveSecuritySettings}
+                      disabled={isSavingSettings}
+                      className="w-full btn-primary py-3 flex items-center justify-center gap-2"
+                    >
+                      {isSavingSettings ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      <span className="text-xs font-bold uppercase tracking-widest">Save Admin Settings</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2458,7 +3670,7 @@ export default function AppDashboard() {
         );
       case 'wallet':
         return (
-          <div className="space-y-8">
+          <div className="space-y-8 w-full">
             <div className="glass p-8 rounded-2xl bg-gradient-to-br from-gold/20 to-transparent">
               <p className="text-[10px] uppercase tracking-widest font-bold text-gold mb-2">Total Spent</p>
               <h3 className="text-4xl font-display mb-6">
@@ -2477,8 +3689,8 @@ export default function AppDashboard() {
             <section>
               <h4 className="text-sm uppercase tracking-widest font-bold text-white/40 mb-4">Payment History</h4>
               <div className="space-y-4">
-                {bookings.map((booking) => (
-                  <div key={booking.id} className="glass p-4 rounded-xl flex items-center justify-between">
+                {bookings.map((booking, bIdx) => (
+                  <div key={`${booking.id}-${bIdx}`} className="glass p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center">
                         <CreditCard size={18} className="text-white/40" />
@@ -2522,55 +3734,59 @@ export default function AppDashboard() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-black text-white overflow-hidden">
-      {/* Top Navigation Bar */}
-      <header className="bg-black/50 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
-        <div className="p-4 lg:px-8 lg:py-4 flex flex-col gap-4">
-          {/* Top Row: Logo & User Actions */}
-          <div className="flex items-center justify-between">
-            <Logo className="h-8 lg:h-10" />
+    <div className="flex flex-col min-h-screen w-full bg-black text-white pt-20">
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col w-full">
+        <main className="flex-1 p-3 lg:p-6 w-full max-w-7xl mx-auto">
+          {/* Dashboard Header Section (Relocated) */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-4 pb-4 border-b border-white/5">
+            {/* Left side: Dashboard name */}
+            <h1 className="text-2xl lg:text-3xl font-display text-white">
+              {userProfile?.role === 'admin' ? 'Admin Dashboard' :
+                userProfile?.role === 'driver' ? 'Driver Dashboard' :
+                  'Customer Dashboard'}
+            </h1>
 
+            {/* Right side: User info, role icon, separator, bell */}
             <div className="flex items-center gap-4">
-              <div className="relative">
-                <button
-                  onClick={() => setShowNotifications(!showNotifications)}
-                  className="relative p-2 text-gold hover:bg-white/5 rounded-full transition-colors"
-                >
-                  <Bell size={22} />
-                  {bookings.filter(b => !b.read).length > 0 && (
-                    <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold text-white">
-                      {bookings.filter(b => !b.read).length}
-                    </span>
-                  )}
-                </button>
+              {/* User info */}
+              <div className="flex flex-col items-end">
+                <span className="text-gold font-bold text-sm">{userProfile?.name || 'User'}</span>
+                <span className="text-white/40 text-xs uppercase tracking-[0.2em] font-bold">
+                  {userProfile?.role}
+                </span>
               </div>
 
-              <div className="flex items-center gap-3 pl-4 border-l border-white/10">
-                <div className="text-right hidden sm:block">
-                  <p className="text-xs font-bold">{userProfile?.name || 'User'}</p>
-                  <p className="text-[10px] text-white/40 uppercase tracking-widest">{userProfile?.role}</p>
-                </div>
-                <div className="w-9 h-9 bg-gold/10 border border-gold/20 rounded-full flex items-center justify-center">
-                  <User size={18} className="text-gold" />
-                </div>
+              {/* Role-based icon */}
+              <div className={cn(
+                "w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 shadow-lg",
+                userProfile?.role === 'admin' ? "bg-red-500/10 border-red-500/20 text-red-400" :
+                  userProfile?.role === 'driver' ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
+                    "bg-gold/10 border-gold/20 text-gold"
+              )}>
+                {userProfile?.role === 'admin' ? <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" /> :
+                  userProfile?.role === 'driver' ? <Truck className="w-4 h-4 md:w-5 md:h-5" /> :
+                    <User className="w-4 h-4 md:w-5 md:h-5" />}
               </div>
 
+              {/* Separator */}
+              <div className="w-px h-10 bg-white/10" />
+
+              {/* Bell icon */}
               <button
-                onClick={handleLogout}
-                className="p-2 text-red-400 hover:text-red-600 transition-colors"
-                title="Logout"
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="relative p-3 bg-white/5 text-gold hover:bg-white/10 rounded-2xl border border-white/5 transition-all group"
               >
-                <LogOut size={22} />
+                <Bell className="w-4 h-4 md:w-5 md:h-5 group-hover:scale-110 transition-transform" />
+                {bookings.filter(b => !b.read).length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold text-white shadow-lg">
+                    {bookings.filter(b => !b.read).length}
+                  </span>
+                )}
               </button>
             </div>
           </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen overflow-y-auto">
-        <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto">
-          {/* Navigation Tabs - Relocated from Header */}
+          {/* Navigation Tabs */}
           <div className="w-full mb-8">
             <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5 overflow-x-auto no-scrollbar">
               {filteredNavItems.map((item) => (
@@ -2608,6 +3824,7 @@ export default function AppDashboard() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
+              className="w-full"
             >
               {renderTabContent()}
             </motion.div>
@@ -2690,12 +3907,12 @@ export default function AppDashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4 md:p-6"
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-md glass p-4 md:p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">Edit Booking</h3>
@@ -2707,11 +3924,11 @@ export default function AppDashboard() {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Guest Name</label>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Customer Name</label>
                     <input
                       type="text"
-                      value={editingBooking?.guestName || ''}
-                      onChange={(e) => setEditingBooking({ ...editingBooking, guestName: e.target.value })}
+                      value={editingBooking?.customerName || ''}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, customerName: e.target.value })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                     />
                   </div>
@@ -2719,31 +3936,11 @@ export default function AppDashboard() {
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone</label>
                     <input
                       type="tel"
-                      value={editingBooking?.guestPhone || ''}
-                      onChange={(e) => setEditingBooking({ ...editingBooking, guestPhone: e.target.value })}
+                      value={editingBooking?.customerPhone || ''}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, customerPhone: e.target.value })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Pickup Address</label>
-                  <input
-                    type="text"
-                    value={editingBooking?.pickup || ''}
-                    onChange={(e) => setEditingBooking({ ...editingBooking, pickup: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Dropoff Address</label>
-                  <input
-                    type="text"
-                    value={editingBooking?.dropoff || ''}
-                    onChange={(e) => setEditingBooking({ ...editingBooking, dropoff: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -2768,47 +3965,7 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Service Type</label>
-                    <select
-                      value={editingBooking?.serviceType || 'standard'}
-                      onChange={(e) => setEditingBooking({ ...editingBooking, serviceType: e.target.value })}
-                      className="custom-select w-full py-3 text-sm"
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="wedding">Wedding</option>
-                      <option value="tour">Tour</option>
-                      <option value="hourly">Hourly</option>
-                      <option value="airport">Airport</option>
-                      <option value="corporate">Corporate</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Vehicle Type</label>
-                    <select
-                      value={editingBooking?.vehicleType || 'sedan'}
-                      onChange={(e) => setEditingBooking({ ...editingBooking, vehicleType: e.target.value })}
-                      className="custom-select w-full py-3 text-sm"
-                    >
-                      <option value="sedan">Sedan</option>
-                      <option value="suv">SUV</option>
-                      <option value="van">Van</option>
-                      <option value="luxury">Luxury</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price ($)</label>
-                    <input
-                      type="number"
-                      value={editingBooking?.price || 0}
-                      onChange={(e) => setEditingBooking({ ...editingBooking, price: parseFloat(e.target.value) })}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                    />
-                  </div>
+                {isAdmin && (
                   <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Status</label>
                     <select
@@ -2823,6 +3980,32 @@ export default function AppDashboard() {
                       <option value="completed">Completed</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
+                  </div>
+                )}
+
+                <div className="p-4 bg-white/5 rounded-xl border border-white/5 space-y-3">
+                  <p className="text-[8px] uppercase tracking-widest font-bold text-white/30">Fixed Details (View Only)</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                    <div>
+                      <p className="text-[8px] text-white/40 uppercase font-bold">Pickup</p>
+                      <p className="text-[10px] text-white/70 truncate">{editingBooking?.pickup}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-white/40 uppercase font-bold">Dropoff</p>
+                      <p className="text-[10px] text-white/70 truncate">{editingBooking?.dropoff || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-white/40 uppercase font-bold">Service</p>
+                      <p className="text-[10px] text-white/70 uppercase font-bold text-gold">{editingBooking?.serviceType}</p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] text-white/40 uppercase font-bold">Vehicle</p>
+                      <p className="text-[10px] text-white/70 uppercase font-bold">{editingBooking?.vehicleType}</p>
+                    </div>
+                    <div className="col-span-2 pt-2 border-t border-white/5">
+                      <p className="text-[8px] text-white/40 uppercase font-bold">Total Price</p>
+                      <p className="text-sm text-gold font-bold">${editingBooking?.price}</p>
+                    </div>
                   </div>
                 </div>
 
@@ -2851,61 +4034,506 @@ export default function AppDashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4 md:p-6"
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
+              className="w-full max-w-lg glass p-4 md:p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-display text-gold">Price Breakdown</h3>
-                <button onClick={() => setShowViewModal(false)} className="text-white/40 hover:text-white">
+                <h3 className="text-xl font-display text-gold">Booking Details</h3>
+                <button onClick={() => { setShowViewModal(false); setShowDistanceBreakdown(false); }} className="text-white/40 hover:text-white">
                   <X size={20} />
                 </button>
               </div>
 
               <div className="space-y-6">
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Base Fare</span>
-                    <span className="text-sm text-white font-bold">${(viewingBooking.basePrice || 50).toFixed(2)}</span>
+                {/* Fare Breakdown - Hidden for Drivers */}
+                {(!isDriver || isAdmin) && (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-gold mb-2">Fare Breakdown</h4>
+                      {viewingBooking.priceBreakdown ? (
+                        <div className="space-y-2">
+                          {systemSettings?.showBasePrice !== false && viewingBooking.priceBreakdown.base > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelBasePrice || 'Base Fare'}</span>
+                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.base || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          {systemSettings?.showDistancePrice !== false && (
+                            <div className="flex justify-between items-center">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-white/40 uppercase tracking-widest font-bold">
+                                  {systemSettings?.labelDistancePrice || (viewingBooking.serviceType === 'hourly' ? 'Hourly Charge' : 'Distance Charge')}
+                                </span>
+                              </div>
+                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.distance || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          {systemSettings?.showWaypointPrice !== false && viewingBooking.priceBreakdown.waypoints > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelWaypointPrice || 'Waypoints'}</span>
+                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.waypoints || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          {viewingBooking.isReturn && viewingBooking.priceBreakdown.returnPrice > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Return Trip (2x)</span>
+                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.returnPrice || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          {systemSettings?.showDiscount !== false && viewingBooking.priceBreakdown.discount > 0 && (
+                            <div className="flex justify-between items-center text-green-400">
+                              <span className="text-xs uppercase tracking-widest font-bold">{systemSettings?.labelDiscount || 'Discount'}</span>
+                              <span className="text-sm font-bold">-${(viewingBooking.priceBreakdown.discount || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="pt-2 border-t border-white/5">
+                            {/* Extras row */}
+                            {systemSettings?.showExtrasPrice !== false && viewingBooking.priceBreakdown.extras > 0 && (
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-xs text-white/40 uppercase tracking-widest font-bold">
+                                  {systemSettings?.labelExtrasPrice || 'Extras'}
+                                </span>
+                                <span className="text-sm text-white font-bold">
+                                  ${(viewingBooking.priceBreakdown.extras || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Gross Price row */}
+                            {systemSettings?.showGrossPrice !== false && viewingBooking.priceBreakdown.gross > 0 && (
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-xs text-white/40 uppercase tracking-widest font-bold">
+                                  {systemSettings?.labelGrossPrice || 'Gross Price'}
+                                </span>
+                                <span className="text-sm text-white font-bold">
+                                  ${(viewingBooking.priceBreakdown.gross || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Net Price row */}
+                            {systemSettings?.showNetPrice !== false && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs text-white/60 uppercase tracking-widest font-bold">
+                                  {systemSettings?.labelNetPrice || 'Net Price'}
+                                </span>
+                                <span className="text-sm text-white font-bold">
+                                  ${(viewingBooking.priceBreakdown.net || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {systemSettings?.showTax !== false && viewingBooking.priceBreakdown.tax > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelTax || 'Tax'}</span>
+                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.tax || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          {systemSettings?.showStripeFees !== false && viewingBooking.priceBreakdown.stripeFees > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelStripeFees || 'Stripe Fees'}</span>
+                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.stripeFees || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="pt-3 border-t border-white/10 flex justify-between items-center">
+                            <span className="text-sm text-gold uppercase tracking-widest font-bold">{systemSettings?.labelTotalPrice || 'Total Price'}</span>
+                            <span className="text-xl font-display text-gold">${(Number(viewingBooking.price) || 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gold uppercase tracking-widest font-bold">{systemSettings?.labelTotalPrice || 'Total Price'}</span>
+                          <span className="text-xl font-display text-gold">${(Number(viewingBooking.price) || 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Distance Range Based Calculation */}
+                    {isAdmin && (
+                      <div className="p-4 bg-white/5 rounded-2xl border border-gold/20 space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-[10px] uppercase tracking-widest font-bold text-gold">
+                            {viewingBooking.serviceType === 'hourly' ? 'Hourly Price Calculation' : 'Distance Range Calculation'}
+                          </h4>
+                          <span className="text-[8px] bg-gold/10 text-gold px-2 py-0.5 rounded font-bold uppercase">
+                            {viewingBooking.serviceType === 'hourly' ? 'Fixed Hourly' : (systemSettings?.distanceCalculationType === 'type2' ? 'Type 2: Cumulative' : 'Type 1: Range Rate')}
+                          </span>
+                        </div>
+                        {(() => {
+                          const vehicle = fleet.find(v => v.id === viewingBooking.vehicleId);
+                          if (!vehicle) return null;
+
+                          const isHourly = viewingBooking.serviceType === 'hourly';
+                          const distKm = parseFloat(viewingBooking.distance?.replace(/[^\d.]/g, '') || '0');
+                          const rangeCalcs = [];
+
+                          if (isHourly) {
+                            rangeCalcs.push({
+                              label: 'Hourly',
+                              dist: viewingBooking.hours || 1,
+                              rate: vehicle.hourlyPrice,
+                              total: (Number(vehicle.hourlyPrice) || 0) * (viewingBooking.hours || 1),
+                              isHourly: true
+                            });
+                          } else if (vehicle.kmRanges && vehicle.kmRanges.length > 0) {
+                            if (systemSettings?.distanceCalculationType === 'type2') {
+                              // Type 2: Cumulative Range Calculation
+                              let previousMax = 0;
+                              for (const r of vehicle.kmRanges) {
+                                if (r.label.includes('+')) {
+                                  const min = parseFloat(r.label.replace('+', ''));
+                                  if (distKm >= min) {
+                                    const balance = distKm - previousMax;
+                                    rangeCalcs.push({ label: r.label, dist: balance, rate: r.surcharge, total: balance * Number(r.surcharge) });
+                                    break;
+                                  }
+                                } else {
+                                  const [min, max] = r.label.split('-').map(Number);
+                                  if (distKm > max) {
+                                    const segment = max - previousMax;
+                                    rangeCalcs.push({ label: r.label, dist: segment, rate: r.surcharge, total: segment * Number(r.surcharge) });
+                                    previousMax = max;
+                                  } else if (distKm >= min && distKm <= max) {
+                                    const balance = distKm - previousMax;
+                                    rangeCalcs.push({ label: r.label, dist: balance, rate: r.surcharge, total: balance * Number(r.surcharge) });
+                                    break;
+                                  }
+                                }
+                              }
+                            } else {
+                              // Type 1: Total Distance * Rate of the range it falls into
+                              let selectedRange = null;
+                              for (const r of vehicle.kmRanges) {
+                                if (r.label.includes('+')) {
+                                  const min = parseFloat(r.label.replace('+', ''));
+                                  if (distKm >= min) {
+                                    selectedRange = r;
+                                    break;
+                                  }
+                                } else {
+                                  const [min, max] = r.label.split('-').map(Number);
+                                  if (distKm >= min && distKm <= max) {
+                                    selectedRange = r;
+                                    break;
+                                  }
+                                }
+                              }
+                              if (selectedRange) {
+                                rangeCalcs.push({
+                                  label: selectedRange.label,
+                                  dist: distKm,
+                                  rate: selectedRange.surcharge,
+                                  total: distKm * Number(selectedRange.surcharge)
+                                });
+                              }
+                            }
+                          }
+
+                          if (rangeCalcs.length === 0) {
+                            return <p className="text-[10px] text-white/30 uppercase tracking-widest">No range-based pricing applied</p>;
+                          }
+
+                          return (
+                            <div className="space-y-2">
+                              {rangeCalcs.map((calc, i) => (
+                                <div key={i} className="flex justify-between items-center text-[10px]">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-1 h-1 rounded-full bg-gold" />
+                                    <span className="text-white font-bold uppercase tracking-tighter">{calc.label} {calc.isHourly ? '' : 'Range'}</span>
+                                    <span className="text-white/40">({calc.dist.toFixed(1)} {calc.isHourly ? 'h' : 'km'} × ${calc.rate})</span>
+                                  </div>
+                                  <span className="text-white font-bold">${calc.total.toFixed(2)}</span>
+                                </div>
+                              ))}
+                              <div className="pt-2 border-t border-white/5 flex justify-between items-center">
+                                <span className="text-[9px] text-gold font-bold uppercase tracking-widest">
+                                  {viewingBooking.serviceType === 'hourly' ? 'Total Hourly Charge' : 'Total Distance Charge'}
+                                </span>
+                                <span className="text-xs text-gold font-bold">${rangeCalcs.reduce((acc, curr) => acc + curr.total, 0).toFixed(2)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Distance ({viewingBooking.distance || 0} km)</span>
-                    <span className="text-sm text-white font-bold">${((viewingBooking.distance || 0) * (viewingBooking.kmPrice || 2.5)).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Service Fee</span>
-                    <span className="text-sm text-white font-bold">${(viewingBooking.serviceFee || 0).toFixed(2)}</span>
-                  </div>
-                  <div className="pt-3 border-t border-white/10 flex justify-between items-center">
-                    <span className="text-sm text-gold uppercase tracking-widest font-bold">Total Price</span>
-                    <span className="text-xl font-display text-gold">${(Number(viewingBooking.price) || 0).toFixed(2)}</span>
-                  </div>
-                </div>
+                )}
 
                 <div className="space-y-4">
+                  {viewingBooking.waypoints?.length > 0 && (
+                    <div>
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Waypoints</h4>
+                      <div className="space-y-2">
+                        {viewingBooking.waypoints.map((wp: string, idx: number) => (
+                          <div key={`view-wp-${idx}`} className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-start gap-3">
+                            <MapPin size={12} className="text-gold mt-0.5 shrink-0" />
+                            <p className="text-[10px] text-white/70">{wp}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {viewingBooking.selectedExtras?.length > 0 && (
+                    <div>
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Selected Extras</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {viewingBooking.selectedExtras.map((extraId: string, index: number) => {
+                          const extra = extras.find(e => e.id === extraId);
+                          return (
+                            <span key={`${extraId}-${index}`} className="px-3 py-1 bg-gold/10 border border-gold/20 rounded-full text-[10px] text-gold font-bold uppercase">
+                              {extra?.name || 'Extra'}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div>
-                    <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Ride Details</h4>
+                    <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Ride Information</h4>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                        <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold mb-1">Service Type</p>
-                        <p className="text-[10px] text-gold font-bold uppercase">{viewingBooking.serviceType || 'Standard'}</p>
+                        <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold mb-1">Distance (One Way)</p>
+                        <p className="text-[10px] text-white font-bold">{viewingBooking.distance || 'N/A'}</p>
                       </div>
                       <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-                        <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold mb-1">Vehicle Type</p>
-                        <p className="text-[10px] text-white font-bold uppercase">{viewingBooking.vehicleType || 'Sedan'}</p>
+                        <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold mb-1">ETA (One Way)</p>
+                        <p className="text-[10px] text-white font-bold">{viewingBooking.duration || 'N/A'}</p>
                       </div>
                     </div>
                   </div>
+
+                  {viewingBooking.flightNumber && (
+                    <div>
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Flight Information</h4>
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Plane size={16} className="text-gold" />
+                          <div>
+                            <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Flight Number</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm text-white font-bold">{viewingBooking.flightNumber}</p>
+                              <a
+                                href={`https://www.melbourneairport.com.au/flights/departures/${viewingBooking.flightNumber}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gold hover:text-white transition-colors"
+                                title="View on Melbourne Airport website"
+                              >
+                                <Globe size={14} />
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                        {viewingBooking.flightStatus && (
+                          <div className="text-right">
+                            <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Status</p>
+                            <p className="text-[10px] text-gold font-bold uppercase">{viewingBooking.flightStatus}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {viewingBooking.purpose && (
+                    <div>
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Additional Information</h4>
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                        <p className="text-xs text-white/70 leading-relaxed italic">"{viewingBooking.purpose}"</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <button
-                  onClick={() => setShowViewModal(false)}
+                  onClick={() => { setShowViewModal(false); setShowDistanceBreakdown(false); }}
                   className="w-full bg-gold text-black py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
                 >
                   Close Details
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Route Modal */}
+        {showRouteModal && routeBooking && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[150] flex items-center justify-center p-4 md:p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-4xl glass p-4 md:p-8 rounded-lg md:rounded-sm border border-gold/20 overflow-y-auto custom-scrollbar flex flex-col max-h-[95vh] md:max-h-[90vh]"
+            >
+              <div className="flex justify-between items-center mb-4 md:mb-6">
+                <div>
+                  <h3 className="text-lg md:text-xl font-display text-gold">Travel Route Path</h3>
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                    <span className="text-[8px] md:text-[9px] px-2 py-0.5 bg-gold/10 text-gold rounded border border-gold/20 font-bold uppercase tracking-widest">Pickup</span>
+                    <p className="text-[9px] md:text-[10px] text-white/70 truncate max-w-[100px] md:max-w-[150px]">{routeBooking.pickup}</p>
+
+                    {routeBooking.waypoints?.length > 0 && (
+                      <>
+                        <ArrowRight size={10} className="text-white/20" />
+                        <span className="text-[8px] md:text-[9px] px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-400/20 font-bold uppercase tracking-widest">
+                          {routeBooking.waypoints.length} Stops
+                        </span>
+                      </>
+                    )}
+
+                    <ArrowRight size={10} className="text-white/20" />
+                    <span className="text-[8px] md:text-[9px] px-2 py-0.5 bg-green-500/10 text-green-400 rounded border border-green-500/20 font-bold uppercase tracking-widest">Dropoff</span>
+                    <p className={cn("text-[9px] md:text-[10px] truncate max-w-[100px] md:max-w-[150px]", routeBooking.dropoff ? "text-white/70" : "text-white/60 italic")}>
+                      {routeBooking.dropoff || (routeBooking.serviceType === 'hourly' ? 'No Drop Off (Optional)' : 'N/A')}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setShowRouteModal(false)} className="text-white/40 hover:text-white p-2">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-[250px] md:min-h-[350px] relative rounded-xl md:rounded-2xl overflow-hidden border border-white/10 mb-4 md:mb-6">
+                {isLoaded ? (
+                  <>
+                    {isMapLoading && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                        <div className="flex flex-col items-center gap-3">
+                          <Loader2 className="text-gold animate-spin" size={32} />
+                          <p className="text-[10px] text-gold font-bold uppercase tracking-widest">Calculating Route...</p>
+                        </div>
+                      </div>
+                    )}
+                    <GoogleMap
+                      mapContainerStyle={{ width: '100%', height: '100%', minHeight: '350px' }}
+                      center={{ lat: -37.8136, lng: 144.9631 }}
+                      zoom={12}
+                      options={{
+                        styles: [
+                          { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
+                          { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
+                          { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
+                        ],
+                        disableDefaultUI: true,
+                      }}
+                    >
+                      {mapDirections && (
+                        <DirectionsRenderer
+                          options={{
+                            directions: mapDirections,
+                            polylineOptions: {
+                              strokeColor: '#D4AF37',
+                              strokeWeight: 5,
+                            },
+                          }}
+                        />
+                      )}
+                    </GoogleMap>
+                  </>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-white/5">
+                    <Loader2 className="text-gold animate-spin" size={32} />
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4 md:mb-6">
+                <h4 className="text-[9px] md:text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 md:mb-3">Orderly Route Details</h4>
+                <div className="space-y-2">
+                  <div className="flex items-start gap-3 p-2 bg-white/5 rounded-lg border border-white/5">
+                    <div className="w-5 h-5 rounded-full bg-gold/20 flex items-center justify-center shrink-0 mt-0.5">
+                      <span className="text-[10px] text-gold font-bold">P</span>
+                    </div>
+                    <p className="text-[10px] text-white/70">{routeBooking.pickup}</p>
+                  </div>
+
+                  {routeBooking.waypoints?.map((wp: string, i: number) => (
+                    <div key={`route-wp-${i}`} className="flex items-start gap-3 p-2 bg-white/5 rounded-lg border border-white/5 ml-4">
+                      <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="text-[10px] text-blue-400 font-bold">{i + 1}</span>
+                      </div>
+                      <p className="text-[10px] text-white/70">{wp}</p>
+                    </div>
+                  ))}
+
+                  <div className="flex items-start gap-3 p-2 bg-white/5 rounded-lg border border-white/5">
+                    <div className="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                      <span className="text-[10px] text-green-400 font-bold">D</span>
+                    </div>
+                    <p className={cn("text-[10px]", routeBooking.dropoff ? "text-white/70" : "text-white/60 italic")}>
+                      {routeBooking.dropoff || (routeBooking.serviceType === 'hourly' ? 'No Drop Off (Optional)' : 'N/A')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
+                    <Navigation size={20} className="text-gold" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Total Distance</p>
+                    <p className="text-lg font-display text-white">
+                      {(() => {
+                        if (!routeBooking.distance) return 'N/A';
+                        if (!routeBooking.isReturn) return routeBooking.distance;
+                        const num = parseFloat(routeBooking.distance.replace(/[^\d.]/g, ''));
+                        return `${(num * 2).toFixed(1)} km`;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
+                    <Clock size={20} className="text-gold" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                      {routeBooking.serviceType === 'hourly' ? 'Selected Duration' : 'Est. Travel Time'}
+                    </p>
+                    <p className="text-lg font-display text-white">
+                      {routeBooking.serviceType === 'hourly' ? `${routeBooking.hours} Hours` : (() => {
+                        if (!routeBooking.duration) return 'N/A';
+                        if (!routeBooking.isReturn) return routeBooking.duration;
+                        const match = routeBooking.duration.match(/(\d+)\s*min/);
+                        if (match) {
+                          return `${parseInt(match[1]) * 2} mins`;
+                        }
+                        return routeBooking.duration;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setShowRouteModal(false)}
+                  className="flex-1 py-4 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white border border-white/10 rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const origin = encodeURIComponent(routeBooking.pickup);
+                    const destination = encodeURIComponent(routeBooking.dropoff);
+                    const waypoints = (routeBooking.waypoints || []).map((wp: string) => encodeURIComponent(wp)).join('|');
+                    const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
+                    window.open(url, '_blank');
+                  }}
+                  className="flex-1 bg-gradient-to-r from-gold to-yellow-600 text-black py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:from-white hover:to-white transition-all shadow-lg shadow-gold/20 flex items-center justify-center gap-2"
+                >
+                  <Navigation size={16} fill="currentColor" />
+                  Start Ride
                 </button>
               </div>
             </motion.div>
@@ -2930,8 +4558,11 @@ export default function AppDashboard() {
                   <Trash2 size={32} className="text-red-500" />
                 </div>
                 <h3 className="text-2xl font-display mb-2">Are you sure?</h3>
-                <p className="text-white/40 text-xs mb-8 uppercase tracking-widest">
-                  This action cannot be undone. You are about to delete this {confirmDelete.type}.
+                <p className="text-white/40 text-[10px] mb-8 uppercase tracking-widest leading-relaxed">
+                  {confirmDelete.type === 'user'
+                    ? "This will only delete the user profile from the database. The authentication account will NOT be removed."
+                    : `This action cannot be undone. You are about to delete this ${confirmDelete.type}.`
+                  }
                 </p>
 
                 <div className="flex gap-4">
@@ -2948,6 +4579,8 @@ export default function AppDashboard() {
                       else if (confirmDelete.type === 'vehicle') executeDeleteVehicle(confirmDelete.id);
                       else if (confirmDelete.type === 'coupon') executeDeleteCoupon(confirmDelete.id);
                       else if (confirmDelete.type === 'extra') executeDeleteExtra(confirmDelete.id);
+                      else if (confirmDelete.type === 'page') executeDeletePage(confirmDelete.id);
+                      else if (confirmDelete.type === 'blog') executeDeleteBlog(confirmDelete.id);
                     }}
                     className="flex-1 bg-red-500 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
                   >
@@ -3002,6 +4635,18 @@ export default function AppDashboard() {
                     placeholder="john@example.com"
                   />
                 </div>
+                {!editingUser?.id && (
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Password</label>
+                    <input
+                      type="password"
+                      value={editingUser?.password || ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Min 6 characters"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone Number</label>
                   <input
@@ -3031,7 +4676,9 @@ export default function AppDashboard() {
                   >
                     <option value="customer">Customer</option>
                     <option value="driver">Driver</option>
-                    <option value="admin">Admin</option>
+                    {(systemSettings?.allowAdminRegistration || editingUser?.role === 'admin') && (
+                      <option value="admin">Admin</option>
+                    )}
                   </select>
                 </div>
 
@@ -3043,18 +4690,21 @@ export default function AppDashboard() {
                     Cancel
                   </button>
                   <button
+                    disabled={isCreatingUser}
                     onClick={() => {
                       if (editingUser.id) {
                         handleUpdateUser(editingUser.id, editingUser);
                       } else {
-                        // For new user, we generate a random ID since we can't easily create Auth user here
-                        const newId = Math.random().toString(36).substring(7);
-                        handleUpdateUser(newId, { ...editingUser, id: newId, createdAt: serverTimestamp() });
+                        handleCreateUser(editingUser);
                       }
                     }}
-                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
+                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50"
                   >
-                    {editingUser?.id ? 'Save Changes' : 'Create User'}
+                    {isCreatingUser ? (
+                      <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto" />
+                    ) : (
+                      editingUser?.id ? 'Save Changes' : 'Create User'
+                    )}
                   </button>
                 </div>
               </div>
@@ -3062,6 +4712,7 @@ export default function AppDashboard() {
           </motion.div>
         )}
 
+        {/* Extra Modal */}
         {/* Extra Modal */}
         {showExtraModal && (
           <motion.div
@@ -3075,63 +4726,105 @@ export default function AppDashboard() {
               animate={{ scale: 1, y: 0 }}
               className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
             >
+              {/* Heading + Active toggle inline */}
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
                   {editingExtra?.id ? 'Edit Extra' : 'Add Extra'}
                 </h3>
-                <button onClick={() => setShowExtraModal(false)} className="text-white/40 hover:text-white">
-                  <X size={20} />
-                </button>
+
+                <div className="flex items-center gap-3">
+                  {/* Active toggle inline with heading */}
+                  <div className="flex items-center gap-2">
+                    {/* State label with colour */}
+                    <span
+                      className={cn(
+                        "text-[10px] font-bold uppercase transition-colors",
+                        editingExtra?.active ? "text-green-400" : "text-red-400"
+                      )}
+                    >
+                      {editingExtra?.active ? "Active" : "Inactive"}
+                    </span>
+
+                    {/* Toggle button */}
+                    <button
+                      onClick={() =>
+                        setEditingExtra({ ...editingExtra, active: !editingExtra.active })
+                      }
+                      className={cn(
+                        "w-12 h-6 rounded-full transition-all relative",
+                        editingExtra?.active ? "bg-green-500" : "bg-red-500/40"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                          editingExtra?.active ? "right-1" : "left-1"
+                        )}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Close button */}
+                  <button
+                    onClick={() => setShowExtraModal(false)}
+                    className="text-white/40 hover:text-white"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
+                {/* Name */}
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Name</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                    Name
+                  </label>
                   <input
                     type="text"
                     value={editingExtra?.name || ''}
-                    onChange={(e) => setEditingExtra({ ...editingExtra, name: e.target.value })}
+                    onChange={(e) =>
+                      setEditingExtra({ ...editingExtra, name: e.target.value })
+                    }
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                     placeholder="Baby Seat"
                   />
                 </div>
+
+                {/* Description */}
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Description</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                    Description
+                  </label>
                   <textarea
                     value={editingExtra?.description || ''}
-                    onChange={(e) => setEditingExtra({ ...editingExtra, description: e.target.value })}
+                    onChange={(e) =>
+                      setEditingExtra({ ...editingExtra, description: e.target.value })
+                    }
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all min-h-[100px]"
                     placeholder="Safe and comfortable baby seat for infants..."
                   />
                 </div>
+
+                {/* Price */}
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price ($)</label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">
+                    Price ($)
+                  </label>
                   <input
                     type="number"
                     value={editingExtra?.price || 0}
-                    onChange={(e) => setEditingExtra({ ...editingExtra, price: parseFloat(e.target.value) })}
+                    onChange={(e) =>
+                      setEditingExtra({
+                        ...editingExtra,
+                        price: parseFloat(e.target.value),
+                      })
+                    }
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                   />
                 </div>
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
-                  <div>
-                    <p className="text-sm font-bold">Active Status</p>
-                    <p className="text-[10px] text-white/40 uppercase tracking-widest">Toggle availability</p>
-                  </div>
-                  <button
-                    onClick={() => setEditingExtra({ ...editingExtra, active: !editingExtra.active })}
-                    className={cn(
-                      "w-12 h-6 rounded-full transition-all relative",
-                      editingExtra?.active ? "bg-gold" : "bg-white/10"
-                    )}
-                  >
-                    <div className={cn(
-                      "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                      editingExtra?.active ? "right-1" : "left-1"
-                    )} />
-                  </button>
-                </div>
 
+                {/* Action buttons */}
                 <div className="pt-4 flex gap-4">
                   <button
                     onClick={() => setShowExtraModal(false)}
@@ -3140,10 +4833,361 @@ export default function AppDashboard() {
                     Cancel
                   </button>
                   <button
-                    onClick={() => handleUpdateExtra(editingExtra.id, editingExtra)}
+                    onClick={() =>
+                      handleUpdateExtra(editingExtra.id, editingExtra)
+                    }
                     className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
                   >
                     Save Changes
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Blog Modal */}
+        {showBlogModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">
+                  {editingBlog?.id ? 'Edit Blog Post' : 'Add Blog Post'}
+                </h3>
+                <button onClick={() => setShowBlogModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Post Title</label>
+                    <input
+                      type="text"
+                      value={editingBlog?.title || ''}
+                      onChange={(e) => {
+                        const title = e.target.value;
+                        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        setEditingBlog({ ...editingBlog, title, slug: editingBlog.id ? editingBlog.slug : slug });
+                      }}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="The Ultimate Guide to Melbourne Airport"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">URL Slug</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 text-sm">/blog/</span>
+                      <input
+                        type="text"
+                        value={editingBlog?.slug || ''}
+                        onChange={(e) => setEditingBlog({ ...editingBlog, slug: e.target.value })}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-14 pr-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                        placeholder="ultimate-guide-melbourne-airport"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Category</label>
+                    <select
+                      value={editingBlog?.category || 'Travel Tips'}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, category: e.target.value })}
+                      className="custom-select w-full py-3 text-sm"
+                    >
+                      {BLOG_CATEGORIES.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Featured Image URL</label>
+                    <input
+                      type="text"
+                      value={editingBlog?.featuredImage || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, featuredImage: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="https://images.unsplash.com/..."
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Excerpt</label>
+                  <textarea
+                    value={editingBlog?.excerpt || ''}
+                    onChange={(e) => setEditingBlog({ ...editingBlog, excerpt: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-20"
+                    placeholder="Brief summary for the blog list page..."
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Post Content (HTML)</label>
+                  <textarea
+                    value={editingBlog?.content || ''}
+                    onChange={(e) => setEditingBlog({ ...editingBlog, content: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-48 font-mono"
+                    placeholder="<p>...</p>"
+                  />
+                </div>
+
+                <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
+                  <h4 className="text-sm font-bold text-gold uppercase tracking-widest">SEO Settings</h4>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Title</label>
+                    <input
+                      type="text"
+                      value={editingBlog?.metaTitle || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, metaTitle: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="SEO Title for Google"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Description</label>
+                    <textarea
+                      value={editingBlog?.metaDescription || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, metaDescription: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
+                      placeholder="SEO description for search results..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Custom CSS (Optional)</label>
+                    <textarea
+                      value={editingBlog?.customCss || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, customCss: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-32 font-mono"
+                      placeholder=".prose h2 { color: gold; }"
+                    />
+                    <p className="text-[8px] text-white/30 mt-1 italic">Add custom styles for this specific post.</p>
+                  </div>
+
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingBlog?.noindex ? "bg-red-500 border-red-500" : "border-white/20 group-hover:border-gold")}>
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={editingBlog?.noindex || false}
+                          onChange={(e) => setEditingBlog({ ...editingBlog, noindex: e.target.checked })}
+                        />
+                        {editingBlog?.noindex && <CheckCircle size={14} className="text-white" />}
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-widest text-white/60">No Index</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingBlog?.includeInSitemap ? "bg-gold border-gold" : "border-white/20 group-hover:border-gold")}>
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={editingBlog?.includeInSitemap || false}
+                          onChange={(e) => setEditingBlog({ ...editingBlog, includeInSitemap: e.target.checked })}
+                        />
+                        {editingBlog?.includeInSitemap && <CheckCircle size={14} className="text-black" />}
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-widest text-white/60">Include in Sitemap</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-4 flex gap-4">
+                  <button
+                    onClick={() => setShowBlogModal(false)}
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleUpdateBlog(editingBlog.id || 'new', editingBlog)}
+                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
+                  >
+                    {editingBlog?.id ? 'Save Changes' : 'Publish Post'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Page Modal */}
+        {showPageModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">
+                  {editingPage?.id ? 'Edit Page' : 'Add Dynamic Page'}
+                </h3>
+                <button onClick={() => setShowPageModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Page Title</label>
+                    <input
+                      type="text"
+                      value={editingPage?.title || ''}
+                      onChange={(e) => {
+                        const title = e.target.value;
+                        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        setEditingPage({ ...editingPage, title, slug: editingPage.id ? editingPage.slug : slug });
+                      }}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Airport Transfers Melbourne"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">URL Slug</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 text-sm">/</span>
+                      <input
+                        type="text"
+                        value={editingPage?.slug || ''}
+                        onChange={(e) => setEditingPage({ ...editingPage, slug: e.target.value })}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                        placeholder="airport-transfers-melbourne"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Featured Image URL</label>
+                  <input
+                    type="text"
+                    value={editingPage?.featuredImage || ''}
+                    onChange={(e) => setEditingPage({ ...editingPage, featuredImage: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="https://images.unsplash.com/..."
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Page Content (HTML)</label>
+                  <textarea
+                    value={editingPage?.content || ''}
+                    onChange={(e) => setEditingPage({ ...editingPage, content: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-48 font-mono"
+                    placeholder="<section>...</section>"
+                  />
+                </div>
+
+                <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
+                  <h4 className="text-sm font-bold text-gold uppercase tracking-widest">SEO Settings</h4>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Title</label>
+                    <input
+                      type="text"
+                      value={editingPage?.metaTitle || ''}
+                      onChange={(e) => setEditingPage({ ...editingPage, metaTitle: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Best Chauffeur Service in Melbourne | Merlux"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Description</label>
+                    <textarea
+                      value={editingPage?.metaDescription || ''}
+                      onChange={(e) => setEditingPage({ ...editingPage, metaDescription: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
+                      placeholder="Book luxury chauffeur services in Melbourne..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Keywords (comma separated)</label>
+                    <input
+                      type="text"
+                      value={editingPage?.keywords || ''}
+                      onChange={(e) => setEditingPage({ ...editingPage, keywords: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="chauffeur, melbourne, airport transfer"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Custom CSS (Optional)</label>
+                    <textarea
+                      value={editingPage?.customCss || ''}
+                      onChange={(e) => setEditingPage({ ...editingPage, customCss: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-32 font-mono"
+                      placeholder=".prose h2 { color: gold; }"
+                    />
+                    <p className="text-[8px] text-white/30 mt-1 italic">Add custom styles for this specific page.</p>
+                  </div>
+
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingPage?.noindex ? "bg-red-500 border-red-500" : "border-white/20 group-hover:border-gold")}>
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={editingPage?.noindex || false}
+                          onChange={(e) => setEditingPage({ ...editingPage, noindex: e.target.checked })}
+                        />
+                        {editingPage?.noindex && <CheckCircle size={14} className="text-white" />}
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-widest text-white/60">No Index</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingPage?.includeInSitemap ? "bg-gold border-gold" : "border-white/20 group-hover:border-gold")}>
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={editingPage?.includeInSitemap || false}
+                          onChange={(e) => setEditingPage({ ...editingPage, includeInSitemap: e.target.checked })}
+                        />
+                        {editingPage?.includeInSitemap && <CheckCircle size={14} className="text-black" />}
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-widest text-white/60">Include in Sitemap</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-4 flex gap-4">
+                  <button
+                    onClick={() => setShowPageModal(false)}
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleUpdatePage(editingPage.id || 'new', editingPage)}
+                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
+                  >
+                    {editingPage?.id ? 'Save Changes' : 'Create Page'}
                   </button>
                 </div>
               </div>
@@ -3393,20 +5437,33 @@ export default function AppDashboard() {
                 </h3>
 
                 <div className="flex items-center gap-4">
-                  {/* Active toggle */}
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <input
-                      type="checkbox"
-                      checked={editingCoupon?.active}
-                      onChange={(e) =>
-                        setEditingCoupon({ ...editingCoupon, active: e.target.checked })
-                      }
-                      className="w-5 h-5 rounded-lg border-white/10 bg-white/5 text-gold focus:ring-gold"
-                    />
-                    <span className="text-[10px] uppercase tracking-widest font-bold text-white/40 group-hover:text-white transition-colors">
+                  {/* Active toggle with coloured label */}
+                  <div className="flex items-center gap-2 cursor-pointer">
+                    <span
+                      className={cn(
+                        "text-[10px] uppercase tracking-widest font-bold transition-colors",
+                        editingCoupon?.active ? "text-green-400" : "text-red-400"
+                      )}
+                    >
                       {editingCoupon?.active ? "Active" : "Inactive"}
                     </span>
-                  </label>
+                    <button
+                      onClick={() =>
+                        setEditingCoupon({ ...editingCoupon, active: !editingCoupon.active })
+                      }
+                      className={cn(
+                        "w-12 h-6 rounded-full transition-all relative",
+                        editingCoupon?.active ? "bg-green-500" : "bg-red-500/40"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                          editingCoupon?.active ? "right-1" : "left-1"
+                        )}
+                      />
+                    </button>
+                  </div>
 
                   {/* Close button */}
                   <button
@@ -3604,11 +5661,11 @@ export default function AppDashboard() {
               </div>
 
               <div className="space-y-4">
-                {getBookingsForDate(selectedDate).map((booking) => (
-                  <div key={booking.id} className="glass p-4 rounded-xl border border-white/5 space-y-3">
+                {getBookingsForDate(selectedDate).map((booking, bIdx) => (
+                  <div key={`${booking.id}-${bIdx}`} className="glass p-4 rounded-xl border border-white/5 space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
-                        <p className="text-sm font-bold">{booking.guestName}</p>
+                        <p className="text-sm font-bold">{booking.customerName}</p>
                         <p className="text-[10px] text-gold font-bold uppercase tracking-widest">{formatTimeToAMPM(booking.time)} | {booking.serviceType}</p>
                       </div>
                       <span className={cn(
@@ -3627,32 +5684,63 @@ export default function AppDashboard() {
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-white/60">
                         <MapPin size={10} className="text-gold" />
-                        <span className="truncate">{booking.dropoff}</span>
+                        <span className={cn("truncate", !booking.dropoff && "text-white/60 italic")}>
+                          {booking.dropoff || (booking.serviceType === 'hourly' ? 'No Drop Off (Optional)' : 'N/A')}
+                        </span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
-                      <div>
-                        <p className="text-[8px] text-white/40 uppercase font-bold">Contact</p>
-                        <p className="text-[10px] text-white/80">{booking.guestPhone || 'No phone'}</p>
-                        <p className="text-[10px] text-white/60 truncate">{booking.guestEmail}</p>
+                    <div className="grid grid-cols-[1fr_auto] gap-4 pt-2 border-t border-white/5">
+                      <div className="flex flex-col gap-1 relative">
+                        <div className="flex items-center gap-2">
+                          <p className="text-[8px] text-white/40 uppercase font-bold shrink-0">Phone:</p>
+                          <p className="text-[10px] text-white/80 whitespace-nowrap">{booking.customerPhone || 'No phone'}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[8px] text-white/40 uppercase font-bold shrink-0">Email:</p>
+                          <p className="text-[10px] text-white/60 truncate">{booking.customerEmail}</p>
+                        </div>
+                        {booking.purpose && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <p className="text-[8px] text-white/40 uppercase font-bold shrink-0">Notes:</p>
+                            <button
+                              onMouseEnter={() => setShowNotesPopup(booking.id)}
+                              onMouseLeave={() => setShowNotesPopup(null)}
+                              className="text-gold/50 hover:text-gold transition-colors"
+                            >
+                              <Eye size={8} />
+                            </button>
+                            <p className="text-[9px] text-white/50 truncate italic ml-1">"{booking.purpose}"</p>
+                          </div>
+                        )}
+
+                        <AnimatePresence>
+                          {showNotesPopup === booking.id && booking.purpose && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                              className="absolute bottom-full left-0 mb-2 w-48 bg-black p-3 rounded-xl border border-gold/20 z-[110] shadow-2xl"
+                            >
+                              <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Additional Info</p>
+                              <p className="text-[9px] text-white/70 leading-relaxed italic">"{booking.purpose}"</p>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                       <div className="text-right">
                         <p className="text-[8px] text-white/40 uppercase font-bold">Vehicle</p>
                         <p className="text-[10px] text-white/80">{booking.vehicleId}</p>
+                        {booking.serviceType === 'hourly' && (
+                          <p className="text-[9px] text-gold font-bold uppercase tracking-widest">{booking.hours} Hours</p>
+                        )}
                         <p className="text-[10px] text-gold font-bold">${booking.price}</p>
                       </div>
                     </div>
-                    {booking.notes && (
-                      <div className="bg-white/5 p-2 rounded-lg">
-                        <p className="text-[8px] text-white/40 uppercase font-bold mb-1">Notes</p>
-                        <p className="text-[10px] text-white/60 italic">"{booking.notes}"</p>
-                      </div>
-                    )}
                     <div className="pt-2 flex justify-end">
                       <button
                         onClick={() => {
                           setActiveTab('bookings');
-                          setSearchQuery(booking.guestName || '');
+                          setSearchQuery(booking.customerName || '');
                           setShowDayBookings(false);
                         }}
                         className="text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-gold transition-colors"
@@ -3666,7 +5754,131 @@ export default function AppDashboard() {
             </motion.div>
           </motion.div>
         )}
+        {/* Global Page CSS Modal */}
+        {showGlobalPageCssModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">Global Page CSS</h3>
+                <button onClick={() => setShowGlobalPageCssModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+              <p className="text-xs text-white/40 mb-4 italic">Apply common styles to all service pages. Styles are automatically scoped to the content area. Use selectors like p, h1, h2, ul, li, etc.</p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <textarea
+                  value={globalPageCss}
+                  onChange={(e) => setGlobalPageCss(e.target.value)}
+                  className="w-full h-64 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-gold transition-all"
+                  placeholder="p { color: #ccc; } h1 { color: #fff; }"
+                />
+                <div className="bg-white/5 border border-white/10 rounded-xl p-6 overflow-y-auto h-64 cms-content-area">
+                  <style dangerouslySetInnerHTML={{ __html: globalPageCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, '.cms-content-area $1') }} />
+                  <h1 className="text-xl mb-2">Sample Heading 1</h1>
+                  <h2 className="text-lg mb-2">Sample Heading 2</h2>
+                  <p className="mb-4">This is a sample paragraph to preview your global CSS styles. See how they affect the content area.</p>
+                  <ul className="list-disc pl-5 space-y-1">
+                    <li>List item one</li>
+                    <li>List item two</li>
+                  </ul>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={async () => {
+                    try {
+                      await setDoc(doc(db, 'settings', 'cms'), { globalPageCss }, { merge: true });
+                      setShowGlobalPageCssModal(false);
+                      alert('Global Page CSS updated!');
+                    } catch (err) {
+                      console.error('Error updating global CSS:', err);
+                    }
+                  }}
+                  className="btn-primary px-8 py-3"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Global Blog CSS Modal */}
+        {showGlobalBlogCssModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">Global Blog CSS</h3>
+                <button onClick={() => setShowGlobalBlogCssModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+              <p className="text-xs text-white/40 mb-4 italic">Apply common styles to all blog posts. Styles are automatically scoped to the content area. Use selectors like p, h1, h2, ul, li, etc.</p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <textarea
+                  value={globalBlogCss}
+                  onChange={(e) => setGlobalBlogCss(e.target.value)}
+                  className="w-full h-64 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-gold transition-all"
+                  placeholder="p { color: #ccc; } h1 { color: #fff; }"
+                />
+                <div className="bg-white/5 border border-white/10 rounded-xl p-6 overflow-y-auto h-64 cms-content-area">
+                  <style dangerouslySetInnerHTML={{ __html: globalBlogCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, '.cms-content-area $1') }} />
+                  <h1 className="text-xl mb-2">Blog Post Title</h1>
+                  <h2 className="text-lg mb-2">Section Heading</h2>
+                  <p className="mb-4">This is a sample paragraph for your blog post preview. Check your typography and colors here.</p>
+                  <ul className="list-disc pl-5 space-y-1">
+                    <li>Key point A</li>
+                    <li>Key point B</li>
+                  </ul>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={async () => {
+                    try {
+                      await setDoc(doc(db, 'settings', 'cms'), { globalBlogCss }, { merge: true });
+                      setShowGlobalBlogCssModal(false);
+                      alert('Global Blog CSS updated!');
+                    } catch (err) {
+                      console.error('Error updating global CSS:', err);
+                    }
+                  }}
+                  className="btn-primary px-8 py-3"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
+
+      {/* Scroll to Top Button */}
+      <button
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="fixed bottom-8 right-8 p-4 bg-gold text-black rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all z-50 group"
+        title="Scroll to Top"
+      >
+        <ChevronDown size={24} className="rotate-180 group-hover:-translate-y-1 transition-transform" />
+      </button>
     </div>
   );
 }

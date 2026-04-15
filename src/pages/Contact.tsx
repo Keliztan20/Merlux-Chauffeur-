@@ -1,6 +1,15 @@
 import { Mail, Phone, MapPin, Send } from 'lucide-react';
+import { useSettings } from '../lib/SettingsContext';
 
 export default function Contact() {
+  const { settings } = useSettings();
+  const contact = settings?.contact || {
+    address: 'Collins Street, Melbourne VIC 3000, Australia',
+    phone: '+61 3 0000 0000',
+    email: 'bookings@merlux.com.au',
+    bookingEmail: 'bookings@merlux.com.au'
+  };
+
   return (
     <div className="pt-32 pb-24 bg-black min-h-screen">
       <div className="max-w-7xl mx-auto px-6">
@@ -17,7 +26,7 @@ export default function Contact() {
               </div>
               <h3 className="text-xl font-display mb-2">Call Us</h3>
               <p className="text-white/50 text-sm mb-4">Available 24/7 for bookings and inquiries.</p>
-              <a href="tel:+61300000000" className="text-gold font-bold text-lg">+61 3 0000 0000</a>
+              <a href={`tel:${contact.phone.replace(/\s+/g, '')}`} className="text-gold font-bold text-lg">{contact.phone}</a>
             </div>
 
             <div className="glass p-8">
@@ -26,7 +35,7 @@ export default function Contact() {
               </div>
               <h3 className="text-xl font-display mb-2">Email Us</h3>
               <p className="text-white/50 text-sm mb-4">We'll get back to you within 2 hours.</p>
-              <a href="mailto:bookings@merlux.com.au" className="text-gold font-bold text-lg">bookings@merlux.com.au</a>
+              <a href={`mailto:${contact.bookingEmail || contact.email}`} className="text-gold font-bold text-lg">{contact.bookingEmail || contact.email}</a>
             </div>
 
             <div className="glass p-8">
@@ -35,7 +44,7 @@ export default function Contact() {
               </div>
               <h3 className="text-xl font-display mb-2">Our Office</h3>
               <p className="text-white/50 text-sm mb-4">Visit us at our Melbourne headquarters.</p>
-              <p className="text-white font-bold">Collins Street, Melbourne VIC 3000</p>
+              <p className="text-white font-bold">{contact.address}</p>
             </div>
           </div>
 
