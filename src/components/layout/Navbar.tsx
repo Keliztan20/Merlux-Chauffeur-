@@ -203,7 +203,7 @@ export default function Navbar() {
               )}
               <Link
                 to="/booking"
-                className="py-2 px-2 text-xs rounded-sm flex items-center gap-2 bg-gold text-black font-bold uppercase tracking-widest hover:bg-gold/80 hover:text-white transition-colors duration-200"
+                className="py-2 px-2 text-xs rounded-sm flex items-center gap-2 bg-gold text-black font-bold uppercase tracking-widest hover:bg-white transition-colors duration-200"
               >
                 {/* Desktop: Icon + Text */}
                 <span className="hidden lg:flex items-center gap-2">

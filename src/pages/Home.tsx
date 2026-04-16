@@ -118,7 +118,7 @@ export default function Home() {
   return (
     <div className="relative bg-black text-white overflow-x-hidden">
       {/* 1. Hero Section with Image Slider */}
-      <section className="relative h-screen md:h-[60vh] lg:h-[100vh] flex items-center justify-center overflow-hidden">
+      <section className="relative h-screen md:h-[55vh] lg:h-[100vh] flex items-center justify-center overflow-hidden">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentHero}
