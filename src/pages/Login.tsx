@@ -181,7 +181,7 @@ export default function Login() {
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full blur-[120px]" />
       </div>
 
-      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-12 items-center px-6 py-12 relative z-10">
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-12 items-center px-6 py-20 relative z-10">
         
         {/* Left Side: Branding & Info */}
         <motion.div 
@@ -189,7 +189,6 @@ export default function Login() {
           animate={{ opacity: 1, x: 0 }}
           className="hidden lg:flex flex-col justify-center space-y-8"
         >
-          <Logo className="h-16 w-fit" />
           <div className="space-y-4">
             <h2 className="text-5xl font-display text-white leading-tight">
               Experience the <span className="text-gold">Ultimate</span> in Luxury Chauffeur Services
@@ -221,7 +220,7 @@ export default function Login() {
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md mx-auto"
+          className="w-full max-w-md mx-auto py-15"
         >
           <div className="glass p-8 md:p-10 rounded-[2rem] border border-white/10 relative overflow-hidden">
             {/* Form Header */}

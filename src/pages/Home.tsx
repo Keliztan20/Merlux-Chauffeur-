@@ -1,8 +1,8 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  ChevronRight, ChevronLeft, Star, Shield, Clock, MapPin, 
-  Car, Plane, Briefcase, Heart, Wine, Camera, Send, 
+import {
+  ChevronRight, ChevronLeft, Star, Shield, Clock, MapPin,
+  Car, Plane, Briefcase, Heart, Wine, Camera, Send,
   ArrowRight, Calendar, User, Phone, Mail, MessageSquare,
   Map
 } from 'lucide-react';
@@ -118,7 +118,7 @@ export default function Home() {
   return (
     <div className="relative bg-black text-white overflow-x-hidden">
       {/* 1. Hero Section with Image Slider */}
-      <section className="relative h-screen flex items-center justify-center overflow-hidden">
+      <section className="relative h-screen md:h-[60vh] lg:h-[100vh] flex items-center justify-center overflow-hidden">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentHero}
@@ -136,6 +136,7 @@ export default function Home() {
             />
           </motion.div>
         </AnimatePresence>
+
         <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black z-[1]" />
 
         <div className="relative z-10 max-w-7xl mx-auto px-6 text-center">
@@ -144,18 +145,31 @@ export default function Home() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
           >
-            <span className="text-gold uppercase tracking-[0.5em] text-xs font-bold mb-6 block">Premium Chauffeur Service</span>
-            <h1 className="text-5xl md:text-8xl font-display mb-8 leading-tight">
+            <span className="text-gold uppercase tracking-[0.5em] text-xs font-bold mb-6 block">
+              Premium Chauffeur Service
+            </span>
+
+            {/* h1 responsive sizes: 5xl default, 6xl on desktop */}
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-display mb-8 leading-tight">
               Elegance in <span className="text-gold italic">Every Mile</span>
             </h1>
+
             <p className="text-lg md:text-xl text-white/70 max-w-2xl mx-auto mb-12 font-light tracking-wide leading-relaxed">
               Experience Melbourne's most refined transport service. From airport transfers to bespoke private tours, we redefine luxury travel.
             </p>
+
             <div className="flex flex-col md:flex-row items-center justify-center gap-6">
-              <Link to="/booking" className="bg-gold text-black px-10 py-5 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-white transition-all duration-500 flex items-center gap-3 group">
-                Book Your Journey <ArrowRight size={16} className="group-hover:translate-x-2 transition-transform" />
+              <Link
+                to="/booking"
+                className="bg-gold text-black px-10 py-5 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-white transition-all duration-500 flex items-center gap-3 group"
+              >
+                Book Your Journey
+                <ArrowRight size={16} className="group-hover:translate-x-2 transition-transform" />
               </Link>
-              <Link to="/fleet" className="bg-white/5 border border-white/10 backdrop-blur-md text-white px-10 py-5 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-white/10 transition-all duration-500">
+              <Link
+                to="/fleet"
+                className="bg-white/5 border border-white/10 backdrop-blur-md text-white px-10 py-5 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-white/10 transition-all duration-500"
+              >
                 Explore Our Fleet
               </Link>
             </div>
@@ -188,8 +202,8 @@ export default function Home() {
               viewport={{ once: true }}
               className="group relative h-[500px] rounded-[3rem] overflow-hidden border border-white/10"
             >
-              <img 
-                src="https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=2070&auto=format&fit=crop" 
+              <img
+                src="https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=2070&auto=format&fit=crop"
                 alt="Offers"
                 className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110 opacity-60"
                 referrerPolicy="no-referrer"
@@ -212,8 +226,8 @@ export default function Home() {
               viewport={{ once: true }}
               className="group relative h-[500px] rounded-[3rem] overflow-hidden border border-white/10"
             >
-              <img 
-                src="https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?q=80&w=2070&auto=format&fit=crop" 
+              <img
+                src="https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?q=80&w=2070&auto=format&fit=crop"
                 alt="Tours"
                 className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110 opacity-60"
                 referrerPolicy="no-referrer"
@@ -246,7 +260,7 @@ export default function Home() {
               <p className="text-white/60 mb-10 leading-relaxed text-lg">
                 Begin your luxury experience by selecting your service type. Whether it's a quick airport transfer or a full-day private tour, we've got you covered.
               </p>
-              
+
               <div className="bg-white/5 border border-white/10 p-8 md:p-10 rounded-[2.5rem] backdrop-blur-xl relative group/booking hover:border-gold/30 transition-all duration-700">
                 <div className="absolute -inset-1 bg-gradient-to-r from-gold/20 to-transparent blur-2xl opacity-0 group-hover/booking:opacity-100 transition-opacity duration-1000" />
                 <div className="relative z-10">
@@ -259,24 +273,24 @@ export default function Home() {
                           onClick={() => setSelectedService(option.id)}
                           className={cn(
                             "flex flex-col items-center justify-center p-6 rounded-2xl border transition-all duration-500 gap-4 group/opt relative overflow-hidden",
-                            selectedService === option.id 
-                              ? "bg-gold border-gold text-black shadow-lg shadow-gold/20" 
+                            selectedService === option.id
+                              ? "bg-gold border-gold text-black shadow-lg shadow-gold/20"
                               : "bg-white/5 border-white/10 text-white hover:border-gold/50"
                           )}
                         >
                           {selectedService === option.id && (
-                            <motion.div 
+                            <motion.div
                               layoutId="activeGlow"
                               className="absolute inset-0 bg-white/20 blur-xl"
                             />
                           )}
                           <div className="relative z-10 flex flex-col items-center gap-3">
-                            <option.icon 
-                              size={24} 
+                            <option.icon
+                              size={24}
                               className={cn(
                                 "transition-all duration-500 group-hover/opt:scale-110",
                                 selectedService === option.id ? "text-black" : "text-gold"
-                              )} 
+                              )}
                             />
                             <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-center leading-tight">
                               {option.name}
@@ -286,7 +300,7 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-                  <button 
+                  <button
                     onClick={() => navigate('/booking', { state: { service: selectedService, step: 2 } })}
                     className="w-full bg-gold text-black py-5 rounded-2xl font-bold uppercase tracking-[0.2em] text-[10px] hover:bg-white transition-all duration-500 shadow-2xl shadow-gold/20 flex items-center justify-center gap-3 group"
                   >
@@ -391,39 +405,39 @@ export default function Home() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="relative">
                   <User className="absolute left-4 top-1/2 -translate-y-1/2 text-black/40" size={18} />
-                  <input 
-                    type="text" 
-                    placeholder="Your Name" 
+                  <input
+                    type="text"
+                    placeholder="Your Name"
                     required
                     value={contactForm.name}
-                    onChange={(e) => setContactForm({...contactForm, name: e.target.value})}
+                    onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
                     className="w-full bg-white/20 border border-black/10 rounded-2xl pl-12 pr-4 py-4 text-sm focus:border-black outline-none transition-all placeholder:text-black/40"
                   />
                 </div>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-black/40" size={18} />
-                  <input 
-                    type="email" 
-                    placeholder="Your Email" 
+                  <input
+                    type="email"
+                    placeholder="Your Email"
                     required
                     value={contactForm.email}
-                    onChange={(e) => setContactForm({...contactForm, email: e.target.value})}
+                    onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
                     className="w-full bg-white/20 border border-black/10 rounded-2xl pl-12 pr-4 py-4 text-sm focus:border-black outline-none transition-all placeholder:text-black/40"
                   />
                 </div>
               </div>
               <div className="relative">
                 <MessageSquare className="absolute left-4 top-6 text-black/40" size={18} />
-                <textarea 
-                  placeholder="Your Message" 
+                <textarea
+                  placeholder="Your Message"
                   rows={4}
                   required
                   value={contactForm.message}
-                  onChange={(e) => setContactForm({...contactForm, message: e.target.value})}
+                  onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
                   className="w-full bg-white/20 border border-black/10 rounded-2xl pl-12 pr-4 py-4 text-sm text-black focus:border-black outline-none transition-all placeholder:text-black/40 resize-none"
                 />
               </div>
-              <button 
+              <button
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full bg-black text-white py-5 rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3"
@@ -445,13 +459,13 @@ export default function Home() {
               <h2 className="text-4xl md:text-6xl font-display">Our Luxury <span className="text-gold italic">Fleet</span></h2>
             </div>
             <div className="flex gap-4">
-              <button 
+              <button
                 onClick={() => setCurrentFleet((prev) => (prev - 1 + FLEET.length) % FLEET.length)}
                 className="w-14 h-14 rounded-full border border-white/10 flex items-center justify-center hover:bg-gold hover:text-black transition-all"
               >
                 <ChevronLeft size={24} />
               </button>
-              <button 
+              <button
                 onClick={() => setCurrentFleet((prev) => (prev + 1) % FLEET.length)}
                 className="w-14 h-14 rounded-full border border-white/10 flex items-center justify-center hover:bg-gold hover:text-black transition-all"
               >
@@ -471,8 +485,8 @@ export default function Home() {
                 className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center"
               >
                 <div className="rounded-[3rem] overflow-hidden h-[400px] md:h-[500px]">
-                  <img 
-                    src={FLEET[currentFleet].img} 
+                  <img
+                    src={FLEET[currentFleet].img}
                     alt={FLEET[currentFleet].name}
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
@@ -534,8 +548,8 @@ export default function Home() {
                 onClick={() => navigate(`/blog/${blog.id}`)}
               >
                 <div className="rounded-[2.5rem] overflow-hidden h-72 mb-8 relative">
-                  <img 
-                    src={blog.img} 
+                  <img
+                    src={blog.img}
                     alt={blog.title}
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                     referrerPolicy="no-referrer"
@@ -558,8 +572,8 @@ export default function Home() {
       {/* 7. Last Tour Chauffeur Transfers */}
       <section className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 z-0 opacity-30">
-          <img 
-            src="https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?q=80&w=2070&auto=format&fit=crop" 
+          <img
+            src="https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?q=80&w=2070&auto=format&fit=crop"
             alt="Tour Background"
             className="w-full h-full object-cover grayscale"
             referrerPolicy="no-referrer"
@@ -574,7 +588,7 @@ export default function Home() {
             <p className="text-white/60 mb-12 text-lg leading-relaxed">
               Discover Victoria's most iconic destinations in absolute comfort. Our chauffeurs are local experts who will guide you through the Great Ocean Road, Yarra Valley, or Phillip Island with a personalized itinerary.
             </p>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-12">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-gold/10 rounded-2xl flex items-center justify-center border border-gold/20">

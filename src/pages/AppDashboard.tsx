@@ -1,11 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Home, MapPin, Clock, User,
-  Settings, Bell, CreditCard, History,
-  ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown,
-  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
-  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, ShieldCheck, UserPlus, Edit2, Eye, UserLock, Copy, Code,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, Cog, Navigation, Route, Settings2
+  Home, MapPin, Clock, User, Settings, Bell, CreditCard, History, ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown, Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage, Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, ShieldCheck, UserPlus, Edit2, Eye, UserLock, Copy, Code, AppWindow, Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, Cog, Navigation, Route, Settings2
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
@@ -249,6 +244,7 @@ export default function AppDashboard() {
       console.error('Error signing out:', err);
     }
   };
+
 
   const markAllAsRead = async () => {
     // Implementation for marking all notifications as read
@@ -1541,17 +1537,18 @@ export default function AppDashboard() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-4">
-                          <div className="flex items-center gap-1.5">
-                            <Navigation size={12} className="text-gold" />
-                            <span className="text-[10px] text-white/60 font-bold uppercase">
-                              {(() => {
-                                if (!booking.distance) return 'N/A';
-                                if (!booking.isReturn) return booking.distance;
-                                const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
-                                return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
-                              })()}
-                            </span>
-                          </div>
+                          {booking.distance && (
+                            <div className="flex items-center gap-1.5">
+                              <Navigation size={12} className="text-gold" />
+                              <span className="text-[10px] text-white/60 font-bold uppercase">
+                                {(() => {
+                                  if (!booking.isReturn) return booking.distance;
+                                  const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
+                                  return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
+                                })()}
+                              </span>
+                            </div>
+                          )}
 
                           <div className="flex items-center gap-1.5">
                             <Clock size={12} className="text-gold" />
@@ -2231,18 +2228,16 @@ export default function AppDashboard() {
 
                 {/* Role Filter Dropdown */}
                 <div className="relative shrink-0">
-                  <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
                   <select
                     value={userRoleFilter}
                     onChange={(e) => setUserRoleFilter(e.target.value)}
-                    className="appearance-none bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2.5 text-[10px] font-bold uppercase tracking-widest text-white outline-none focus:border-gold transition-all cursor-pointer"
+                    className="custom-select min-w-[120px]"
                   >
                     <option value="all">All Roles</option>
                     <option value="admin">Admins</option>
                     <option value="driver">Drivers</option>
                     <option value="customer">Customers</option>
                   </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" size={12} />
                 </div>
 
                 {/* Add User button */}
@@ -2360,7 +2355,7 @@ export default function AppDashboard() {
                 { id: 'extras', label: 'Extras', icon: Plus },
                 { id: 'coupons', label: 'Coupons', icon: Percent },
                 { id: 'settings', label: 'Settings', icon: Cog },
-                { id: 'pages', label: 'Pages', icon: LayoutGrid },
+                { id: 'pages', label: 'Pages', icon: AppWindow },
                 { id: 'blogs', label: 'Blogs', icon: Edit2 },
                 { id: 'global-seo', label: 'Global SEO', icon: Globe },
               ].map((sub) => (
@@ -2376,7 +2371,7 @@ export default function AppDashboard() {
                 >
                   <sub.icon size={14} />
                   {/* Hide labels on small screens, show on md+ */}
-                  <span className="hidden md:inline">{sub.label}</span>
+                  <span className="hidden lg:inline">{sub.label}</span>
                 </button>
               ))}
             </div>
@@ -2766,7 +2761,7 @@ export default function AppDashboard() {
                   <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
                     <div>
                       <h3 className="text-xl font-display text-gold uppercase tracking-widest">
-                        Website & Booking Configuration Settings
+                        Website & Booking Configuration
                       </h3>
                       <p className="text-[10px] text-white/40 uppercase tracking-widest mt-1">
                         Manage pricing visibility, labels, and financial rules
@@ -3094,6 +3089,39 @@ export default function AppDashboard() {
                           </div>
                         </div>
                       </div>
+
+                      {isAdmin && (
+                        <div className="pt-4 border-t border-white/5 space-y-3">
+                          <h4 className="text-sm font-bold text-gold uppercase tracking-widest">Admin Controls</h4>
+                          <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                            <div>
+                              <p className="text-sm font-bold">Allow Admin Registration</p>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                Show 'Admin' role option on public registration page
+                              </p>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setSystemSettings({
+                                  ...systemSettings,
+                                  allowAdminRegistration: !systemSettings?.allowAdminRegistration,
+                                })
+                              }
+                              className={cn(
+                                "w-12 h-6 rounded-full transition-all relative",
+                                systemSettings?.allowAdminRegistration ? "bg-gold" : "bg-white/10"
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                  systemSettings?.allowAdminRegistration ? "right-1" : "left-1"
+                                )}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Right Column: Label Customization */}
@@ -3105,7 +3133,7 @@ export default function AppDashboard() {
                         </h4>
                       </div>
 
-                      <div className="glass p-6 rounded-2xl border border-white/5 space-y-6">
+                      <div className="bg-white/5 p-6 rounded-2xl border border-white/5 space-y-6">
                         <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold border-b border-white/5 pb-2">
                           Customize how price components are named in the UI
                         </p>
@@ -3150,53 +3178,6 @@ export default function AppDashboard() {
 
             {activeSubTab === 'pages' && (
               <div className="space-y-8">
-                {/* System Pages Section */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Settings2 size={16} className="text-gold" />
-                    <h4 className="text-sm font-bold text-white uppercase tracking-widest">System Pages</h4>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {[
-                      { title: 'Home', slug: 'home' },
-                      { title: 'Fleet', slug: 'fleet' },
-                      { title: 'Services', slug: 'services' },
-                      { title: 'About Us', slug: 'about' },
-                      { title: 'Contact', slug: 'contact' },
-                      { title: 'Booking', slug: 'booking' },
-                      { title: 'Offers', slug: 'offers' },
-                      { title: 'Tours', slug: 'tours' }
-                    ].map(sysPage => {
-                      const existing = pages.find(p => p.slug === sysPage.slug);
-                      return (
-                        <div key={sysPage.slug} className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group">
-                          <div>
-                            <p className="text-xs font-bold text-white group-hover:text-gold transition-colors">{sysPage.title}</p>
-                            <p className="text-[8px] text-white/40 uppercase tracking-widest">/{sysPage.slug === 'home' ? '' : sysPage.slug}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              if (existing) {
-                                setEditingPage(existing);
-                              } else {
-                                setEditingPage({ title: sysPage.title, slug: sysPage.slug, content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                              }
-                              setShowPageModal(true);
-                            }}
-                            className={cn(
-                              "p-2 rounded-lg transition-all",
-                              existing ? "bg-gold/10 text-gold hover:bg-gold hover:text-black" : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
-                            )}
-                            title={existing ? "Edit SEO" : "Setup SEO"}
-                          >
-                            {existing ? <Edit2 size={14} /> : <Plus size={14} />}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 <div className="border-t border-white/5 pt-8">
                   <div className="flex justify-between items-center mb-6">
                     <div>
@@ -3204,23 +3185,47 @@ export default function AppDashboard() {
                       <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage custom landing pages</p>
                     </div>
                     <div className="flex gap-4">
-                      <button
-                        onClick={() => setShowGlobalPageCssModal(true)}
-                        className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
-                      >
-                        <Code size={14} />
-                        Global CSS
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                          setShowPageModal(true);
-                        }}
-                        className="btn-primary px-6 py-2 flex items-center gap-2"
-                      >
-                        <Plus size={18} />
-                        <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
-                      </button>
+                      {/* Button Group */}
+                      <div className="flex gap-4">
+                        {/* Global CSS */}
+                        <button
+                          onClick={() => setShowGlobalPageCssModal(true)}
+                          className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
+                        >
+                          {/* Desktop/Tablet: Icon + Text */}
+                          <span className="hidden md:flex items-center gap-2">
+                            <Code size={14} />
+                            Global CSS
+                          </span>
+                          {/* Mobile: Icon Only */}
+                          <span className="flex md:hidden">
+                            <Code size={16} /> {/* Replace with your time icon */}
+                          </span>
+                        </button>
+
+                        {/* Add Page */}
+                        <button
+                          onClick={() => {
+                            setEditingPage({
+                              title: '', slug: '', content: '',
+                              metaTitle: '', metaDescription: '', keywords: '',
+                              includeInSitemap: true, noindex: false
+                            });
+                            setShowPageModal(true);
+                          }}
+                          className="btn-primary px-6 py-2 flex items-center gap-2"
+                        >
+                          {/* Desktop/Tablet: Icon + Text */}
+                          <span className="hidden md:flex items-center gap-2">
+                            <Plus size={18} />
+                            <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
+                          </span>
+                          {/* Mobile: Icon Only */}
+                          <span className="flex md:hidden">
+                            <Plus size={18} />
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -3303,23 +3308,48 @@ export default function AppDashboard() {
                     <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your journal articles</p>
                   </div>
                   <div className="flex gap-4">
-                    <button
-                      onClick={() => setShowGlobalBlogCssModal(true)}
-                      className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
-                    >
-                      <Code size={14} />
-                      Global CSS
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                        setShowBlogModal(true);
-                      }}
-                      className="btn-primary px-6 py-2 flex items-center gap-2"
-                    >
-                      <Plus size={18} />
-                      <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
-                    </button>
+                    {/* Button Group */}
+                    <div className="flex gap-4">
+                      {/* Global Blog CSS */}
+                      <button
+                        onClick={() => setShowGlobalBlogCssModal(true)}
+                        className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
+                      >
+                        {/* Desktop/Tablet: Icon + Text */}
+                        <span className="hidden md:flex items-center gap-2">
+                          <Code size={14} />
+                          Global CSS
+                        </span>
+                        {/* Mobile: Icon Only */}
+                        <span className="flex md:hidden">
+                          <Code size={16} /> {/* or swap for a Time icon if you prefer */}
+                        </span>
+                      </button>
+
+                      {/* Add Post */}
+                      <button
+                        onClick={() => {
+                          setEditingBlog({
+                            title: '', slug: '', content: '', excerpt: '',
+                            category: 'Travel Tips', featuredImage: '',
+                            metaTitle: '', metaDescription: '', keywords: '',
+                            includeInSitemap: true, noindex: false
+                          });
+                          setShowBlogModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                      >
+                        {/* Desktop/Tablet: Icon + Text */}
+                        <span className="hidden md:flex items-center gap-2">
+                          <Plus size={18} />
+                          <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
+                        </span>
+                        {/* Mobile: Icon Only */}
+                        <span className="flex md:hidden">
+                          <Plus size={18} />
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -3407,8 +3437,26 @@ export default function AppDashboard() {
                     disabled={isSavingSettings}
                     className="btn-primary px-6 py-2 flex items-center gap-2"
                   >
-                    {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                    <span className="text-xs font-bold uppercase tracking-widest">Save Changes</span>
+                    {/* Desktop/Tablet: Icon + Text */}
+                    <span className="hidden md:flex items-center gap-2">
+                      {isSavingSettings ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Save size={18} />
+                      )}
+                      <span className="text-xs font-bold uppercase tracking-widest">
+                        Save Changes
+                      </span>
+                    </span>
+
+                    {/* Mobile: Icon Only */}
+                    <span className="flex md:hidden">
+                      {isSavingSettings ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Save size={18} />
+                      )}
+                    </span>
                   </button>
                 </div>
 
@@ -3471,54 +3519,102 @@ export default function AppDashboard() {
                     </h4>
                     <div className="space-y-4">
                       <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 gap-6">
                           {/* Site Logo */}
                           <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">Site Logo</label>
-                            <div className="flex items-center gap-3">
-                              {systemSettings?.seo?.logo && (
-                                <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
-                                  <img src={systemSettings.seo.logo} alt="Logo Preview" className="max-w-full max-h-full object-contain" referrerPolicy="no-referrer" />
-                                </div>
-                              )}
-                              <div className="flex-1 flex gap-2">
-                                <input
-                                  type="text"
-                                  value={systemSettings?.seo?.logo || ''}
-                                  onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, logo: e.target.value } })}
-                                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                                  placeholder="Logo URL..."
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
+                              Site Logo
+                            </label>
+
+                            {/* Logo preview outside card */}
+                            {systemSettings?.seo?.logo && (
+                              <div className="mb-3 w-20 h-20 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                                <img
+                                  src={systemSettings.seo.logo}
+                                  alt="Logo Preview"
+                                  className="max-w-full max-h-full object-contain"
+                                  referrerPolicy="no-referrer"
                                 />
-                                <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
-                                  <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={isUploading} />
-                                  {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-                                </label>
                               </div>
+                            )}
+
+                            {/* Input + upload card */}
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={systemSettings?.seo?.logo || ''}
+                                onChange={(e) =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    seo: { ...systemSettings.seo, logo: e.target.value },
+                                  })
+                                }
+                                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                                placeholder="Logo URL..."
+                              />
+                              <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  accept="image/*"
+                                  onChange={handleLogoUpload}
+                                  disabled={isUploading}
+                                />
+                                {isUploading ? (
+                                  <Loader2 size={18} className="animate-spin" />
+                                ) : (
+                                  <Upload size={18} />
+                                )}
+                              </label>
                             </div>
                           </div>
 
                           {/* Favicon */}
                           <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">Favicon (.ico/png)</label>
-                            <div className="flex items-center gap-3">
-                              {systemSettings?.seo?.favicon && (
-                                <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
-                                  <img src={systemSettings.seo.favicon} alt="Favicon Preview" className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
-                                </div>
-                              )}
-                              <div className="flex-1 flex gap-2">
-                                <input
-                                  type="text"
-                                  value={systemSettings?.seo?.favicon || ''}
-                                  onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, favicon: e.target.value } })}
-                                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                                  placeholder="Favicon URL..."
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
+                              Favicon (.ico/png)
+                            </label>
+
+                            {/* Favicon preview outside card */}
+                            {systemSettings?.seo?.favicon && (
+                              <div className="mb-3 w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                                <img
+                                  src={systemSettings.seo.favicon}
+                                  alt="Favicon Preview"
+                                  className="w-6 h-6 object-contain"
+                                  referrerPolicy="no-referrer"
                                 />
-                                <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
-                                  <input type="file" className="hidden" accept="image/*" onChange={handleFaviconUpload} disabled={isUploading} />
-                                  {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-                                </label>
                               </div>
+                            )}
+
+                            {/* Input + upload card */}
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={systemSettings?.seo?.favicon || ''}
+                                onChange={(e) =>
+                                  setSystemSettings({
+                                    ...systemSettings,
+                                    seo: { ...systemSettings.seo, favicon: e.target.value },
+                                  })
+                                }
+                                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                                placeholder="Favicon URL..."
+                              />
+                              <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  accept="image/*"
+                                  onChange={handleFaviconUpload}
+                                  disabled={isUploading}
+                                />
+                                {isUploading ? (
+                                  <Loader2 size={18} className="animate-spin" />
+                                ) : (
+                                  <Upload size={18} />
+                                )}
+                              </label>
                             </div>
                           </div>
                         </div>
@@ -3603,47 +3699,6 @@ export default function AppDashboard() {
                 >
                   {isUpdatingProfile ? 'Updating...' : 'Update Profile'}
                 </button>
-
-                {isAdmin && (
-                  <div className="pt-8 border-t border-white/5 space-y-6">
-                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest">Admin Controls</h4>
-                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
-                      <div>
-                        <p className="text-sm font-bold">Allow Admin Registration</p>
-                        <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                          Show 'Admin' role option on public registration page
-                        </p>
-                      </div>
-                      <button
-                        onClick={() =>
-                          setSystemSettings({
-                            ...systemSettings,
-                            allowAdminRegistration: !systemSettings?.allowAdminRegistration,
-                          })
-                        }
-                        className={cn(
-                          "w-12 h-6 rounded-full transition-all relative",
-                          systemSettings?.allowAdminRegistration ? "bg-gold" : "bg-white/10"
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                            systemSettings?.allowAdminRegistration ? "right-1" : "left-1"
-                          )}
-                        />
-                      </button>
-                    </div>
-                    <button
-                      onClick={handleSaveSecuritySettings}
-                      disabled={isSavingSettings}
-                      className="w-full btn-primary py-3 flex items-center justify-center gap-2"
-                    >
-                      {isSavingSettings ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      <span className="text-xs font-bold uppercase tracking-widest">Save Admin Settings</span>
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -3739,48 +3794,60 @@ export default function AppDashboard() {
       <div className="flex-1 flex flex-col w-full">
         <main className="flex-1 p-3 lg:p-6 w-full max-w-7xl mx-auto">
           {/* Dashboard Header Section (Relocated) */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-4 pb-4 border-b border-white/5">
-            {/* Left side: Dashboard name */}
-            <h1 className="text-2xl lg:text-3xl font-display text-white">
-              {userProfile?.role === 'admin' ? 'Admin Dashboard' :
-                userProfile?.role === 'driver' ? 'Driver Dashboard' :
-                  'Customer Dashboard'}
-            </h1>
+          <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-white/5 flex-nowrap">
+            {/* Left side: Dashboard name + user name stacked */}
+            <div className="flex flex-col">
+              <h1 className="text-base md:text-lg lg:text-xl font-display text-white">
+                {userProfile?.role === 'admin'
+                  ? 'Admin Dashboard'
+                  : userProfile?.role === 'driver'
+                    ? 'Driver Dashboard'
+                    : 'Customer Dashboard'}
+              </h1>
+              <span className="text-gold font-bold text-xs md:text-sm">
+                {userProfile?.name || 'User'}
+              </span>
+            </div>
 
-            {/* Right side: User info, role icon, separator, bell */}
-            <div className="flex items-center gap-4">
-              {/* User info */}
-              <div className="flex flex-col items-end">
-                <span className="text-gold font-bold text-sm">{userProfile?.name || 'User'}</span>
-                <span className="text-white/40 text-xs uppercase tracking-[0.2em] font-bold">
-                  {userProfile?.role}
-                </span>
-              </div>
+            {/* Right side: role label + icon + bell inline */}
+            <div className="flex items-center gap-2 flex-nowrap">
+              {/* Role label */}
+              <span className="text-white/40 text-[10px] md:text-xs uppercase tracking-[0.15em] font-bold">
+                {userProfile?.role}
+              </span>
 
               {/* Role-based icon */}
-              <div className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 shadow-lg",
-                userProfile?.role === 'admin' ? "bg-red-500/10 border-red-500/20 text-red-400" :
-                  userProfile?.role === 'driver' ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
-                    "bg-gold/10 border-gold/20 text-gold"
-              )}>
-                {userProfile?.role === 'admin' ? <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" /> :
-                  userProfile?.role === 'driver' ? <Truck className="w-4 h-4 md:w-5 md:h-5" /> :
-                    <User className="w-4 h-4 md:w-5 md:h-5" />}
+              <div
+                className={cn(
+                  "w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 shadow",
+                  userProfile?.role === 'admin'
+                    ? "bg-red-500/10 border-red-500/20 text-red-400"
+                    : userProfile?.role === 'driver'
+                      ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                      : "bg-gold/10 border-gold/20 text-gold"
+                )}
+              >
+                {userProfile?.role === 'admin' ? (
+                  <ShieldCheck className="w-4 h-4" />
+                ) : userProfile?.role === 'driver' ? (
+                  <Truck className="w-4 h-4" />
+                ) : (
+                  <User className="w-4 h-4" />
+                )}
               </div>
 
               {/* Separator */}
-              <div className="w-px h-10 bg-white/10" />
+              <div className="w-px h-6 bg-white/10" />
 
               {/* Bell icon */}
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-3 bg-white/5 text-gold hover:bg-white/10 rounded-2xl border border-white/5 transition-all group"
+                className="relative w-8 h-8 flex items-center justify-center bg-white/5 text-gold hover:bg-white/10 rounded-lg border border-white/5 transition-all group"
               >
-                <Bell className="w-4 h-4 md:w-5 md:h-5 group-hover:scale-110 transition-transform" />
-                {bookings.filter(b => !b.read).length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold text-white shadow-lg">
-                    {bookings.filter(b => !b.read).length}
+                <Bell className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                {bookings.filter((b) => !b.read).length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center font-bold text-white shadow">
+                    {bookings.filter((b) => !b.read).length}
                   </span>
                 )}
               </button>
@@ -3844,7 +3911,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-sm glass p-8 rounded-3xl text-center border border-gold/20"
+              className="w-full max-w-sm glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar text-center"
             >
               <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Star size={32} className="text-gold" />
@@ -4476,22 +4543,25 @@ export default function AppDashboard() {
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
-                    <Navigation size={20} className="text-gold" />
+                {routeBooking.distance && (
+                  <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
+                      <Navigation size={20} className="text-gold" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                        Total Distance
+                      </p>
+                      <p className="text-lg font-display text-white">
+                        {(() => {
+                          if (!routeBooking.isReturn) return routeBooking.distance;
+                          const num = parseFloat(routeBooking.distance.replace(/[^\d.]/g, ''));
+                          return `${(num * 2).toFixed(1)} km`;
+                        })()}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Total Distance</p>
-                    <p className="text-lg font-display text-white">
-                      {(() => {
-                        if (!routeBooking.distance) return 'N/A';
-                        if (!routeBooking.isReturn) return routeBooking.distance;
-                        const num = parseFloat(routeBooking.distance.replace(/[^\d.]/g, ''));
-                        return `${(num * 2).toFixed(1)} km`;
-                      })()}
-                    </p>
-                  </div>
-                </div>
+                )}
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
                     <Clock size={20} className="text-gold" />
@@ -4603,7 +4673,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
+              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -4713,7 +4783,6 @@ export default function AppDashboard() {
         )}
 
         {/* Extra Modal */}
-        {/* Extra Modal */}
         {showExtraModal && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -4724,7 +4793,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
+              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               {/* Heading + Active toggle inline */}
               <div className="flex justify-between items-center mb-6">
@@ -4857,7 +4926,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 md:max-h-[90vh] overflow-y-auto custom-scrollbar max-h-[90vh]"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5038,7 +5107,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5206,7 +5275,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5428,7 +5497,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               {/* Heading row: Title + Active toggle + Close button */}
               <div className="flex justify-between items-center mb-6">
@@ -5765,7 +5834,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20"
+              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">Global Page CSS</h3>
@@ -5823,7 +5892,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20"
+              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">Global Blog CSS</h3>
@@ -5870,15 +5939,6 @@ export default function AppDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Scroll to Top Button */}
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        className="fixed bottom-8 right-8 p-4 bg-gold text-black rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all z-50 group"
-        title="Scroll to Top"
-      >
-        <ChevronDown size={24} className="rotate-180 group-hover:-translate-y-1 transition-transform" />
-      </button>
     </div>
   );
 }

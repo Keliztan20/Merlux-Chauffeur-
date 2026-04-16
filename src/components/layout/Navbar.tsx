@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Home, Gift, MapPin, Briefcase, MoreHorizontal, User, CalendarDays, LogOut, ChevronDown, LogIn, ShieldCheck, Truck, UserCircle, LayoutDashboard } from 'lucide-react';
+import { Home, CalendarFold, Gift, MapPin, Briefcase, MoreHorizontal, User, CalendarDays, LogOut, ChevronDown, LogIn, ShieldCheck, Truck, UserCircle, LayoutDashboard } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '../../lib/utils';
 import { auth, db } from '../../lib/firebase';
@@ -96,7 +96,7 @@ export default function Navbar() {
           <Logo />
 
           {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-4 lg:gap-8">
             {navLinks.map((link) => (
               <Link
                 key={link.path}
@@ -175,7 +175,7 @@ export default function Navbar() {
                       ) : (
                         <UserCircle size={18} className="text-gold" />
                       )}
-                      <span>Dashboard</span>
+                      <span className="hidden lg:inline">Dashboard</span>
                     </Link>
 
                     {/* Tooltip */}
@@ -201,8 +201,20 @@ export default function Navbar() {
                   <LogIn size={20} />
                 </Link>
               )}
-              <Link to="/booking" className="btn-primary py-2 px-6 text-xs rounded-sm">
-                Book Now
+              <Link
+                to="/booking"
+                className="py-2 px-2 text-xs rounded-sm flex items-center gap-2 bg-gold text-black font-bold uppercase tracking-widest hover:bg-gold/80 hover:text-white transition-colors duration-200"
+              >
+                {/* Desktop: Icon + Text */}
+                <span className="hidden lg:flex items-center gap-2">
+                  <CalendarFold size={16} />
+                  Book Now
+                </span>
+
+                {/* Tablet + Mobile: Icon Only with matched padding */}
+                <span className="flex lg:hidden px-0.5">
+                  <CalendarFold size={16} /> {/* Matches the <LogIn size={20} /> button */}
+                </span>
               </Link>
             </div>
           </div>
