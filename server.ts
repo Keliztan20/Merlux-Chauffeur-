@@ -14,37 +14,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
-let dbAdmin: admin.firestore.Firestore;
+if (!admin.apps.length) {
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0235637334';
+  const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || 'ai-studio-19758109-ff4d-41af-92f4-5c0a6339ee89';
 
-try {
-  const configPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'firebase-applet-config.json');
-  let config: any = {};
-  if (fs.existsSync(configPath)) {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  admin.initializeApp({
+    projectId: projectId,
+  });
+
+  if (databaseId) {
+    admin.firestore().settings({ databaseId });
   }
-
-  const projectId = config.projectId || process.env.VITE_FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-  const databaseId = config.firestoreDatabaseId || process.env.VITE_FIREBASE_DATABASE_ID;
-
-  console.log('Initializing Firebase Admin with:', { projectId, databaseId });
-
-  if (!admin.apps.length) {
-    if (projectId) {
-      admin.initializeApp({ projectId });
-    } else {
-      admin.initializeApp();
-    }
-  }
-
-  // In firebase-admin v11+, you can pass the databaseId to firestore()
-  const dbId = databaseId && databaseId !== '(default)' ? databaseId : undefined;
-  dbAdmin = dbId ? admin.firestore(dbId) : admin.firestore();
-
-} catch (err) {
-  console.error('Firebase Admin Initialization Error:', err);
-  dbAdmin = admin.firestore();
 }
 
+const dbAdmin = admin.firestore();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
 
 async function startServer() {
@@ -54,38 +37,6 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // Admin: Test Firestore Connection
-  app.get('/api/admin/test-firestore', async (req, res) => {
-    try {
-      const collections = await dbAdmin.listCollections();
-      let authStatus = 'Unknown';
-      try {
-        await admin.auth().listUsers(1);
-        authStatus = 'Identity Toolkit API is Enabled';
-      } catch (e: any) {
-        if (e.message.includes('identitytoolkit.googleapis.com')) {
-          authStatus = 'Identity Toolkit API is DISABLED (Action Required)';
-        } else {
-          authStatus = `Auth Error: ${e.message}`;
-        }
-      }
-      
-      res.json({ 
-        success: true, 
-        collections: collections.map(c => c.id),
-        projectId: admin.app().options.projectId || 'default',
-        authStatus
-      });
-    } catch (error: any) {
-      console.error('Firestore Test Error:', error);
-      res.status(500).json({ 
-        error: error.message,
-        code: error.code,
-        details: error.details
-      });
-    }
-  });
-
   // Stripe Checkout Session Endpoint
   app.post('/api/create-checkout-session', async (req, res) => {
     try {
@@ -94,6 +45,8 @@ async function startServer() {
       if (!process.env.STRIPE_SECRET_KEY) {
         throw new Error('STRIPE_SECRET_KEY is not set');
       }
+
+      const bookingDataString = JSON.stringify(bookingData);
 
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
@@ -114,7 +67,10 @@ async function startServer() {
         success_url: `${process.env.APP_URL || 'http://localhost:3000'}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.APP_URL || 'http://localhost:3000'}/booking`,
         metadata: {
-          bookingData: JSON.stringify(bookingData),
+          bookingDataChunk1: bookingDataString.substring(0, 450),
+          bookingDataChunk2: bookingDataString.substring(450, 900),
+          bookingDataChunk3: bookingDataString.substring(900, 1350),
+          bookingDataChunk4: bookingDataString.substring(1350, 1800),
         },
       });
 
@@ -148,9 +104,6 @@ async function startServer() {
         phoneNumber: phone || undefined,
       });
 
-      // Set custom claims for role
-      await admin.auth().setCustomUserClaims(userRecord.uid, { role: role || 'customer' });
-
       // Create user document in Firestore
       await dbAdmin.collection('users').doc(userRecord.uid).set({
         id: userRecord.uid,
@@ -167,84 +120,6 @@ async function startServer() {
     } catch (error: any) {
       console.error('Error creating user:', error);
       res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Admin: Update User Role (Custom Claims)
-  app.post('/api/admin/update-user-role', async (req, res) => {
-    try {
-      const { uid, role } = req.body;
-      if (!uid || !role) {
-        return res.status(400).json({ error: 'UID and Role are required' });
-      }
-      await admin.auth().setCustomUserClaims(uid, { role });
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error('Error updating user role claims:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Admin: Delete User from Firestore ONLY
-  app.post('/api/admin/delete-user', async (req, res) => {
-    try {
-      const { uid } = req.body;
-      if (!uid) return res.status(400).json({ error: 'User ID is required' });
-      
-      try {
-        await dbAdmin.collection('users').doc(uid).delete();
-      } catch (e: any) {
-        // If permission denied on named database, try default database as fallback
-        if (e.message.includes('PERMISSION_DENIED') || e.code === 7) {
-          console.log('Permission denied on configured database, trying default database...');
-          await admin.firestore().collection('users').doc(uid).delete();
-        } else {
-          throw e;
-        }
-      }
-      
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error('Error deleting user from Firestore:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Admin: List Firebase Auth Users
-  app.get('/api/admin/list-auth-users', async (req, res) => {
-    console.log('Received request to list auth users');
-    try {
-      const listUsersResult = await admin.auth().listUsers(1000);
-      console.log(`Found ${listUsersResult.users.length} auth users`);
-      const users = listUsersResult.users.map(user => ({
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-        providerData: user.providerData.map(p => p.providerId),
-        createdAt: user.metadata.creationTime,
-        lastSignInAt: user.metadata.lastSignInTime,
-      }));
-      res.json({ users });
-    } catch (error: any) {
-      console.error('Error listing auth users:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Admin: Delete User from Firebase Auth
-  app.post('/api/admin/delete-auth-user', async (req, res) => {
-    try {
-      const { uid } = req.body;
-      if (!uid) return res.status(400).json({ error: 'User ID is required' });
-      await admin.auth().deleteUser(uid);
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error('Error deleting auth user:', error);
-      let message = error.message;
-      if (message.includes('identitytoolkit.googleapis.com')) {
-        message = 'The "Identity Toolkit API" is not enabled in your Google Cloud project. Please enable it at https://console.developers.google.com/apis/api/identitytoolkit.googleapis.com/overview?project=' + process.env.GOOGLE_CLOUD_PROJECT + ' to allow deleting users from Firebase Auth.';
-      }
-      res.status(500).json({ error: message });
     }
   });
 

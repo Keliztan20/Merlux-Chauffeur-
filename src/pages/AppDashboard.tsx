@@ -1,6 +1,11 @@
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Home, MapPin, Clock, User, Settings, Bell, CreditCard, History, ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown, Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage, Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, ShieldCheck, UserPlus, Edit2, Eye, UserLock, Copy, Code, AppWindow, Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, Cog, Navigation, Route, Settings2
+  Home, MapPin, Clock, User,
+  Settings, Bell, CreditCard, History,
+  ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight,
+  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
+  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock, Copy,
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
@@ -103,10 +108,6 @@ export default function AppDashboard() {
   const [editingPage, setEditingPage] = useState<any>(null);
   const [editingBlog, setEditingBlog] = useState<any>(null);
   const [cmsActiveSubTab, setCmsActiveSubTab] = useState('pages');
-  const [showGlobalPageCssModal, setShowGlobalPageCssModal] = useState(false);
-  const [showGlobalBlogCssModal, setShowGlobalBlogCssModal] = useState(false);
-  const [globalPageCss, setGlobalPageCss] = useState('');
-  const [globalBlogCss, setGlobalBlogCss] = useState('');
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -217,24 +218,12 @@ export default function AppDashboard() {
     { id: 'analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
     { id: 'calendar', label: 'Calendar', icon: Calendar, adminOnly: false },
     { id: 'users', label: 'Users', icon: Users, adminOnly: true },
+    { id: 'cms', label: 'SEO & CMS', icon: Globe, adminOnly: true },
     { id: 'profile', label: 'Profile', icon: User, adminOnly: false },
     { id: 'management', label: 'Management', icon: Settings, adminOnly: true },
   ];
 
   const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
-
-  const handleSaveSecuritySettings = async () => {
-    setIsSavingSettings(true);
-    try {
-      await setDoc(doc(db, 'settings', 'system'), systemSettings, { merge: true });
-      alert('Security settings saved successfully!');
-    } catch (err) {
-      console.error('Error saving security settings:', err);
-      alert('Failed to save security settings.');
-    } finally {
-      setIsSavingSettings(false);
-    }
-  };
 
   const handleLogout = async () => {
     try {
@@ -244,7 +233,6 @@ export default function AppDashboard() {
       console.error('Error signing out:', err);
     }
   };
-
 
   const markAllAsRead = async () => {
     // Implementation for marking all notifications as read
@@ -330,21 +318,13 @@ export default function AppDashboard() {
 
       // Fetch user profile for role
       try {
-        const idTokenResult = await user.getIdTokenResult();
-        const roleFromClaim = idTokenResult.claims.role;
-
         const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
-          const profileData = userSnap.data();
-          // Sync role if claim exists and differs
-          if (roleFromClaim && roleFromClaim !== profileData.role) {
-            profileData.role = roleFromClaim;
-          }
-          setUserProfile(profileData);
+          setUserProfile(userSnap.data());
         } else {
           // If no profile exists, set a default one to allow the app to load
-          setUserProfile({ role: (roleFromClaim as string) || 'customer', email: user.email });
+          setUserProfile({ role: 'customer', email: user.email });
         }
       } catch (err) {
         console.error('Error fetching user profile:', err);
@@ -493,7 +473,6 @@ export default function AppDashboard() {
     let unsubscribeExtras: (() => void) | undefined;
     let unsubscribeCoupons: (() => void) | undefined;
     let unsubscribeSettings: (() => void) | undefined;
-    let unsubscribeCmsSettings: (() => void) | undefined;
     let unsubscribePages: (() => void) | undefined;
     let unsubscribeBlogs: (() => void) | undefined;
 
@@ -604,16 +583,6 @@ export default function AppDashboard() {
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'blogs');
       });
-
-      // Fetch CMS settings
-      const cmsSettingsRef = doc(db, 'settings', 'cms');
-      unsubscribeCmsSettings = onSnapshot(cmsSettingsRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setGlobalPageCss(data.globalPageCss || '');
-          setGlobalBlogCss(data.globalBlogCss || '');
-        }
-      });
     }
 
     // Auto-cancel past bookings
@@ -668,7 +637,6 @@ export default function AppDashboard() {
       if (unsubscribeExtras) unsubscribeExtras();
       if (unsubscribeCoupons) unsubscribeCoupons();
       if (unsubscribeSettings) unsubscribeSettings();
-      if (unsubscribeCmsSettings) unsubscribeCmsSettings();
       if (unsubscribePages) unsubscribePages();
       if (unsubscribeBlogs) unsubscribeBlogs();
     };
@@ -702,20 +670,13 @@ export default function AppDashboard() {
 
   const handleUpdateUser = async (userId: string, data: any) => {
     try {
+      // Ensure the internal id field always matches the document path ID
+      const sanitizedData = { ...data, id: userId };
+      
       await setDoc(doc(db, 'users', userId), {
-        ...data,
+        ...sanitizedData,
         updatedAt: serverTimestamp()
       }, { merge: true });
-
-      // If role changed, update custom claims
-      if (data.role) {
-        await fetch('/api/admin/update-user-role', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: userId, role: data.role })
-        });
-      }
-
       setShowUserModal(false);
       setEditingUser(null);
     } catch (err) {
@@ -832,34 +793,12 @@ export default function AppDashboard() {
   };
 
   const executeDeleteUser = async (userId: string) => {
-    if (userId === auth.currentUser?.uid) {
-      alert("You cannot delete your own account while logged in.");
-      setConfirmDelete(null);
-      return;
-    }
-
     try {
-      const response = await fetch('/api/admin/delete-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: userId })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete user');
-      }
-
+      await deleteDoc(doc(db, 'users', userId));
       setConfirmDelete(null);
-      alert('User profile deleted successfully from Database. Authentication account remains active.');
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error deleting user:', err);
-      let message = err.message || 'Failed to delete user';
-      if (message.includes('identitytoolkit.googleapis.com')) {
-        message = 'The Identity Toolkit API is not enabled in your Google Cloud Project. Please enable it in the Google Cloud Console to perform administrative user actions.';
-      }
-      alert(message);
-      setConfirmDelete(null);
+      handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
     }
   };
 
@@ -1047,7 +986,7 @@ export default function AppDashboard() {
       // Convert keywords string to array if it's a string
       const processedData = {
         ...data,
-        keywords: typeof data.keywords === 'string'
+        keywords: typeof data.keywords === 'string' 
           ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
           : data.keywords
       };
@@ -1073,7 +1012,7 @@ export default function AppDashboard() {
       // Convert keywords string to array if it's a string
       const processedData = {
         ...data,
-        keywords: typeof data.keywords === 'string'
+        keywords: typeof data.keywords === 'string' 
           ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
           : data.keywords
       };
@@ -1098,42 +1037,8 @@ export default function AppDashboard() {
     setConfirmDelete({ id, type: 'page' });
   };
 
-  const handleDuplicatePage = async (page: any) => {
-    try {
-      const newPage = {
-        ...page,
-        title: `${page.title} (Copy)`,
-        slug: `${page.slug}-copy-${Math.floor(Math.random() * 1000)}`,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      delete newPage.id;
-      await addDoc(collection(db, 'pages'), newPage);
-      alert('Page duplicated successfully!');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'pages');
-    }
-  };
-
   const handleDeleteBlog = (id: string) => {
     setConfirmDelete({ id, type: 'blog' });
-  };
-
-  const handleDuplicateBlog = async (blog: any) => {
-    try {
-      const newBlog = {
-        ...blog,
-        title: `${blog.title} (Copy)`,
-        slug: `${blog.slug}-copy-${Math.floor(Math.random() * 1000)}`,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      delete newBlog.id;
-      await addDoc(collection(db, 'blogs'), newBlog);
-      alert('Blog post duplicated successfully!');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'blogs');
-    }
   };
 
   const executeDeletePage = async (id: string) => {
@@ -1177,7 +1082,7 @@ export default function AppDashboard() {
     switch (activeTab) {
       case 'bookings':
         return (
-          <div className="space-y-6 w-full">
+          <div className="space-y-6">
             {/* Booking Stats Section */}
             {isAdmin && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1444,8 +1349,8 @@ export default function AppDashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAndSortedBookings.map((booking, idx) => (
-                  <div key={`${booking.id}-${idx}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
+                {filteredAndSortedBookings.map((booking) => (
+                  <div key={`booking-card-${booking.id}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
@@ -1537,18 +1442,17 @@ export default function AppDashboard() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-4">
-                          {booking.distance && (
-                            <div className="flex items-center gap-1.5">
-                              <Navigation size={12} className="text-gold" />
-                              <span className="text-[10px] text-white/60 font-bold uppercase">
-                                {(() => {
-                                  if (!booking.isReturn) return booking.distance;
-                                  const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
-                                  return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
-                                })()}
-                              </span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            <Navigation size={12} className="text-gold" />
+                            <span className="text-[10px] text-white/60 font-bold uppercase">
+                              {(() => {
+                                if (!booking.distance) return 'N/A';
+                                if (!booking.isReturn) return booking.distance;
+                                const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
+                                return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
+                              })()}
+                            </span>
+                          </div>
 
                           <div className="flex items-center gap-1.5">
                             <Clock size={12} className="text-gold" />
@@ -1936,8 +1840,8 @@ export default function AppDashboard() {
                                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
                                 >
                                   <option value="" className="bg-black">Assign Driver</option>
-                                  {drivers.map((driver, dIdx) => (
-                                    <option key={`${driver.id}-${dIdx}`} value={driver.id} className="bg-black">{driver.name}</option>
+                                  {drivers.map((driver) => (
+                                    <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
                                   ))}
                                 </select>
                                 <User size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white pointer-events-none" />
@@ -2194,7 +2098,7 @@ export default function AppDashboard() {
           return matchesSearch && matchesRole;
         });
         return (
-          <div className="space-y-8 w-full">
+          <div className="space-y-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
               {/* Row 1: Heading */}
               <div>
@@ -2204,17 +2108,17 @@ export default function AppDashboard() {
                 </p>
               </div>
 
-              {/* Row 2: Search + Role Filter + Add User */}
-              <div className="flex flex-row items-center gap-3 w-full md:w-auto">
+              {/* Row 2: Search + Add User */}
+              <div className="flex flex-row items-center gap-2 w-full md:w-auto">
                 {/* Search input */}
-                <div className="relative flex-1 md:w-64">
+                <div className="relative flex-1 min-w-[200px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
                   <input
                     type="text"
                     placeholder="Search users..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2.5 text-xs text-white outline-none focus:border-gold transition-all"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -2226,29 +2130,16 @@ export default function AppDashboard() {
                   )}
                 </div>
 
-                {/* Role Filter Dropdown */}
-                <div className="relative shrink-0">
-                  <select
-                    value={userRoleFilter}
-                    onChange={(e) => setUserRoleFilter(e.target.value)}
-                    className="custom-select min-w-[120px]"
-                  >
-                    <option value="all">All Roles</option>
-                    <option value="admin">Admins</option>
-                    <option value="driver">Drivers</option>
-                    <option value="customer">Customers</option>
-                  </select>
-                </div>
-
                 {/* Add User button */}
                 <button
                   onClick={() => {
                     setEditingUser({ role: 'customer', name: '', email: '', phone: '' });
                     setShowUserModal(true);
                   }}
-                  className="btn-primary px-6 py-2.5 flex items-center justify-center gap-2 shrink-0"
+                  className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
                 >
                   <UserPlus size={18} />
+                  {/* Hide text on mobile, show on md+ */}
                   <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
                     Add User
                   </span>
@@ -2256,9 +2147,33 @@ export default function AppDashboard() {
               </div>
             </div>
 
+            {/* Role Filter Tabs */}
+            <div className="flex items-center gap-2 border-b border-white/5 p-1 bg-white/5 rounded-lg w-fit">
+              {[
+                { id: 'all', label: 'All Users', icon: Users },
+                { id: 'admin', label: 'Admins', icon: Shield },
+                { id: 'driver', label: 'Drivers', icon: Car },
+                { id: 'customer', label: 'Customers', icon: User },
+              ].map((roleTab) => (
+                <button
+                  key={`user-role-tab-${roleTab.id}`}
+                  onClick={() => setUserRoleFilter(roleTab.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                    userRoleFilter === roleTab.id
+                      ? "bg-gold text-black"
+                      : "text-white/40 hover:text-white hover:bg-white/5"
+                  )}
+                >
+                  <roleTab.icon size={14} />
+                  <span className="hidden md:inline">{roleTab.label}</span>
+                </button>
+              ))}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredUsers.map((u, idx) => (
-                <div key={`${u.id}-${idx}`} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+              {filteredUsers.map((u) => (
+                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
                   <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-4">
                       <div
@@ -2344,26 +2259,425 @@ export default function AppDashboard() {
           </div>
         );
       case 'cms':
-        return null;
-      case 'management':
         if (!isAdmin) return null;
         return (
-          <div className="space-y-4 w-full">
-            <div className="flex items-center justify-between w-full border-b border-white/5 p-1 bg-white/5 rounded-lg">
+          <div className="space-y-6">
+            <div className="flex items-center gap-4 border-b border-white/5 p-1 bg-white/5 rounded-lg">
               {[
-                { id: 'fleet', label: 'Fleet', icon: Truck },
-                { id: 'extras', label: 'Extras', icon: Plus },
-                { id: 'coupons', label: 'Coupons', icon: Percent },
-                { id: 'settings', label: 'Settings', icon: Cog },
-                { id: 'pages', label: 'Pages', icon: AppWindow },
+                { id: 'pages', label: 'Pages', icon: LayoutGrid },
                 { id: 'blogs', label: 'Blogs', icon: Edit2 },
                 { id: 'global-seo', label: 'Global SEO', icon: Globe },
               ].map((sub) => (
                 <button
                   key={sub.id}
+                  onClick={() => setCmsActiveSubTab(sub.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
+                    cmsActiveSubTab === sub.id
+                      ? "bg-gold text-black"
+                      : "text-white/40 hover:text-white hover:bg-white/5"
+                  )}
+                >
+                  <sub.icon size={14} />
+                  <span className="hidden md:inline">{sub.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {cmsActiveSubTab === 'pages' && (
+              <div className="space-y-8">
+                {/* System Pages Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Settings2 size={16} className="text-gold" />
+                    <h4 className="text-sm font-bold text-white uppercase tracking-widest">System Pages</h4>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                      { title: 'Home', slug: 'home' },
+                      { title: 'Fleet', slug: 'fleet' },
+                      { title: 'Services', slug: 'services' },
+                      { title: 'About Us', slug: 'about' },
+                      { title: 'Contact', slug: 'contact' },
+                      { title: 'Booking', slug: 'booking' },
+                      { title: 'Offers', slug: 'offers' },
+                      { title: 'Tours', slug: 'tours' }
+                    ].map(sysPage => {
+                      const existing = pages.find(p => p.slug === sysPage.slug);
+                      return (
+                        <div key={sysPage.slug} className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group">
+                          <div>
+                            <p className="text-xs font-bold text-white group-hover:text-gold transition-colors">{sysPage.title}</p>
+                            <p className="text-[8px] text-white/40 uppercase tracking-widest">/{sysPage.slug === 'home' ? '' : sysPage.slug}</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (existing) {
+                                setEditingPage(existing);
+                              } else {
+                                setEditingPage({ title: sysPage.title, slug: sysPage.slug, content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                              }
+                              setShowPageModal(true);
+                            }}
+                            className={cn(
+                              "p-2 rounded-lg transition-all",
+                              existing ? "bg-gold/10 text-gold hover:bg-gold hover:text-black" : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
+                            )}
+                            title={existing ? "Edit SEO" : "Setup SEO"}
+                          >
+                            {existing ? <Edit2 size={14} /> : <Plus size={14} />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t border-white/5 pt-8">
+                  <div className="flex justify-between items-center mb-6">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Dynamic Pages</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage custom landing pages</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                        setShowPageModal(true);
+                      }}
+                      className="btn-primary px-6 py-2 flex items-center gap-2"
+                    >
+                      <Plus size={18} />
+                      <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).length > 0 ? 
+                      pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).map(page => (
+                      <div key={page.id} className="glass p-6 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-gold/30 transition-all">
+                        <div>
+                          <h4 className="text-lg font-bold text-white mb-1">{page.title}</h4>
+                          <p className="text-xs text-gold mb-2">/{page.slug}</p>
+                          <div className="flex gap-3">
+                            <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
+                              {page.noindex ? 'No Index' : 'Index'}
+                            </span>
+                            <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.includeInSitemap ? "bg-blue-500/10 text-blue-400" : "bg-white/5 text-white/40")}>
+                              {page.includeInSitemap ? 'In Sitemap' : 'Hidden'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingPage(page);
+                              setShowPageModal(true);
+                            }}
+                            className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePage(page.id)}
+                            className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="text-center py-12 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                        <p className="text-white/40 italic">No dynamic pages created yet.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {cmsActiveSubTab === 'blogs' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Blog Posts</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your journal articles</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                      setShowBlogModal(true);
+                    }}
+                    className="btn-primary px-6 py-2 flex items-center gap-2"
+                  >
+                    <Plus size={18} />
+                    <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {blogs.length > 0 ? blogs.map(blog => (
+                    <div key={blog.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+                      <div className="h-32 relative overflow-hidden">
+                        <img src={blog.featuredImage || blog.image || 'https://picsum.photos/seed/blog/800/400'} alt={blog.title} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40" />
+                        <div className="absolute bottom-3 left-4">
+                          <p className="text-sm font-bold text-white line-clamp-1">{blog.title}</p>
+                          <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
+                        </div>
+                      </div>
+                      <div className="p-4 flex items-center justify-between">
+                        <div className="flex gap-2">
+                           <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", blog.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
+                            {blog.noindex ? 'No Index' : 'Index'}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingBlog(blog);
+                              setShowBlogModal(true);
+                            }}
+                            className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBlog(blog.id)}
+                            className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="col-span-full text-center py-12 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                      <p className="text-white/40 italic">No blog posts created yet.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {cmsActiveSubTab === 'global-seo' && (
+              <div className="space-y-8">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">Global SEO & Contact</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage site-wide settings and contact info</p>
+                  </div>
+                  <button
+                    onClick={() => handleUpdateSettings(systemSettings)}
+                    disabled={isSavingSettings}
+                    className="btn-primary px-6 py-2 flex items-center gap-2"
+                  >
+                    {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                    <span className="text-xs font-bold uppercase tracking-widest">Save Changes</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Contact Details */}
+                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
+                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                      <Phone size={16} /> Contact Details
+                    </h4>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Website Address</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.contact?.address || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, address: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="123 Luxury Way, Melbourne VIC 3000"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone Number</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.contact?.phone || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, phone: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="+61 400 000 000"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Contact Email</label>
+                          <input
+                            type="email"
+                            value={systemSettings?.contact?.email || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, email: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="info@merlux.com.au"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Booking Email</label>
+                          <input
+                            type="email"
+                            value={systemSettings?.contact?.bookingEmail || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, bookingEmail: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="bookings@merlux.com.au"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Global SEO */}
+                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
+                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                      <Globe size={16} /> Global SEO
+                    </h4>
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Logo</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={systemSettings?.seo?.logo || ''}
+                              onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, logo: e.target.value } })}
+                              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="Logo URL..."
+                            />
+                            <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
+                              <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={isUploading} />
+                              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                            </label>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Favicon (.ico/png)</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={systemSettings?.seo?.favicon || ''}
+                              onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, favicon: e.target.value } })}
+                              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="Favicon URL..."
+                            />
+                            <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
+                              <input type="file" className="hidden" accept="image/*" onChange={handleFaviconUpload} disabled={isUploading} />
+                              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Name</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.seo?.siteName || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, siteName: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="Merlux Chauffeur Services"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Meta Title</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.seo?.defaultTitle || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultTitle: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="Luxury Chauffeur Melbourne | Merlux"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Meta Description</label>
+                        <textarea
+                          value={systemSettings?.seo?.defaultDescription || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultDescription: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
+                          placeholder="Book luxury chauffeur services in Melbourne..."
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Keywords (comma separated)</label>
+                        <input
+                          type="text"
+                          value={Array.isArray(systemSettings?.seo?.defaultKeywords) ? systemSettings.seo.defaultKeywords.join(', ') : systemSettings?.seo?.defaultKeywords || ''}
+                          onChange={(e) => {
+                            const keywords = e.target.value.split(',').map(k => k.trim()).filter(k => k !== '');
+                            setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultKeywords: keywords } });
+                          }}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="chauffeur, melbourne, luxury travel"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Analytics & Schema */}
+                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6 lg:col-span-2">
+                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                      <BarChart3 size={16} /> Analytics & Schema
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Google Analytics ID</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.seo?.googleAnalyticsId || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, googleAnalyticsId: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="G-XXXXXXXXXX"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Search Console ID</label>
+                        <input
+                          type="text"
+                          value={systemSettings?.seo?.searchConsoleId || ''}
+                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, searchConsoleId: e.target.value } })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="verification-code"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Organization Schema (JSON-LD)</label>
+                        <textarea
+                          value={systemSettings?.seo?.organizationSchema ? JSON.stringify(systemSettings.seo.organizationSchema, null, 2) : ''}
+                          onChange={(e) => {
+                            try {
+                              const schema = JSON.parse(e.target.value);
+                              setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, organizationSchema: schema } });
+                            } catch (err) {
+                              // Allow typing invalid JSON temporarily
+                            }
+                          }}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-48 font-mono"
+                          placeholder='{ "@context": "https://schema.org", "@type": "Organization", ... }'
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      case 'management':
+        if (!isAdmin) return null;
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center gap-4 border-b border-white/5 p-1 bg-white/5 rounded-lg">
+              {[
+                { id: 'fleet', label: 'Fleet', icon: Truck },
+                { id: 'extras', label: 'Extras', icon: Plus },
+                { id: 'coupons', label: 'Coupons', icon: Percent },
+                { id: 'booking-mgmt', label: 'Booking', icon: CalendarCog },
+              ].map((sub) => (
+                <button
+                  key={sub.id}
                   onClick={() => setActiveSubTab(sub.id)}
                   className={cn(
-                    "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
                     activeSubTab === sub.id
                       ? "bg-gold text-black"
                       : "text-white/40 hover:text-white hover:bg-white/5"
@@ -2371,7 +2685,7 @@ export default function AppDashboard() {
                 >
                   <sub.icon size={14} />
                   {/* Hide labels on small screens, show on md+ */}
-                  <span className="hidden lg:inline">{sub.label}</span>
+                  <span className="hidden md:inline">{sub.label}</span>
                 </button>
               ))}
             </div>
@@ -2754,890 +3068,320 @@ export default function AppDashboard() {
               </div>
             )}
 
-            {activeSubTab === 'settings' && (
+            {activeSubTab === 'booking-mgmt' && (
               <div className="space-y-8">
                 <div className="glass p-6 md:p-8 rounded-3xl border border-white/5 w-full">
                   {/* Booking Configuration header row with Save button */}
-                  <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
-                    <div>
-                      <h3 className="text-xl font-display text-gold uppercase tracking-widest">
-                        Website & Booking Configuration
-                      </h3>
-                      <p className="text-[10px] text-white/40 uppercase tracking-widest mt-1">
-                        Manage pricing visibility, labels, and financial rules
-                      </p>
-                    </div>
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-display text-gold uppercase tracking-widest">
+                      Booking Configuration
+                    </h3>
 
                     <button
                       onClick={() => handleUpdateSettings(systemSettings)}
                       disabled={isSavingSettings}
                       className={cn(
-                        "bg-gold text-black rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-gold/20",
-                        "hover:bg-white hover:shadow-white/20",
+                        "bg-gold text-black rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2",
+                        "hover:bg-white",
                         "w-auto py-2 px-4 md:py-3 md:px-6"
                       )}
                     >
+                      {/* Icon always visible */}
                       {isSavingSettings ? (
                         <Loader2 className="h-4 w-4 animate-spin text-black" />
                       ) : (
                         <Save className="h-4 w-4 text-black" />
                       )}
 
+                      {/* Text label only on desktop */}
                       <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
-                        {isSavingSettings ? "Saving..." : "Save All Settings"}
+                        {isSavingSettings ? "Saving..." : "Save Settings"}
                       </span>
                     </button>
                   </div>
+                  {/* Responsive two-column layout */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Price Component Visibility */}
+                    <div className="space-y-4">
+                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
+                        Price Component Visibility
+                      </h4>
 
-                  {/* Main Grid */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                    {/* Left Column: Visibility & Financial */}
-                    <div className="space-y-10">
-                      {/* Price Component Visibility */}
-                      <div className="space-y-6">
-                        <div className="flex items-center gap-2">
-                          <Eye size={16} className="text-gold" />
-                          <h4 className="text-sm font-bold text-white uppercase tracking-widest">
-                            Price Visibility
-                          </h4>
+                      {/* Gross Price toggle */}
+                      <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                        <div>
+                          <p className="text-sm font-bold">Show Gross Price</p>
+                          <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                            Subtotal before discounts
+                          </p>
+                        </div>
+                        <button
+                          onClick={() =>
+                            setSystemSettings({
+                              ...systemSettings,
+                              showGrossPrice: !systemSettings?.showGrossPrice,
+                            })
+                          }
+                          className={cn(
+                            "w-12 h-6 rounded-full transition-all relative",
+                            systemSettings?.showGrossPrice !== false ? "bg-gold" : "bg-white/10"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                              systemSettings?.showGrossPrice !== false ? "right-1" : "left-1"
+                            )}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Show Price Breakdown toggle + pills inside */}
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">Show Price Breakdown</p>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                              Enable detailed pricing options
+                            </p>
+                          </div>
+                          <button
+                            onClick={() =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                showPriceBreakdown: !systemSettings?.showPriceBreakdown,
+                              })
+                            }
+                            className={cn(
+                              "w-12 h-6 rounded-full transition-all relative",
+                              systemSettings?.showPriceBreakdown ? "bg-gold" : "bg-white/10"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                systemSettings?.showPriceBreakdown ? "right-1" : "left-1"
+                              )}
+                            />
+                          </button>
                         </div>
 
-                        <div className="space-y-4">
-                          {/* Gross Price toggle */}
-                          <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-white/20 transition-all">
-                            <div>
-                              <p className="text-sm font-bold">Show Gross Price</p>
-                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                Display subtotal before discounts
-                              </p>
-                            </div>
-                            <button
-                              onClick={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  showGrossPrice: !systemSettings?.showGrossPrice,
-                                })
-                              }
-                              className={cn(
-                                "w-12 h-6 rounded-full transition-all relative",
-                                systemSettings?.showGrossPrice !== false ? "bg-gold" : "bg-white/10"
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                                  systemSettings?.showGrossPrice !== false ? "right-1" : "left-1"
-                                )}
-                              />
-                            </button>
-                          </div>
-
-                          {/* Show Price Breakdown toggle + pills inside */}
-                          <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-4 hover:border-white/20 transition-all">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-sm font-bold">Detailed Price Breakdown</p>
-                                <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                  Enable granular pricing component visibility
-                                </p>
-                              </div>
+                        {/* Pills appear inside same div when enabled */}
+                        {systemSettings?.showPriceBreakdown && (
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { id: "showBasePrice", label: "Base Price" },
+                              { id: "showDistancePrice", label: "Distance/Hour Price" },
+                              { id: "showWaypointPrice", label: "Waypoint Price" },
+                              { id: "showExtrasPrice", label: "Extras Price" },
+                              { id: "showTax", label: "Tax" },
+                              { id: "showDiscount", label: "Discount" },
+                              { id: "showNetPrice", label: "Net Price" },
+                              { id: "showGrossPrice", label: "Gross Price" },
+                              { id: "showStripeFees", label: "Stripe Fees" },
+                              { id: "showTotalPrice", label: "Total Price" },
+                            ].map((pill) => (
                               <button
+                                key={pill.id}
                                 onClick={() =>
                                   setSystemSettings({
                                     ...systemSettings,
-                                    showPriceBreakdown: !systemSettings?.showPriceBreakdown,
+                                    [pill.id]: !systemSettings?.[pill.id],
                                   })
                                 }
                                 className={cn(
-                                  "w-12 h-6 rounded-full transition-all relative",
-                                  systemSettings?.showPriceBreakdown ? "bg-gold" : "bg-white/10"
+                                  "text-[10px] px-3 py-1 rounded-lg font-bold tracking-widest transition-all",
+                                  systemSettings?.[pill.id]
+                                    ? "bg-green-600 text-white"
+                                    : "bg-red-500/10 text-white hover:bg-red-500/30"
                                 )}
                               >
-                                <div
-                                  className={cn(
-                                    "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                                    systemSettings?.showPriceBreakdown ? "right-1" : "left-1"
-                                  )}
-                                />
+                                {pill.label}
                               </button>
-                            </div>
-
-                            {/* Pills appear inside same div when enabled */}
-                            {systemSettings?.showPriceBreakdown && (
-                              <div className="pt-4 border-t border-white/5">
-                                <p className="text-[9px] uppercase tracking-widest font-bold text-white/30 mb-3">Toggle Components:</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {[
-                                    { id: "showBasePrice", label: "Base Price" },
-                                    { id: "showDistancePrice", label: "Distance/Hour Price" },
-                                    { id: "showWaypointPrice", label: "Waypoint Price" },
-                                    { id: "showExtrasPrice", label: "Extras Price" },
-                                    { id: "showTax", label: "Tax" },
-                                    { id: "showDiscount", label: "Discount" },
-                                    { id: "showNetPrice", label: "Net Price" },
-                                    { id: "showStripeFees", label: "Stripe Fees" },
-                                    { id: "showTotalPrice", label: "Total Price" },
-                                  ].map((pill) => (
-                                    <button
-                                      key={pill.id}
-                                      onClick={() =>
-                                        setSystemSettings({
-                                          ...systemSettings,
-                                          [pill.id]: systemSettings?.[pill.id] === false ? true : false,
-                                        })
-                                      }
-                                      className={cn(
-                                        "text-[9px] px-3 py-1.5 rounded-lg font-bold tracking-widest transition-all border",
-                                        systemSettings?.[pill.id] !== false
-                                          ? "bg-gold/20 text-gold border-gold/30"
-                                          : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
-                                      )}
-                                    >
-                                      {pill.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                            ))}
                           </div>
-                        </div>
+                        )}
                       </div>
-
-                      {/* Financial Settings */}
-                      <div className="space-y-6">
-                        <div className="flex items-center gap-2">
-                          <DollarSign size={16} className="text-gold" />
-                          <h4 className="text-sm font-bold text-white uppercase tracking-widest">
-                            Financial Rules
-                          </h4>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                              Tax Percentage (%)
-                            </label>
-                            <input
-                              type="number"
-                              value={systemSettings?.taxPercentage || 0}
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  taxPercentage: parseFloat(e.target.value),
-                                })
-                              }
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                              Stripe Fee (%)
-                            </label>
-                            <input
-                              type="number"
-                              value={systemSettings?.stripeFeePercentage || 2.9}
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  stripeFeePercentage: parseFloat(e.target.value),
-                                })
-                              }
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                              Waypoint Price ($)
-                            </label>
-                            <input
-                              type="number"
-                              value={systemSettings?.waypointPrice || 0}
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  waypointPrice: parseFloat(e.target.value),
-                                })
-                              }
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                              Waypoint Limit
-                            </label>
-                            <input
-                              type="number"
-                              value={systemSettings?.waypointLimit || 5}
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  waypointLimit: parseInt(e.target.value),
-                                })
-                              }
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                              Limit to Country (ISO)
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="e.g. AU, US"
-                              value={systemSettings?.limitCountry || ""}
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  limitCountry: e.target.value.toUpperCase(),
-                                })
-                              }
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                              Limit to City
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="e.g. Melbourne"
-                              value={systemSettings?.limitCity || ""}
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  limitCity: e.target.value,
-                                })
-                              }
-                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Distance Calculation Settings (Moved here) */}
-                      <div className="space-y-6 pt-6 border-t border-white/5">
-                        <div className="flex items-center gap-2">
-                          <Navigation size={16} className="text-gold" />
-                          <h4 className="text-sm font-bold text-white uppercase tracking-widest">
-                            Distance Calculation
-                          </h4>
-                        </div>
-
-                        <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-6">
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-sm font-bold">Calculation Type</p>
-                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                How distance price is calculated
-                              </p>
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => setSystemSettings({ ...systemSettings, distanceCalculationType: 'type1' })}
-                                className={cn(
-                                  "flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
-                                  systemSettings?.distanceCalculationType !== 'type2'
-                                    ? "bg-gold text-black border-gold"
-                                    : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
-                                )}
-                              >
-                                Type 1 (Range)
-                              </button>
-                              <button
-                                onClick={() => setSystemSettings({ ...systemSettings, distanceCalculationType: 'type2' })}
-                                className={cn(
-                                  "flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
-                                  systemSettings?.distanceCalculationType === 'type2'
-                                    ? "bg-gold text-black border-gold"
-                                    : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
-                                )}
-                              >
-                                Type 2 (Cumulative)
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                            <div>
-                              <p className="text-sm font-bold">Show Distance Eye Icon</p>
-                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                Allow users to see breakdown on booking
-                              </p>
-                            </div>
-                            <button
-                              onClick={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  showDistanceEyeIcon: !systemSettings?.showDistanceEyeIcon,
-                                })
-                              }
-                              className={cn(
-                                "w-12 h-6 rounded-full transition-all relative",
-                                systemSettings?.showDistanceEyeIcon ? "bg-gold" : "bg-white/10"
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                                  systemSettings?.showDistanceEyeIcon ? "right-1" : "left-1"
-                                )}
-                              />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {isAdmin && (
-                        <div className="pt-4 border-t border-white/5 space-y-3">
-                          <h4 className="text-sm font-bold text-gold uppercase tracking-widest">Admin Controls</h4>
-                          <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
-                            <div>
-                              <p className="text-sm font-bold">Allow Admin Registration</p>
-                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                Show 'Admin' role option on public registration page
-                              </p>
-                            </div>
-                            <button
-                              onClick={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  allowAdminRegistration: !systemSettings?.allowAdminRegistration,
-                                })
-                              }
-                              className={cn(
-                                "w-12 h-6 rounded-full transition-all relative",
-                                systemSettings?.allowAdminRegistration ? "bg-gold" : "bg-white/10"
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                                  systemSettings?.allowAdminRegistration ? "right-1" : "left-1"
-                                )}
-                              />
-                            </button>
-                          </div>
-                        </div>
-                      )}
                     </div>
 
-                    {/* Right Column: Label Customization */}
+                    {/* Financial Settings */}
                     <div className="space-y-6">
-                      <div className="flex items-center gap-2">
-                        <Edit2 size={16} className="text-gold" />
-                        <h4 className="text-sm font-bold text-white uppercase tracking-widest">
-                          Label Customization
-                        </h4>
+                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
+                        Financial Settings
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Tax Percentage (%)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.taxPercentage || 0}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                taxPercentage: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Stripe Fee (%)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.stripeFeePercentage || 2.9}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                stripeFeePercentage: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Waypoint Price ($)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.waypointPrice || 0}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                waypointPrice: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Waypoint Limit (Count)
+                          </label>
+                          <input
+                            type="number"
+                            value={systemSettings?.waypointLimit || 5}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                waypointLimit: parseInt(e.target.value),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
                       </div>
 
-                      <div className="bg-white/5 p-6 rounded-2xl border border-white/5 space-y-6">
-                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold border-b border-white/5 pb-2">
-                          Customize how price components are named in the UI
-                        </p>
-                        <div className="grid grid-cols-1 gap-6">
-                          {[
-                            { id: 'labelBasePrice', label: 'Base Price Label', default: 'Base Fare' },
-                            { id: 'labelDistancePrice', label: 'Distance Price Label', default: 'Distance Charge' },
-                            { id: 'labelWaypointPrice', label: 'Waypoint Price Label', default: 'Waypoints' },
-                            { id: 'labelExtrasPrice', label: 'Extras Label', default: 'Extras' },
-                            { id: 'labelTax', label: 'Tax Label', default: 'Tax' },
-                            { id: 'labelDiscount', label: 'Discount Label', default: 'Discount' },
-                            { id: 'labelNetPrice', label: 'Net Price Label', default: 'Net Price' },
-                            { id: 'labelGrossPrice', label: 'Gross Price Label', default: 'Gross Price' },
-                            { id: 'labelStripeFees', label: 'Stripe Fees Label', default: 'Stripe Fees' },
-                            { id: 'labelTotalPrice', label: 'Total Price Label', default: 'Total Price' },
-                          ].map((item) => (
-                            <div key={item.id} className="space-y-2">
-                              <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block ml-1">
-                                {item.label}
-                              </label>
-                              <input
-                                type="text"
-                                value={systemSettings?.[item.id] || item.default}
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    [item.id]: e.target.value,
-                                  })
-                                }
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                                placeholder={item.default}
-                              />
-                            </div>
-                          ))}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Limit to Country (ISO Code)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. AU, US"
+                            value={systemSettings?.limitCountry || ""}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                limitCountry: e.target.value.toUpperCase(),
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">
+                            Limit to City (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Melbourne"
+                            value={systemSettings?.limitCity || ""}
+                            onChange={(e) =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                limitCity: e.target.value,
+                              })
+                            }
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          />
                         </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {activeSubTab === 'pages' && (
-              <div className="space-y-8">
-                <div className="border-t border-white/5 pt-8">
-                  <div className="flex justify-between items-center mb-6">
-                    <div>
-                      <h3 className="text-2xl font-display text-gold">Dynamic Pages</h3>
-                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage custom landing pages</p>
-                    </div>
-                    <div className="flex gap-4">
-                      {/* Button Group */}
-                      <div className="flex gap-4">
-                        {/* Global CSS */}
-                        <button
-                          onClick={() => setShowGlobalPageCssModal(true)}
-                          className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
-                        >
-                          {/* Desktop/Tablet: Icon + Text */}
-                          <span className="hidden md:flex items-center gap-2">
-                            <Code size={14} />
-                            Global CSS
-                          </span>
-                          {/* Mobile: Icon Only */}
-                          <span className="flex md:hidden">
-                            <Code size={16} /> {/* Replace with your time icon */}
-                          </span>
-                        </button>
+                    {/* Distance Calculation Settings */}
+                    <div className="space-y-6">
+                      <h4 className="text-xs uppercase tracking-widest font-bold text-white/40 border-b border-white/5 pb-2">
+                        Distance Calculation Settings
+                      </h4>
 
-                        {/* Add Page */}
-                        <button
-                          onClick={() => {
-                            setEditingPage({
-                              title: '', slug: '', content: '',
-                              metaTitle: '', metaDescription: '', keywords: '',
-                              includeInSitemap: true, noindex: false
-                            });
-                            setShowPageModal(true);
-                          }}
-                          className="btn-primary px-6 py-2 flex items-center gap-2"
-                        >
-                          {/* Desktop/Tablet: Icon + Text */}
-                          <span className="hidden md:flex items-center gap-2">
-                            <Plus size={18} />
-                            <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
-                          </span>
-                          {/* Mobile: Icon Only */}
-                          <span className="flex md:hidden">
-                            <Plus size={18} />
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    {pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).length > 0 ?
-                      pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).map((page, idx) => (
-                        <div key={`${page.id}-${idx}`} className="glass p-6 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-gold/30 transition-all">
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-4">
+                        <div className="border-b border-white/10 space-y-3 pb-3">
                           <div>
-                            <h4 className="text-lg font-bold text-white mb-1">{page.title}</h4>
-                            <p className="text-xs text-gold mb-2">/{page.slug}</p>
-                            <div className="flex gap-3">
-                              <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
-                                {page.noindex ? 'No Index' : 'Index'}
-                              </span>
-                              <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.includeInSitemap ? "bg-blue-500/10 text-blue-400" : "bg-white/5 text-white/40")}>
-                                {page.includeInSitemap ? 'In Sitemap' : 'Hidden'}
-                              </span>
-                            </div>
+                            <p className="text-sm font-bold">Calculation Type</p>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                              How distance price is calculated
+                            </p>
                           </div>
                           <div className="flex gap-2">
-                            <Link
-                              to={`/${page.slug}`}
-                              target="_blank"
-                              className="p-3 bg-white/5 text-white/60 rounded-xl hover:bg-white/10 hover:text-white transition-all"
-                            >
-                              <Eye size={18} />
-                            </Link>
                             <button
-                              onClick={() => handleDuplicatePage(page)}
-                              className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
-                              title="Duplicate"
+                              onClick={() => setSystemSettings({ ...systemSettings, distanceCalculationType: 'type1' })}
+                              className={cn(
+                                "flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
+                                systemSettings?.distanceCalculationType !== 'type2'
+                                  ? "bg-gold text-black border-gold"
+                                  : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
+                              )}
                             >
-                              <Copy size={18} />
+                              Type 1 (Range)
                             </button>
                             <button
-                              onClick={() => {
-                                setEditingPage(page);
-                                setShowPageModal(true);
-                              }}
-                              className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                              onClick={() => setSystemSettings({ ...systemSettings, distanceCalculationType: 'type2' })}
+                              className={cn(
+                                "flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
+                                systemSettings?.distanceCalculationType === 'type2'
+                                  ? "bg-gold text-black border-gold"
+                                  : "bg-white/5 text-white/40 border-white/10 hover:border-white/30"
+                              )}
                             >
-                              <Edit2 size={18} />
-                            </button>
-                            <button
-                              onClick={() => handleDeletePage(page.id)}
-                              className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                            >
-                              <Trash2 size={18} />
+                              Type 2 (Cumulative)
                             </button>
                           </div>
                         </div>
-                      )) : (
-                        <div className="text-center py-16 bg-white/5 rounded-3xl border border-dashed border-white/10">
-                          <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <LayoutGrid size={32} className="text-gold/40" />
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">Show Distance Eye Icon</p>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                              Allow users to see breakdown
+                            </p>
                           </div>
-                          <h4 className="text-lg font-display text-white mb-2">No Pages Found</h4>
-                          <p className="text-white/40 text-sm mb-8 max-w-xs mx-auto">You haven't created any custom landing pages yet. Start by adding your first one.</p>
                           <button
-                            onClick={() => {
-                              setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                              setShowPageModal(true);
-                            }}
-                            className="px-6 py-3 bg-gold text-black rounded-xl font-bold uppercase tracking-widest text-[10px] hover:bg-white transition-all"
-                          >
-                            Create First Page
-                          </button>
-                        </div>
-                      )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeSubTab === 'blogs' && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-2xl font-display text-gold">Blog Posts</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your journal articles</p>
-                  </div>
-                  <div className="flex gap-4">
-                    {/* Button Group */}
-                    <div className="flex gap-4">
-                      {/* Global Blog CSS */}
-                      <button
-                        onClick={() => setShowGlobalBlogCssModal(true)}
-                        className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-bold uppercase tracking-widest text-gold hover:bg-gold/10 transition-all flex items-center gap-2"
-                      >
-                        {/* Desktop/Tablet: Icon + Text */}
-                        <span className="hidden md:flex items-center gap-2">
-                          <Code size={14} />
-                          Global CSS
-                        </span>
-                        {/* Mobile: Icon Only */}
-                        <span className="flex md:hidden">
-                          <Code size={16} /> {/* or swap for a Time icon if you prefer */}
-                        </span>
-                      </button>
-
-                      {/* Add Post */}
-                      <button
-                        onClick={() => {
-                          setEditingBlog({
-                            title: '', slug: '', content: '', excerpt: '',
-                            category: 'Travel Tips', featuredImage: '',
-                            metaTitle: '', metaDescription: '', keywords: '',
-                            includeInSitemap: true, noindex: false
-                          });
-                          setShowBlogModal(true);
-                        }}
-                        className="btn-primary px-6 py-2 flex items-center gap-2"
-                      >
-                        {/* Desktop/Tablet: Icon + Text */}
-                        <span className="hidden md:flex items-center gap-2">
-                          <Plus size={18} />
-                          <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
-                        </span>
-                        {/* Mobile: Icon Only */}
-                        <span className="flex md:hidden">
-                          <Plus size={18} />
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {blogs.length > 0 ? blogs.map((blog, idx) => (
-                    <div key={`${blog.id}-${idx}`} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
-                      <div className="h-32 relative overflow-hidden">
-                        <img src={blog.featuredImage || blog.image || 'https://picsum.photos/seed/blog/800/400'} alt={blog.title} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40" />
-                        <div className="absolute bottom-3 left-4">
-                          <p className="text-sm font-bold text-white line-clamp-1">{blog.title}</p>
-                          <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
-                        </div>
-                      </div>
-                      <div className="p-4 flex items-center justify-between">
-                        <div className="flex gap-2">
-                          <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", blog.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
-                            {blog.noindex ? 'No Index' : 'Index'}
-                          </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <Link
-                            to={`/blog/${blog.slug}`}
-                            target="_blank"
-                            className="p-2 bg-white/5 text-white/60 rounded-lg hover:bg-white/10 hover:text-white transition-all"
-                          >
-                            <Eye size={14} />
-                          </Link>
-                          <button
-                            onClick={() => handleDuplicateBlog(blog)}
-                            className="p-2 bg-white/5 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
-                            title="Duplicate"
-                          >
-                            <Copy size={14} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingBlog(blog);
-                              setShowBlogModal(true);
-                            }}
-                            className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
-                          >
-                            <Edit2 size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteBlog(blog.id)}
-                            className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="col-span-full text-center py-16 bg-white/5 rounded-3xl border border-dashed border-white/10">
-                      <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Globe size={32} className="text-gold/40" />
-                      </div>
-                      <h4 className="text-lg font-display text-white mb-2">No Blog Posts Found</h4>
-                      <p className="text-white/40 text-sm mb-8 max-w-xs mx-auto">Share your stories and updates with your audience. Create your first blog post now.</p>
-                      <button
-                        onClick={() => {
-                          setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                          setShowBlogModal(true);
-                        }}
-                        className="px-6 py-3 bg-gold text-black rounded-xl font-bold uppercase tracking-widest text-[10px] hover:bg-white transition-all"
-                      >
-                        Create First Post
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {activeSubTab === 'global-seo' && (
-              <div className="space-y-8">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-2xl font-display text-gold">Global SEO & Contact</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage site-wide settings and contact info</p>
-                  </div>
-                  <button
-                    onClick={() => handleUpdateSettings(systemSettings)}
-                    disabled={isSavingSettings}
-                    className="btn-primary px-6 py-2 flex items-center gap-2"
-                  >
-                    {/* Desktop/Tablet: Icon + Text */}
-                    <span className="hidden md:flex items-center gap-2">
-                      {isSavingSettings ? (
-                        <Loader2 size={18} className="animate-spin" />
-                      ) : (
-                        <Save size={18} />
-                      )}
-                      <span className="text-xs font-bold uppercase tracking-widest">
-                        Save Changes
-                      </span>
-                    </span>
-
-                    {/* Mobile: Icon Only */}
-                    <span className="flex md:hidden">
-                      {isSavingSettings ? (
-                        <Loader2 size={18} className="animate-spin" />
-                      ) : (
-                        <Save size={18} />
-                      )}
-                    </span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  {/* Contact Details */}
-                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
-                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
-                      <Phone size={16} /> Contact Details
-                    </h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Website Address</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.contact?.address || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, address: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="123 Luxury Way, Melbourne VIC 3000"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone Number</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.contact?.phone || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, phone: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="+61 400 000 000"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Contact Email</label>
-                          <input
-                            type="email"
-                            value={systemSettings?.contact?.email || ''}
-                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, email: e.target.value } })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            placeholder="info@merlux.com.au"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Booking Email</label>
-                          <input
-                            type="email"
-                            value={systemSettings?.contact?.bookingEmail || ''}
-                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, bookingEmail: e.target.value } })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            placeholder="bookings@merlux.com.au"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Global SEO */}
-                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
-                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
-                      <Globe size={16} /> Global SEO
-                    </h4>
-                    <div className="space-y-4">
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 gap-6">
-                          {/* Site Logo */}
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
-                              Site Logo
-                            </label>
-
-                            {/* Logo preview outside card */}
-                            {systemSettings?.seo?.logo && (
-                              <div className="mb-3 w-20 h-20 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
-                                <img
-                                  src={systemSettings.seo.logo}
-                                  alt="Logo Preview"
-                                  className="max-w-full max-h-full object-contain"
-                                  referrerPolicy="no-referrer"
-                                />
-                              </div>
+                            onClick={() =>
+                              setSystemSettings({
+                                ...systemSettings,
+                                showDistanceEyeIcon: !systemSettings?.showDistanceEyeIcon,
+                              })
+                            }
+                            className={cn(
+                              "w-12 h-6 rounded-full transition-all relative",
+                              systemSettings?.showDistanceEyeIcon ? "bg-gold" : "bg-white/10"
                             )}
-
-                            {/* Input + upload card */}
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={systemSettings?.seo?.logo || ''}
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    seo: { ...systemSettings.seo, logo: e.target.value },
-                                  })
-                                }
-                                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                                placeholder="Logo URL..."
-                              />
-                              <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  accept="image/*"
-                                  onChange={handleLogoUpload}
-                                  disabled={isUploading}
-                                />
-                                {isUploading ? (
-                                  <Loader2 size={18} className="animate-spin" />
-                                ) : (
-                                  <Upload size={18} />
-                                )}
-                              </label>
-                            </div>
-                          </div>
-
-                          {/* Favicon */}
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
-                              Favicon (.ico/png)
-                            </label>
-
-                            {/* Favicon preview outside card */}
-                            {systemSettings?.seo?.favicon && (
-                              <div className="mb-3 w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
-                                <img
-                                  src={systemSettings.seo.favicon}
-                                  alt="Favicon Preview"
-                                  className="w-6 h-6 object-contain"
-                                  referrerPolicy="no-referrer"
-                                />
-                              </div>
-                            )}
-
-                            {/* Input + upload card */}
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={systemSettings?.seo?.favicon || ''}
-                                onChange={(e) =>
-                                  setSystemSettings({
-                                    ...systemSettings,
-                                    seo: { ...systemSettings.seo, favicon: e.target.value },
-                                  })
-                                }
-                                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                                placeholder="Favicon URL..."
-                              />
-                              <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all shrink-0">
-                                <input
-                                  type="file"
-                                  className="hidden"
-                                  accept="image/*"
-                                  onChange={handleFaviconUpload}
-                                  disabled={isUploading}
-                                />
-                                {isUploading ? (
-                                  <Loader2 size={18} className="animate-spin" />
-                                ) : (
-                                  <Upload size={18} />
-                                )}
-                              </label>
-                            </div>
-                          </div>
+                          >
+                            <div
+                              className={cn(
+                                "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                                systemSettings?.showDistanceEyeIcon ? "right-1" : "left-1"
+                              )}
+                            />
+                          </button>
                         </div>
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Title</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.seo?.title || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, title: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="Merlux Chauffeurs | Luxury Transport Melbourne"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Description</label>
-                        <textarea
-                          value={systemSettings?.seo?.description || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, description: e.target.value } })}
-                          rows={3}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all resize-none"
-                          placeholder="Premium chauffeur services in Melbourne..."
-                        />
                       </div>
                     </div>
                   </div>
@@ -3648,7 +3392,7 @@ export default function AppDashboard() {
         );
       case 'profile':
         return (
-          <div className="space-y-8 w-full">
+          <div className="space-y-8 max-w-2xl">
             <h3 className="text-2xl font-display text-gold">Profile Settings</h3>
             <div className="glass p-8 rounded-3xl border border-white/5">
               <div className="flex items-center gap-6 mb-8">
@@ -3725,7 +3469,7 @@ export default function AppDashboard() {
         );
       case 'wallet':
         return (
-          <div className="space-y-8 w-full">
+          <div className="space-y-8">
             <div className="glass p-8 rounded-2xl bg-gradient-to-br from-gold/20 to-transparent">
               <p className="text-[10px] uppercase tracking-widest font-bold text-gold mb-2">Total Spent</p>
               <h3 className="text-4xl font-display mb-6">
@@ -3744,8 +3488,8 @@ export default function AppDashboard() {
             <section>
               <h4 className="text-sm uppercase tracking-widest font-bold text-white/40 mb-4">Payment History</h4>
               <div className="space-y-4">
-                {bookings.map((booking, bIdx) => (
-                  <div key={`${booking.id}-${bIdx}`} className="glass p-4 rounded-xl flex items-center justify-between">
+                {bookings.map((booking) => (
+                  <div key={`wallet-hist-${booking.id}`} className="glass p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center">
                         <CreditCard size={18} className="text-white/40" />
@@ -3789,71 +3533,55 @@ export default function AppDashboard() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen w-full bg-black text-white pt-20">
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col w-full">
-        <main className="flex-1 p-3 lg:p-6 w-full max-w-7xl mx-auto">
-          {/* Dashboard Header Section (Relocated) */}
-          <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-white/5 flex-nowrap">
-            {/* Left side: Dashboard name + user name stacked */}
-            <div className="flex flex-col">
-              <h1 className="text-base md:text-lg lg:text-xl font-display text-white">
-                {userProfile?.role === 'admin'
-                  ? 'Admin Dashboard'
-                  : userProfile?.role === 'driver'
-                    ? 'Driver Dashboard'
-                    : 'Customer Dashboard'}
-              </h1>
-              <span className="text-gold font-bold text-xs md:text-sm">
-                {userProfile?.name || 'User'}
-              </span>
-            </div>
+    <div className="flex flex-col min-h-screen bg-black text-white overflow-hidden">
+      {/* Top Navigation Bar */}
+      <header className="bg-black/50 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
+        <div className="p-4 lg:px-8 lg:py-4 flex flex-col gap-4">
+          {/* Top Row: Logo & User Actions */}
+          <div className="flex items-center justify-between">
+            <Logo className="h-8 lg:h-10" />
 
-            {/* Right side: role label + icon + bell inline */}
-            <div className="flex items-center gap-2 flex-nowrap">
-              {/* Role label */}
-              <span className="text-white/40 text-[10px] md:text-xs uppercase tracking-[0.15em] font-bold">
-                {userProfile?.role}
-              </span>
-
-              {/* Role-based icon */}
-              <div
-                className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 shadow",
-                  userProfile?.role === 'admin'
-                    ? "bg-red-500/10 border-red-500/20 text-red-400"
-                    : userProfile?.role === 'driver'
-                      ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                      : "bg-gold/10 border-gold/20 text-gold"
-                )}
-              >
-                {userProfile?.role === 'admin' ? (
-                  <ShieldCheck className="w-4 h-4" />
-                ) : userProfile?.role === 'driver' ? (
-                  <Truck className="w-4 h-4" />
-                ) : (
-                  <User className="w-4 h-4" />
-                )}
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="relative p-2 text-gold hover:bg-white/5 rounded-full transition-colors"
+                >
+                  <Bell size={22} />
+                  {bookings.filter(b => !b.read).length > 0 && (
+                    <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold text-white">
+                      {bookings.filter(b => !b.read).length}
+                    </span>
+                  )}
+                </button>
               </div>
 
-              {/* Separator */}
-              <div className="w-px h-6 bg-white/10" />
+              <div className="flex items-center gap-3 pl-4 border-l border-white/10">
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs font-bold">{userProfile?.name || 'User'}</p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest">{userProfile?.role}</p>
+                </div>
+                <div className="w-9 h-9 bg-gold/10 border border-gold/20 rounded-full flex items-center justify-center">
+                  <User size={18} className="text-gold" />
+                </div>
+              </div>
 
-              {/* Bell icon */}
               <button
-                onClick={() => setShowNotifications(!showNotifications)}
-                className="relative w-8 h-8 flex items-center justify-center bg-white/5 text-gold hover:bg-white/10 rounded-lg border border-white/5 transition-all group"
+                onClick={handleLogout}
+                className="p-2 text-red-400 hover:text-red-600 transition-colors"
+                title="Logout"
               >
-                <Bell className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                {bookings.filter((b) => !b.read).length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center font-bold text-white shadow">
-                    {bookings.filter((b) => !b.read).length}
-                  </span>
-                )}
+                <LogOut size={22} />
               </button>
             </div>
           </div>
-          {/* Navigation Tabs */}
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-h-screen overflow-y-auto">
+        <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto">
+          {/* Navigation Tabs - Relocated from Header */}
           <div className="w-full mb-8">
             <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5 overflow-x-auto no-scrollbar">
               {filteredNavItems.map((item) => (
@@ -3891,7 +3619,6 @@ export default function AppDashboard() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className="w-full"
             >
               {renderTabContent()}
             </motion.div>
@@ -3911,7 +3638,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-sm glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar text-center"
+              className="w-full max-w-sm glass p-8 rounded-3xl text-center border border-gold/20"
             >
               <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Star size={32} className="text-gold" />
@@ -4122,26 +3849,20 @@ export default function AppDashboard() {
                     <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
                       <h4 className="text-[10px] uppercase tracking-widest font-bold text-gold mb-2">Fare Breakdown</h4>
                       {viewingBooking.priceBreakdown ? (
-                        <div className="space-y-2">
-                          {systemSettings?.showBasePrice !== false && viewingBooking.priceBreakdown.base > 0 && (
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelBasePrice || 'Base Fare'}</span>
-                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.base || 0).toFixed(2)}</span>
+                        <>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Base Fare</span>
+                            <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.base || 0).toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{viewingBooking.serviceType === 'hourly' ? 'Hourly Charge' : 'Distance Charge'}</span>
                             </div>
-                          )}
-                          {systemSettings?.showDistancePrice !== false && (
+                            <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.distance || 0).toFixed(2)}</span>
+                          </div>
+                          {viewingBooking.priceBreakdown.waypoints > 0 && (
                             <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-white/40 uppercase tracking-widest font-bold">
-                                  {systemSettings?.labelDistancePrice || (viewingBooking.serviceType === 'hourly' ? 'Hourly Charge' : 'Distance Charge')}
-                                </span>
-                              </div>
-                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.distance || 0).toFixed(2)}</span>
-                            </div>
-                          )}
-                          {systemSettings?.showWaypointPrice !== false && viewingBooking.priceBreakdown.waypoints > 0 && (
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelWaypointPrice || 'Waypoints'}</span>
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Waypoints</span>
                               <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.waypoints || 0).toFixed(2)}</span>
                             </div>
                           )}
@@ -4151,18 +3872,18 @@ export default function AppDashboard() {
                               <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.returnPrice || 0).toFixed(2)}</span>
                             </div>
                           )}
-                          {systemSettings?.showDiscount !== false && viewingBooking.priceBreakdown.discount > 0 && (
+                          {viewingBooking.priceBreakdown.discount > 0 && (
                             <div className="flex justify-between items-center text-green-400">
-                              <span className="text-xs uppercase tracking-widest font-bold">{systemSettings?.labelDiscount || 'Discount'}</span>
+                              <span className="text-xs uppercase tracking-widest font-bold">Discount</span>
                               <span className="text-sm font-bold">-${(viewingBooking.priceBreakdown.discount || 0).toFixed(2)}</span>
                             </div>
                           )}
                           <div className="pt-2 border-t border-white/5">
                             {/* Extras row */}
-                            {systemSettings?.showExtrasPrice !== false && viewingBooking.priceBreakdown.extras > 0 && (
+                            {viewingBooking.priceBreakdown.extras > 0 && (
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-xs text-white/40 uppercase tracking-widest font-bold">
-                                  {systemSettings?.labelExtrasPrice || 'Extras'}
+                                  Extras
                                 </span>
                                 <span className="text-sm text-white font-bold">
                                   ${(viewingBooking.priceBreakdown.extras || 0).toFixed(2)}
@@ -4174,7 +3895,7 @@ export default function AppDashboard() {
                             {systemSettings?.showGrossPrice !== false && viewingBooking.priceBreakdown.gross > 0 && (
                               <div className="flex justify-between items-center mb-2">
                                 <span className="text-xs text-white/40 uppercase tracking-widest font-bold">
-                                  {systemSettings?.labelGrossPrice || 'Gross Price'}
+                                  Gross Price
                                 </span>
                                 <span className="text-sm text-white font-bold">
                                   ${(viewingBooking.priceBreakdown.gross || 0).toFixed(2)}
@@ -4183,37 +3904,29 @@ export default function AppDashboard() {
                             )}
 
                             {/* Net Price row */}
-                            {systemSettings?.showNetPrice !== false && (
-                              <div className="flex justify-between items-center">
-                                <span className="text-xs text-white/60 uppercase tracking-widest font-bold">
-                                  {systemSettings?.labelNetPrice || 'Net Price'}
-                                </span>
-                                <span className="text-sm text-white font-bold">
-                                  ${(viewingBooking.priceBreakdown.net || 0).toFixed(2)}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          {systemSettings?.showTax !== false && viewingBooking.priceBreakdown.tax > 0 && (
                             <div className="flex justify-between items-center">
-                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelTax || 'Tax'}</span>
+                              <span className="text-xs text-white/60 uppercase tracking-widest font-bold">
+                                Net Price
+                              </span>
+                              <span className="text-sm text-white font-bold">
+                                ${(viewingBooking.priceBreakdown.net || 0).toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                          {viewingBooking.priceBreakdown.tax > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">Tax</span>
                               <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.tax || 0).toFixed(2)}</span>
                             </div>
                           )}
-                          {systemSettings?.showStripeFees !== false && viewingBooking.priceBreakdown.stripeFees > 0 && (
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs text-white/40 uppercase tracking-widest font-bold">{systemSettings?.labelStripeFees || 'Stripe Fees'}</span>
-                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.stripeFees || 0).toFixed(2)}</span>
-                            </div>
-                          )}
                           <div className="pt-3 border-t border-white/10 flex justify-between items-center">
-                            <span className="text-sm text-gold uppercase tracking-widest font-bold">{systemSettings?.labelTotalPrice || 'Total Price'}</span>
+                            <span className="text-sm text-gold uppercase tracking-widest font-bold">Total Price</span>
                             <span className="text-xl font-display text-gold">${(Number(viewingBooking.price) || 0).toFixed(2)}</span>
                           </div>
-                        </div>
+                        </>
                       ) : (
                         <div className="flex justify-between items-center">
-                          <span className="text-sm text-gold uppercase tracking-widest font-bold">{systemSettings?.labelTotalPrice || 'Total Price'}</span>
+                          <span className="text-sm text-gold uppercase tracking-widest font-bold">Total Price</span>
                           <span className="text-xl font-display text-gold">${(Number(viewingBooking.price) || 0).toFixed(2)}</span>
                         </div>
                       )}
@@ -4307,7 +4020,7 @@ export default function AppDashboard() {
                           return (
                             <div className="space-y-2">
                               {rangeCalcs.map((calc, i) => (
-                                <div key={i} className="flex justify-between items-center text-[10px]">
+                                <div key={`calc-range-${i}`} className="flex justify-between items-center text-[10px]">
                                   <div className="flex items-center gap-2">
                                     <div className="w-1 h-1 rounded-full bg-gold" />
                                     <span className="text-white font-bold uppercase tracking-tighter">{calc.label} {calc.isHourly ? '' : 'Range'}</span>
@@ -4543,25 +4256,22 @@ export default function AppDashboard() {
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
-                {routeBooking.distance && (
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
-                      <Navigation size={20} className="text-gold" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
-                        Total Distance
-                      </p>
-                      <p className="text-lg font-display text-white">
-                        {(() => {
-                          if (!routeBooking.isReturn) return routeBooking.distance;
-                          const num = parseFloat(routeBooking.distance.replace(/[^\d.]/g, ''));
-                          return `${(num * 2).toFixed(1)} km`;
-                        })()}
-                      </p>
-                    </div>
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
+                    <Navigation size={20} className="text-gold" />
                   </div>
-                )}
+                  <div>
+                    <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Total Distance</p>
+                    <p className="text-lg font-display text-white">
+                      {(() => {
+                        if (!routeBooking.distance) return 'N/A';
+                        if (!routeBooking.isReturn) return routeBooking.distance;
+                        const num = parseFloat(routeBooking.distance.replace(/[^\d.]/g, ''));
+                        return `${(num * 2).toFixed(1)} km`;
+                      })()}
+                    </p>
+                  </div>
+                </div>
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center">
                     <Clock size={20} className="text-gold" />
@@ -4628,11 +4338,8 @@ export default function AppDashboard() {
                   <Trash2 size={32} className="text-red-500" />
                 </div>
                 <h3 className="text-2xl font-display mb-2">Are you sure?</h3>
-                <p className="text-white/40 text-[10px] mb-8 uppercase tracking-widest leading-relaxed">
-                  {confirmDelete.type === 'user'
-                    ? "This will only delete the user profile from the database. The authentication account will NOT be removed."
-                    : `This action cannot be undone. You are about to delete this ${confirmDelete.type}.`
-                  }
+                <p className="text-white/40 text-xs mb-8 uppercase tracking-widest">
+                  This action cannot be undone. You are about to delete this {confirmDelete.type}.
                 </p>
 
                 <div className="flex gap-4">
@@ -4649,8 +4356,6 @@ export default function AppDashboard() {
                       else if (confirmDelete.type === 'vehicle') executeDeleteVehicle(confirmDelete.id);
                       else if (confirmDelete.type === 'coupon') executeDeleteCoupon(confirmDelete.id);
                       else if (confirmDelete.type === 'extra') executeDeleteExtra(confirmDelete.id);
-                      else if (confirmDelete.type === 'page') executeDeletePage(confirmDelete.id);
-                      else if (confirmDelete.type === 'blog') executeDeleteBlog(confirmDelete.id);
                     }}
                     className="flex-1 bg-red-500 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
                   >
@@ -4673,7 +4378,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -4746,9 +4451,7 @@ export default function AppDashboard() {
                   >
                     <option value="customer">Customer</option>
                     <option value="driver">Driver</option>
-                    {(systemSettings?.allowAdminRegistration || editingUser?.role === 'admin') && (
-                      <option value="admin">Admin</option>
-                    )}
+                    <option value="admin">Admin</option>
                   </select>
                 </div>
 
@@ -4783,6 +4486,7 @@ export default function AppDashboard() {
         )}
 
         {/* Extra Modal */}
+        {/* Extra Modal */}
         {showExtraModal && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -4793,7 +4497,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20"
             >
               {/* Heading + Active toggle inline */}
               <div className="flex justify-between items-center mb-6">
@@ -4926,7 +4630,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 md:max-h-[90vh] overflow-y-auto custom-scrollbar max-h-[90vh]"
+              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5015,7 +4719,7 @@ export default function AppDashboard() {
 
                 <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
                   <h4 className="text-sm font-bold text-gold uppercase tracking-widest">SEO Settings</h4>
-
+                  
                   <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Title</label>
                     <input
@@ -5035,17 +4739,6 @@ export default function AppDashboard() {
                       className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
                       placeholder="SEO description for search results..."
                     />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Custom CSS (Optional)</label>
-                    <textarea
-                      value={editingBlog?.customCss || ''}
-                      onChange={(e) => setEditingBlog({ ...editingBlog, customCss: e.target.value })}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-32 font-mono"
-                      placeholder=".prose h2 { color: gold; }"
-                    />
-                    <p className="text-[8px] text-white/30 mt-1 italic">Add custom styles for this specific post.</p>
                   </div>
 
                   <div className="flex gap-6">
@@ -5107,7 +4800,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5150,17 +4843,6 @@ export default function AppDashboard() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Featured Image URL</label>
-                  <input
-                    type="text"
-                    value={editingPage?.featuredImage || ''}
-                    onChange={(e) => setEditingPage({ ...editingPage, featuredImage: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                    placeholder="https://images.unsplash.com/..."
-                  />
-                </div>
-
-                <div>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Page Content (HTML)</label>
                   <textarea
                     value={editingPage?.content || ''}
@@ -5172,7 +4854,7 @@ export default function AppDashboard() {
 
                 <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
                   <h4 className="text-sm font-bold text-gold uppercase tracking-widest">SEO Settings</h4>
-
+                  
                   <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Title</label>
                     <input
@@ -5203,17 +4885,6 @@ export default function AppDashboard() {
                       className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
                       placeholder="chauffeur, melbourne, airport transfer"
                     />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Custom CSS (Optional)</label>
-                    <textarea
-                      value={editingPage?.customCss || ''}
-                      onChange={(e) => setEditingPage({ ...editingPage, customCss: e.target.value })}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-32 font-mono"
-                      placeholder=".prose h2 { color: gold; }"
-                    />
-                    <p className="text-[8px] text-white/30 mt-1 italic">Add custom styles for this specific page.</p>
                   </div>
 
                   <div className="flex gap-6">
@@ -5275,7 +4946,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5497,7 +5168,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
             >
               {/* Heading row: Title + Active toggle + Close button */}
               <div className="flex justify-between items-center mb-6">
@@ -5730,8 +5401,8 @@ export default function AppDashboard() {
               </div>
 
               <div className="space-y-4">
-                {getBookingsForDate(selectedDate).map((booking, bIdx) => (
-                  <div key={`${booking.id}-${bIdx}`} className="glass p-4 rounded-xl border border-white/5 space-y-3">
+                {getBookingsForDate(selectedDate).map((booking) => (
+                  <div key={`day-booking-${booking.id}`} className="glass p-4 rounded-xl border border-white/5 space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="text-sm font-bold">{booking.customerName}</p>
@@ -5819,121 +5490,6 @@ export default function AppDashboard() {
                     </div>
                   </div>
                 ))}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-        {/* Global Page CSS Modal */}
-        {showGlobalPageCssModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-display text-gold">Global Page CSS</h3>
-                <button onClick={() => setShowGlobalPageCssModal(false)} className="text-white/40 hover:text-white">
-                  <X size={20} />
-                </button>
-              </div>
-              <p className="text-xs text-white/40 mb-4 italic">Apply common styles to all service pages. Styles are automatically scoped to the content area. Use selectors like p, h1, h2, ul, li, etc.</p>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <textarea
-                  value={globalPageCss}
-                  onChange={(e) => setGlobalPageCss(e.target.value)}
-                  className="w-full h-64 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-gold transition-all"
-                  placeholder="p { color: #ccc; } h1 { color: #fff; }"
-                />
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6 overflow-y-auto h-64 cms-content-area">
-                  <style dangerouslySetInnerHTML={{ __html: globalPageCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, '.cms-content-area $1') }} />
-                  <h1 className="text-xl mb-2">Sample Heading 1</h1>
-                  <h2 className="text-lg mb-2">Sample Heading 2</h2>
-                  <p className="mb-4">This is a sample paragraph to preview your global CSS styles. See how they affect the content area.</p>
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>List item one</li>
-                    <li>List item two</li>
-                  </ul>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button
-                  onClick={async () => {
-                    try {
-                      await setDoc(doc(db, 'settings', 'cms'), { globalPageCss }, { merge: true });
-                      setShowGlobalPageCssModal(false);
-                      alert('Global Page CSS updated!');
-                    } catch (err) {
-                      console.error('Error updating global CSS:', err);
-                    }
-                  }}
-                  className="btn-primary px-8 py-3"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {/* Global Blog CSS Modal */}
-        {showGlobalBlogCssModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-sm border border-gold/20 max-h-[95vh] md:max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-display text-gold">Global Blog CSS</h3>
-                <button onClick={() => setShowGlobalBlogCssModal(false)} className="text-white/40 hover:text-white">
-                  <X size={20} />
-                </button>
-              </div>
-              <p className="text-xs text-white/40 mb-4 italic">Apply common styles to all blog posts. Styles are automatically scoped to the content area. Use selectors like p, h1, h2, ul, li, etc.</p>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <textarea
-                  value={globalBlogCss}
-                  onChange={(e) => setGlobalBlogCss(e.target.value)}
-                  className="w-full h-64 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:border-gold transition-all"
-                  placeholder="p { color: #ccc; } h1 { color: #fff; }"
-                />
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6 overflow-y-auto h-64 cms-content-area">
-                  <style dangerouslySetInnerHTML={{ __html: globalBlogCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, '.cms-content-area $1') }} />
-                  <h1 className="text-xl mb-2">Blog Post Title</h1>
-                  <h2 className="text-lg mb-2">Section Heading</h2>
-                  <p className="mb-4">This is a sample paragraph for your blog post preview. Check your typography and colors here.</p>
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>Key point A</li>
-                    <li>Key point B</li>
-                  </ul>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button
-                  onClick={async () => {
-                    try {
-                      await setDoc(doc(db, 'settings', 'cms'), { globalBlogCss }, { merge: true });
-                      setShowGlobalBlogCssModal(false);
-                      alert('Global Blog CSS updated!');
-                    } catch (err) {
-                      console.error('Error updating global CSS:', err);
-                    }
-                  }}
-                  className="btn-primary px-8 py-3"
-                >
-                  Save Changes
-                </button>
               </div>
             </motion.div>
           </motion.div>

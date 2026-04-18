@@ -84,7 +84,7 @@ service cloud.firestore {
         (
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-          (request.auth.token.email == "keliztan20@gmail.com" && request.auth.token.email_verified == true)
+          request.auth.token.email == "keliztan20@gmail.com"
         );
     }
 
@@ -128,22 +128,22 @@ service cloud.firestore {
         'status', 'basePrice', 'kmPrice', 'taxAmount', 'discountAmount', 'couponCode', 'netPrice', 
         'grossPrice', 'price', 'priceBreakdown', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 
         'read', 'rating', 'ratingComment', 'userId', 'customerName', 'customerEmail', 'customerPhone', 'flightNumber', 'flightStatus', 'flightETA',
-        'selectedExtras'
+        'selectedExtras', 'stripeSessionId'
       ];
       
       return hasOnlyAllowedFields(allowedFields) &&
-             (!('userId' in data) || data.userId == request.auth.uid || isAdmin()) &&
-             (!('serviceType' in data) || data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly']) &&
-             (!('pickup' in data) || (data.pickup is string && data.pickup.size() >= 1 && data.pickup.size() <= 500)) &&
+             (!('userId' in data) || data.userId == request.auth.uid || isAdmin() || isDriver()) &&
+             data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly'] &&
+             data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 500 &&
              (!('dropoff' in data) || (data.dropoff is string && data.dropoff.size() <= 500)) &&
-             (!('passengers' in data) || (data.passengers is int && data.passengers >= 1 && data.passengers <= 50)) &&
-             (!('status' in data) || data.status in ['pending', 'confirmed', 'assigned', 'accepted', 'rejected', 'completed', 'cancelled']) &&
+             (!('passengers' in data) || (data.passengers is int && data.passengers >= 1 && data.passengers <= 100)) &&
+             data.status in ['pending', 'confirmed', 'assigned', 'accepted', 'rejected', 'completed', 'cancelled'] &&
              (!('price' in data) || (data.price is number && data.price >= 0)) &&
-             (!('paymentStatus' in data) || data.paymentStatus in ['unpaid', 'paid', 'refunded']) &&
+             data.paymentStatus in ['unpaid', 'paid', 'refunded'] &&
              (!('paymentMethod' in data) || data.paymentMethod in ['card', 'cash']) &&
              (!('rating' in data) || (data.rating is int && data.rating >= 1 && data.rating <= 5)) &&
              (!('ratingComment' in data) || (data.ratingComment is string && data.ratingComment.size() <= 2000)) &&
-             (!('createdAt' in data) || (data.createdAt is timestamp || data.createdAt is string));
+             (data.createdAt is timestamp || data.createdAt is string);
     }
 
     function isValidCoupon(data) {
@@ -155,19 +155,18 @@ service cloud.firestore {
     }
 
     function isValidPage(data) {
-      let allowedFields = ['id', 'title', 'slug', 'content', 'metaTitle', 'metaDescription', 'keywords', 'canonicalUrl', 'ogImage', 'featuredImage', 'schema', 'noindex', 'includeInSitemap', 'createdAt', 'updatedAt', 'author', 'customCss'];
+      let allowedFields = ['id', 'title', 'slug', 'content', 'metaTitle', 'metaDescription', 'keywords', 'canonicalUrl', 'ogImage', 'schema', 'noindex', 'includeInSitemap', 'createdAt', 'updatedAt'];
       return hasOnlyAllowedFields(allowedFields) &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.slug is string && data.slug.size() > 0 && data.slug.size() <= 200 &&
              data.content is string && data.content.size() <= 100000 &&
              (!('metaTitle' in data) || (data.metaTitle is string && data.metaTitle.size() <= 200)) &&
              (!('metaDescription' in data) || (data.metaDescription is string && data.metaDescription.size() <= 500)) &&
-             (!('ogImage' in data) || isValidUrl(data.ogImage)) &&
-             (!('featuredImage' in data) || isValidUrl(data.featuredImage));
+             (!('ogImage' in data) || isValidUrl(data.ogImage));
     }
 
     function isValidBlog(data) {
-      let allowedFields = ['id', 'title', 'slug', 'content', 'featuredImage', 'image', 'category', 'excerpt', 'metaTitle', 'metaDescription', 'keywords', 'createdAt', 'updatedAt', 'noindex', 'includeInSitemap', 'author', 'customCss'];
+      let allowedFields = ['id', 'title', 'slug', 'content', 'featuredImage', 'image', 'category', 'excerpt', 'metaTitle', 'metaDescription', 'keywords', 'createdAt', 'updatedAt', 'noindex', 'includeInSitemap'];
       return hasOnlyAllowedFields(allowedFields) &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.slug is string && data.slug.size() > 0 && data.slug.size() <= 200 &&
@@ -230,7 +229,7 @@ service cloud.firestore {
       allow create, delete: if isAdmin();
     }
 
-    match /settings/{settingId} {
+    match /settings/system {
       allow read: if true;
       allow write: if isAdmin();
     }

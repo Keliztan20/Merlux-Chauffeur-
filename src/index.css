@@ -9,6 +9,9 @@
 }
 
 @layer base {
+  body {
+    @apply bg-black text-white antialiased;
+  }
 
   h1,
   h2,

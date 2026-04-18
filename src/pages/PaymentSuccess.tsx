@@ -38,7 +38,14 @@ export default function PaymentSuccess() {
         const session = await response.json();
         
         if (session.payment_status === 'paid') {
-          const bookingData = JSON.parse(session.metadata.bookingData);
+          const bookingDataString = 
+            (session.metadata.bookingDataChunk1 || '') + 
+            (session.metadata.bookingDataChunk2 || '') + 
+            (session.metadata.bookingDataChunk3 || '') + 
+            (session.metadata.bookingDataChunk4 || '') || 
+            session.metadata.bookingData || '{}';
+          
+          const bookingData = JSON.parse(bookingDataString);
           
           // Check if booking already exists for this session
           const docRef = doc(db, 'bookings', sessionId);
@@ -54,10 +61,12 @@ export default function PaymentSuccess() {
           const saveDocRef = doc(db, 'bookings', sessionId);
           await setDoc(saveDocRef, {
             ...bookingData,
+            status: 'confirmed',
             paymentStatus: 'paid',
             stripeSessionId: sessionId,
             read: false,
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
           });
           
           setBookingId(sessionId);

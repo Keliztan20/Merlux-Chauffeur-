@@ -1498,7 +1498,7 @@ export default function Booking() {
                           </div>
 
                           <div className="flex items-center text-[10px] uppercase text-white/40 space-x-2">
-                            <Plane size={10} className="text-gold font-bold" />
+                            <Plane size={10} className="text-gold font-bold"/>
                             <span className="text-white font-bold">
                               {flightInfo.airlineName || "Unknown"}
                             </span>
@@ -1973,21 +1973,19 @@ export default function Booking() {
                           </p>
                         </div>
                       </div>
-                      {formData.dropoff && (
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
-                            <MapPin size={14} className="text-gold" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[8px] uppercase tracking-widest text-white/40">
-                              Dropoff
-                            </p>
-                            <p className="text-[10px] text-white truncate">
-                              {formData.dropoff}
-                            </p>
-                          </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
+                          <MapPin size={14} className="text-gold" />
                         </div>
-                      )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[8px] uppercase tracking-widest text-white/40">
+                            Dropoff
+                          </p>
+                          <p className="text-[10px] text-white truncate">
+                            {formData.dropoff || "Hourly Hire"}
+                          </p>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
                           <Calendar size={14} className="text-gold" />
@@ -2068,33 +2066,32 @@ export default function Booking() {
                           </div>
                         </div>
                       )}
-
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
-                          <Car size={14} className="text-gold" />
-                        </div>
-                        <div>
-                          <p className="text-[8px] uppercase tracking-widest text-white/40">
-                            Vehicle
-                          </p>
-                          <p className="text-[10px] text-white">
-                            {
-                              (
-                                fleet.find(
-                                  (v) => v.id === formData.vehicle,
-                                ) ||
-                                vehicles.find(
-                                  (v) => v.id === formData.vehicle,
-                                )
-                              )?.name
-                            }
-                          </p>
-                        </div>
-                      </div>
                     </div>
 
                     {formData.vehicle && (
                       <div className="space-y-3 pt-6 border-t border-white/5">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
+                            <Car size={14} className="text-gold" />
+                          </div>
+                          <div>
+                            <p className="text-[8px] uppercase tracking-widest text-white/40">
+                              Vehicle
+                            </p>
+                            <p className="text-[10px] text-white">
+                              {
+                                (
+                                  fleet.find(
+                                    (v) => v.id === formData.vehicle,
+                                  ) ||
+                                  vehicles.find(
+                                    (v) => v.id === formData.vehicle,
+                                  )
+                                )?.name
+                              }
+                            </p>
+                          </div>
+                        </div>
                         {settings?.showPriceBreakdown !== false && (
                           <div className="space-y-2">
                             {(() => {
@@ -2637,21 +2634,19 @@ export default function Booking() {
                             </div>
                           </div>
 
-                          {formData.dropoff && (
-                            <div className="flex items-start gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-                                <MapPin size={16} className="text-gold" />
-                              </div>
-                              <div>
-                                <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                  Dropoff
-                                </p>
-                                <p className="text-white text-xs">
-                                  {formData.dropoff}
-                                </p>
-                              </div>
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+                              <MapPin size={16} className="text-gold" />
                             </div>
-                          )}
+                            <div>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                Dropoff
+                              </p>
+                              <p className="text-white text-xs">
+                                {formData.dropoff || "Hourly Hire"}
+                              </p>
+                            </div>
+                          </div>
                         </div>
 
                         {formData.waypoints.filter((wp) => wp.length > 5)
@@ -2731,67 +2726,48 @@ export default function Booking() {
                         )}
 
                         <div className="pt-6 border-t border-white/5 grid grid-cols-2 gap-6">
-                          {formData.serviceType === "hourly" ? (
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-                                <Clock size={16} className="text-gold" />
-                              </div>
-                              <div>
-                                <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                  Duration
-                                </p>
-                                <p className="text-white font-bold text-xs">
-                                  {formData.hours} Hours
-                                </p>
-                              </div>
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+                              <Navigation size={16} className="text-gold" />
                             </div>
-                          ) : (
-                            <>
-                              {/* Distance */}
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-                                  <Navigation size={16} className="text-gold" />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                    Distance
-                                  </p>
-                                  <p className="text-white font-bold text-xs">
-                                    {(() => {
-                                      const distVal =
-                                        parseFloat(distance.replace(/[^\d.]/g, "")) || 0;
-                                      return formData.isReturn
-                                        ? `${(distVal * 2).toFixed(1)} km`
-                                        : distance;
-                                    })()}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Est. Time */}
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-                                  <Clock size={16} className="text-gold" />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                    Est. Time
-                                  </p>
-                                  <p className="text-white font-bold text-xs">
-                                    {(() => {
-                                      if (!duration) return "N/A";
-                                      const match = duration.match(/(\d+)\s*min/);
-                                      if (match && formData.isReturn) {
-                                        const mins = parseInt(match[1]);
-                                        return `${mins * 2} mins`;
-                                      }
-                                      return duration;
-                                    })()}
-                                  </p>
-                                </div>
-                              </div>
-                            </>
-                          )}
+                            <div>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                Distance
+                              </p>
+                              <p className="text-white font-bold text-xs">
+                                {(() => {
+                                  const distVal =
+                                    parseFloat(
+                                      distance.replace(/[^\d.]/g, ""),
+                                    ) || 0;
+                                  return formData.isReturn
+                                    ? `${(distVal * 2).toFixed(1)} km`
+                                    : distance;
+                                })()}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+                              <Clock size={16} className="text-gold" />
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                                Est. Time
+                              </p>
+                              <p className="text-white font-bold text-xs">
+                                {(() => {
+                                  if (!duration) return "N/A";
+                                  const match = duration.match(/(\d+)\s*min/);
+                                  if (match && formData.isReturn) {
+                                    const mins = parseInt(match[1]);
+                                    return `${mins * 2} mins`;
+                                  }
+                                  return duration;
+                                })()}
+                              </p>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Price Breakdown */}

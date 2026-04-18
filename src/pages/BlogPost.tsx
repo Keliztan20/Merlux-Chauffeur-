@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, limit, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { Calendar, User, ArrowLeft, Clock, Share2, Loader2 } from 'lucide-react';
 
 export default function BlogPost() {
   const { slug } = useParams();
   const [post, setPost] = useState<any>(null);
-  const [globalCss, setGlobalCss] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -24,12 +23,6 @@ export default function BlogPost() {
           setError(false);
         } else {
           setError(true);
-        }
-
-        // Fetch global CSS
-        const settingsSnap = await getDoc(doc(db, 'settings', 'cms'));
-        if (settingsSnap.exists()) {
-          setGlobalCss(settingsSnap.data().globalBlogCss || '');
         }
       } catch (err) {
         console.error('Error fetching blog post:', err);
@@ -117,14 +110,8 @@ export default function BlogPost() {
             </div>
             
             <div className="lg:col-span-3">
-              {globalCss && (
-                <style dangerouslySetInnerHTML={{ __html: globalCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, '.cms-content-area $1') }} />
-              )}
-              {post.customCss && (
-                <style dangerouslySetInnerHTML={{ __html: post.customCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, '.cms-content-area $1') }} />
-              )}
               <div 
-                className="cms-content-area prose prose-invert prose-gold max-w-none prose-p:text-white/60 prose-p:leading-relaxed prose-headings:font-display prose-headings:text-white prose-li:text-white/60"
+                className="prose prose-invert prose-gold max-w-none prose-p:text-white/60 prose-p:leading-relaxed prose-headings:font-display prose-headings:text-white prose-li:text-white/60"
                 dangerouslySetInnerHTML={{ __html: post.content }}
               />
             </div>
