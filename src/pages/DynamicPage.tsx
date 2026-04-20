@@ -19,8 +19,23 @@ export default function DynamicPage() {
         const snap = await getDocs(q);
         
         if (!snap.empty) {
-          setPageData(snap.docs[0].data());
+          const data = snap.docs[0].data();
+          setPageData(data);
           setError(false);
+
+          // Individual CSS Injection
+          const styleId = `page-css-${slug}`;
+          let styleTag = document.getElementById(styleId);
+          if (data.customCss && data.isCustomCssActive !== false) {
+            if (!styleTag) {
+              styleTag = document.createElement('style');
+              styleTag.id = styleId;
+              document.head.appendChild(styleTag);
+            }
+            styleTag.innerHTML = data.customCss;
+          } else if (styleTag) {
+            styleTag.remove();
+          }
         } else {
           setError(true);
         }
@@ -33,6 +48,12 @@ export default function DynamicPage() {
     };
 
     if (slug) fetchPage();
+
+    return () => {
+      const styleId = `page-css-${slug}`;
+      const styleTag = document.getElementById(styleId);
+      if (styleTag) styleTag.remove();
+    };
   }, [slug]);
 
   if (loading) {

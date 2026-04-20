@@ -159,7 +159,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] flex items-center justify-center relative overflow-hidden">
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center relative overflow-hidden mt-10">
       {/* Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full blur-[120px]" />
@@ -174,7 +174,6 @@ export default function Login() {
           animate={{ opacity: 1, x: 0 }}
           className="hidden lg:flex flex-col justify-center space-y-8"
         >
-          <Logo className="h-16 w-fit" />
           <div className="space-y-4">
             <h2 className="text-5xl font-display text-white leading-tight">
               Experience the <span className="text-gold">Ultimate</span> in Luxury Chauffeur Services

@@ -17,7 +17,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const settingsRef = doc(db, 'settings', 'system');
     const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
       if (docSnap.exists()) {
-        setSettings(docSnap.data());
+        const data = docSnap.data();
+        setSettings(data);
+
+        // Global CSS Injection
+        const styleId = 'global-cms-css';
+        let styleTag = document.getElementById(styleId);
+        if (data.seo?.globalCmsCss && data.seo?.isGlobalCssActive !== false) {
+          if (!styleTag) {
+            styleTag = document.createElement('style');
+            styleTag.id = styleId;
+            document.head.appendChild(styleTag);
+          }
+          styleTag.innerHTML = data.seo.globalCmsCss;
+        } else if (styleTag) {
+          styleTag.remove();
+        }
       }
       setLoading(false);
     }, (err) => {

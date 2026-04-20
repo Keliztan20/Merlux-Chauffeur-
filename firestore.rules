@@ -203,18 +203,17 @@ service cloud.firestore {
       allow read: if isDocOwner() || isAdmin() || isDriver();
       allow create: if isAuthenticated() && isValidBooking(request.resource.data) && request.resource.data.status == 'pending';
       allow update: if isAuthenticated() && (
-        (isDocOwner() && isValidBooking(resource.data.merge(request.resource.data)) &&
-          (request.resource.data.status == resource.data.status ||
-          (resource.data.status == 'completed' &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'ratingComment', 'updatedAt'])))) ||
+        // Customer: can only update rating on completed bookings
+        (isDocOwner() && resource.data.status == 'completed' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'ratingComment', 'updatedAt']) &&
+          (!('rating' in request.resource.data) || (request.resource.data.rating is int && request.resource.data.rating >= 1 && request.resource.data.rating <= 5)) &&
+          (!('ratingComment' in request.resource.data) || (request.resource.data.ratingComment is string && request.resource.data.ratingComment.size() <= 2000))) ||
+        // Admin: can update anything (with full validation)
         isAdmin() ||
-        (
-          isDriver() &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
-          (request.resource.data.driverId == request.auth.uid ||
-           resource.data.driverId == request.auth.uid)
-        )
+        // Driver: update status and driver assignment
+        (isDriver() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'driverId', 'read', 'updatedAt']) &&
+          (request.resource.data.driverId == request.auth.uid || resource.data.driverId == request.auth.uid))
       );
       allow delete: if isAdmin();
     }

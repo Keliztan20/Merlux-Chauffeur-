@@ -2,18 +2,18 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Home, MapPin, Clock, User,
   Settings, Bell, CreditCard, History,
-  ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight,
+  ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown,
   Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
   Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock, Copy,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2, Code2, MessageSquare, AlertCircle, PiggyBank
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer, Marker } from '@react-google-maps/api';
 import { cn } from '../lib/utils';
 import { auth, db, storage } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, getDocs, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
+import { onAuthStateChanged, signOut, updateProfile, updatePassword } from 'firebase/auth';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
 import {
@@ -23,7 +23,8 @@ import {
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths,
-  isToday, parseISO
+  isToday, parseISO, subDays, startOfYear, endOfYear, eachMonthOfInterval,
+  startOfDay, endOfDay, setMonth, setYear, eachYearOfInterval
 } from 'date-fns';
 
 enum OperationType {
@@ -107,7 +108,6 @@ export default function AppDashboard() {
   const [showBlogModal, setShowBlogModal] = useState(false);
   const [editingPage, setEditingPage] = useState<any>(null);
   const [editingBlog, setEditingBlog] = useState<any>(null);
-  const [cmsActiveSubTab, setCmsActiveSubTab] = useState('pages');
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -127,17 +127,38 @@ export default function AppDashboard() {
   useEffect(() => {
     if (showRouteModal && routeBooking && isLoaded) {
       const fetchDirections = async () => {
-        if (!routeBooking.pickup || !routeBooking.dropoff) return;
+        const hasPickup = routeBooking.pickup && routeBooking.pickup.length >= 5;
+        const hasDropoff = routeBooking.dropoff && routeBooking.dropoff.length >= 5;
+        const hasWaypoints = routeBooking.waypoints && routeBooking.waypoints.length > 0;
+
+        // If only 1 point (pickup) → no route, will show marker
+        if (!hasPickup || (!hasDropoff && !hasWaypoints)) {
+          setMapDirections(null);
+          return;
+        }
+
         setIsMapLoading(true);
         try {
           const service = new google.maps.DirectionsService();
-          const result = await service.route({
-            origin: routeBooking.pickup,
-            destination: routeBooking.dropoff,
-            waypoints: (routeBooking.waypoints || []).map((wp: string) => ({
+
+          let destination = routeBooking.dropoff;
+          let waypoints = (routeBooking.waypoints || []).map((wp: string) => ({
+            location: wp,
+            stopover: true,
+          }));
+
+          if (!hasDropoff && hasWaypoints) {
+            destination = routeBooking.waypoints[routeBooking.waypoints.length - 1];
+            waypoints = routeBooking.waypoints.slice(0, -1).map((wp: string) => ({
               location: wp,
               stopover: true,
-            })),
+            }));
+          }
+
+          const result = await service.route({
+            origin: routeBooking.pickup,
+            destination: destination,
+            waypoints: waypoints,
             travelMode: google.maps.TravelMode.DRIVING,
           });
 
@@ -146,6 +167,7 @@ export default function AppDashboard() {
           }
         } catch (error) {
           console.error('Error fetching directions:', error);
+          setMapDirections(null);
         } finally {
           setIsMapLoading(false);
         }
@@ -166,6 +188,8 @@ export default function AppDashboard() {
   const [profileName, setProfileName] = useState('');
   const [profilePhone, setProfilePhone] = useState('');
   const [profileAddress, setProfileAddress] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
   // Calendar State
@@ -197,6 +221,17 @@ export default function AppDashboard() {
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [viewingBooking, setViewingBooking] = useState<any>(null);
+
+  // CSS State
+  const [showCssModal, setShowCssModal] = useState(false);
+  const [cssEditingLoading, setCssEditingLoading] = useState(false);
+  const [cssConfig, setCssConfig] = useState<{
+    type: 'global' | 'page' | 'blog';
+    id?: string;
+    content: string;
+    isActive: boolean;
+    title?: string;
+  }>({ type: 'global', content: '', isActive: true });
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDistanceBreakdown, setShowDistanceBreakdown] = useState(false);
 
@@ -208,6 +243,41 @@ export default function AppDashboard() {
   // Confirmation State
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra' | 'page' | 'blog', id: string } | null>(null);
 
+  // New Analytics State
+  const [analyticsTimeFilter, setAnalyticsTimeFilter] = useState<'7d' | '30d' | 'month' | 'year'>('7d');
+  const [monthRange, setMonthRange] = useState({ start: 0, end: new Date().getMonth() });
+  const [yearRange, setYearRange] = useState({
+    start: new Date().getFullYear() - 2,
+    end: new Date().getFullYear()
+  });
+  const [analyticsRoleFilter, setAnalyticsRoleFilter] = useState<'all' | 'driver' | 'customer'>('all');
+  const [analyticsViewMode, setAnalyticsViewMode] = useState<'charts' | 'numerical'>('charts');
+  const [bookingTimeFilter, setBookingTimeFilter] = useState<'3d' | '7d' | '30d' | 'month' | 'year' | 'all'>('all');
+  const [bookingDateTypeFilter, setBookingDateTypeFilter] = useState<'pickup' | 'booking'>('pickup');
+  const [bookingMonthRange, setBookingMonthRange] = useState({
+    start: format(startOfMonth(subMonths(new Date(), 5)), 'yyyy-MM'),
+    end: format(endOfMonth(new Date()), 'yyyy-MM')
+  });
+  const [bookingYearRange, setBookingYearRange] = useState({
+    start: new Date().getFullYear() - 1,
+    end: new Date().getFullYear()
+  });
+  const [dashboardCharts, setDashboardCharts] = useState<any[]>([
+    { id: 'revenue-trend', type: 'area', title: 'Revenue Trend', dataKey: 'revenue', color: '#D4AF37', width: 'large' },
+    { id: 'booking-volume', type: 'bar', title: 'Booking Volume', dataKey: 'bookings', color: '#60A5FA', width: 'medium' },
+    { id: 'booking-statuses', type: 'pie', title: 'Booking Statuses', dataKey: 'value', color: '#22D3EE', width: 'small', dataSource: 'statusData' },
+    { id: 'role-distribution', type: 'pie', title: 'User Roles', dataKey: 'value', color: '#F43F5E', width: 'small', dataSource: 'roleData' }
+  ]);
+  const [showAddChartModal, setShowAddChartModal] = useState(false);
+  const [newChartConfig, setNewChartConfig] = useState({
+    title: '',
+    type: 'line',
+    dataKey: 'revenue',
+    dataSource: 'revenueData',
+    color: '#D4AF37',
+    width: 'medium'
+  });
+
   const navigate = useNavigate();
 
   const isAdmin = userProfile?.role === 'admin';
@@ -218,7 +288,6 @@ export default function AppDashboard() {
     { id: 'analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
     { id: 'calendar', label: 'Calendar', icon: Calendar, adminOnly: false },
     { id: 'users', label: 'Users', icon: Users, adminOnly: true },
-    { id: 'cms', label: 'SEO & CMS', icon: Globe, adminOnly: true },
     { id: 'profile', label: 'Profile', icon: User, adminOnly: false },
     { id: 'management', label: 'Management', icon: Settings, adminOnly: true },
   ];
@@ -251,6 +320,8 @@ export default function AppDashboard() {
     setTypeFilter('all');
     setServiceFilter('all');
     setStatusFilter('all');
+    setBookingTimeFilter('all');
+    setBookingDateTypeFilter('pickup');
   };
 
   const handleRefresh = () => {
@@ -261,7 +332,14 @@ export default function AppDashboard() {
 
   const handleRateDriver = async (bookingId: string, rating: number, comment: string) => {
     try {
-      await updateDoc(doc(db, 'bookings', bookingId), {
+      // Fetch the booking to check status and ownership
+      const bookingRef = doc(db, 'bookings', bookingId);
+      const bookingSnap = await getDoc(bookingRef);
+      if (!bookingSnap.exists()) {
+        console.error('Booking not found');
+        return;
+      }
+      await updateDoc(bookingRef, {
         rating,
         ratingComment: comment,
         updatedAt: serverTimestamp()
@@ -344,10 +422,62 @@ export default function AppDashboard() {
     }
   }, [userProfile, user]);
 
+  const handleSaveCss = async () => {
+    setCssEditingLoading(true);
+    try {
+      if (cssConfig.type === 'global') {
+        const settingsRef = doc(db, "settings", "system");
+        await updateDoc(settingsRef, {
+          "seo.globalCmsCss": cssConfig.content,
+          "seo.isGlobalCssActive": cssConfig.isActive
+        });
+        setSystemSettings(prev => ({
+          ...prev,
+          seo: {
+            ...prev.seo,
+            globalCmsCss: cssConfig.content,
+            isGlobalCssActive: cssConfig.isActive
+          }
+        }));
+      } else if (cssConfig.type === 'page' && cssConfig.id) {
+        const pageRef = doc(db, "pages", cssConfig.id);
+        await updateDoc(pageRef, {
+          customCss: cssConfig.content,
+          isCustomCssActive: cssConfig.isActive
+        });
+        setPages(prev => prev.map(p => p.id === cssConfig.id ? { ...p, customCss: cssConfig.content, isCustomCssActive: cssConfig.isActive } : p));
+      } else if (cssConfig.type === 'blog' && cssConfig.id) {
+        const blogRef = doc(db, "blogs", cssConfig.id);
+        await updateDoc(blogRef, {
+          customCss: cssConfig.content,
+          isCustomCssActive: cssConfig.isActive
+        });
+        setBlogs(prev => prev.map(b => b.id === cssConfig.id ? { ...b, customCss: cssConfig.content, isCustomCssActive: cssConfig.isActive } : b));
+      }
+      setShowCssModal(false);
+    } catch (err) {
+      console.error("Error saving CSS:", err);
+    } finally {
+      setCssEditingLoading(false);
+    }
+  };
+
   const handleUpdateProfile = async () => {
     if (!user) return;
     setIsUpdatingProfile(true);
     try {
+      // 1. Password change if requested
+      if (newPassword) {
+        if (newPassword.length < 6) {
+          throw new Error('Password must be at least 6 characters');
+        }
+        if (newPassword !== confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+        await updatePassword(user, newPassword);
+      }
+
+      // 2. Profile metadata update
       await updateProfile(user, { displayName: profileName });
       await updateDoc(doc(db, 'users', user.uid), {
         name: profileName,
@@ -355,11 +485,19 @@ export default function AppDashboard() {
         address: profileAddress,
         updatedAt: serverTimestamp()
       });
+
       setUserProfile((prev: any) => ({ ...prev, name: profileName, phone: profilePhone, address: profileAddress }));
+      setNewPassword('');
+      setConfirmPassword('');
       alert('Profile updated successfully!');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating profile:', err);
-      alert('Failed to update profile.');
+      // Handle Firebase sensitive operation error (requires recent login)
+      if (err.code === 'auth/requires-recent-login') {
+        alert('This operation is sensitive and requires recent authentication. Please log out and log back in to change your password.');
+      } else {
+        alert(err.message || 'Failed to update profile.');
+      }
     } finally {
       setIsUpdatingProfile(false);
     }
@@ -388,21 +526,123 @@ export default function AppDashboard() {
 
   // Analytics Computation
   const analytics = useMemo(() => {
+    const now = new Date();
     const totalRevenue = bookings
       .filter(b => b.paymentStatus === 'paid' || b.status === 'completed')
       .reduce((sum, b) => sum + (Number(b.price) || 0), 0);
 
-    const completedBookings = bookings.filter(b => b.status === 'completed').length;
-    const pendingBookings = bookings.filter(b => b.status === 'pending').length;
-    const cancelledBookings = bookings.filter(b => b.status === 'cancelled').length;
-    const confirmedBookings = bookings.filter(b => b.status === 'confirmed').length;
-    const assignedBookings = bookings.filter(b => b.status === 'assigned').length;
-    const acceptedBookings = bookings.filter(b => b.status === 'accepted').length;
+    // Derived Filtered Status Counts
+    const filteredBookingsList = bookings.filter(b => {
+      const bDate = b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : null;
+      if (!bDate) return false;
 
-    const now = new Date();
+      // Role filter
+      if (analyticsRoleFilter === 'driver' && !b.driverId) return false;
+      if (analyticsRoleFilter === 'customer' && !b.userId) return false;
+
+      if (analyticsTimeFilter === 'month') {
+        const start = setMonth(startOfYear(now), monthRange.start);
+        const end = setMonth(startOfYear(now), monthRange.end);
+        const s = start < end ? start : end;
+        const e = endOfMonth(start < end ? end : start);
+        return bDate >= s && bDate <= e;
+      } else if (analyticsTimeFilter === 'year') {
+        const start = startOfYear(setYear(now, yearRange.start));
+        const end = endOfYear(setYear(now, yearRange.end));
+        const s = start < end ? start : end;
+        const e = start < end ? end : start;
+        return bDate >= s && bDate <= e;
+      } else if (analyticsTimeFilter === '7d') {
+        return bDate >= subDays(now, 6);
+      } else if (analyticsTimeFilter === '30d') {
+        return bDate >= subDays(now, 29);
+      }
+      return true;
+    });
+
+    const completedCount = filteredBookingsList.filter(b => b.status === 'completed').length;
+    const pendingCount = filteredBookingsList.filter(b => b.status === 'pending').length;
+    const cancelledCount = filteredBookingsList.filter(b => b.status === 'cancelled').length;
+    const confirmedCount = filteredBookingsList.filter(b => b.status === 'confirmed').length;
+    const assignedCount = filteredBookingsList.filter(b => b.status === 'assigned').length;
+    const acceptedCount = filteredBookingsList.filter(b => b.status === 'accepted').length;
+
+    const statusData = [
+      { name: 'Pending', value: pendingCount, color: '#D4AF37' },
+      { name: 'Confirmed', value: confirmedCount, color: '#60A5FA' },
+      { name: 'Assigned', value: assignedCount, color: '#C084FC' },
+      { name: 'Accepted', value: acceptedCount, color: '#22D3EE' },
+      { name: 'Completed', value: completedCount, color: '#4ADE80' },
+      { name: 'Cancelled', value: cancelledCount, color: '#F87171' },
+    ].filter(item => item.value > 0);
+
+    let intervals: Date[] = [];
+    let formatStr = 'MMM dd';
+
+    if (analyticsTimeFilter === '7d') {
+      intervals = eachDayOfInterval({ start: subDays(now, 6), end: now });
+      formatStr = 'MMM dd';
+    } else if (analyticsTimeFilter === '30d') {
+      intervals = eachDayOfInterval({ start: subDays(now, 29), end: now });
+      formatStr = 'MMM dd';
+    } else if (analyticsTimeFilter === 'month') {
+      // Respect user selected month range
+      const start = setMonth(startOfYear(now), monthRange.start);
+      const end = setMonth(startOfYear(now), monthRange.end);
+      intervals = eachMonthOfInterval({
+        start: start < end ? start : end,
+        end: start < end ? end : start
+      });
+      formatStr = 'MMM';
+    } else if (analyticsTimeFilter === 'year') {
+      // Respect user selected year range
+      const start = startOfYear(setYear(now, yearRange.start));
+      const end = startOfYear(setYear(now, yearRange.end));
+      intervals = eachYearOfInterval({
+        start: start < end ? start : end,
+        end: start < end ? end : start
+      });
+      formatStr = 'yyyy';
+    }
+
+    const intervalsProcessed = intervals.length > 0;
+    const rangeStart = intervalsProcessed ? intervals[0] : now;
+    const rangeEnd = intervalsProcessed ? intervals[intervals.length - 1] : now;
+
+    const rangeDescription = analyticsTimeFilter === '7d' ? `Last 7 Days (${format(rangeStart, 'MMM dd')} - ${format(rangeEnd, 'MMM dd')})` :
+      analyticsTimeFilter === '30d' ? `Last 30 Days (${format(rangeStart, 'MMM dd')} - ${format(rangeEnd, 'MMM dd')})` :
+        analyticsTimeFilter === 'month' ? `Monthly Range (${format(rangeStart, 'MMM yyyy')} - ${format(rangeEnd, 'MMM yyyy')})` :
+          `Yearly Range (${format(rangeStart, 'yyyy')} - ${format(rangeEnd, 'yyyy')})`;
+
+    const revenueData = intervals.map(date => {
+      const dayBookings = bookings.filter(b => {
+        const bDate = b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : null;
+        if (!bDate) return false;
+
+        if (analyticsTimeFilter === 'month') {
+          return format(bDate, 'yyyy-MM') === format(date, 'yyyy-MM');
+        } else if (analyticsTimeFilter === 'year') {
+          return format(bDate, 'yyyy') === format(date, 'yyyy');
+        } else {
+          return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd');
+        }
+      });
+
+      return {
+        name: format(date, formatStr),
+        revenue: dayBookings
+          .filter(b => b.paymentStatus === 'paid' || b.status === 'completed')
+          .reduce((sum, b) => sum + (Number(b.price) || 0), 0),
+        bookings: dayBookings.length,
+        fullDate: format(date, 'PPP')
+      };
+    });
+
+    const filteredRevenue = revenueData.reduce((sum, item) => sum + item.revenue, 0);
+    const filteredBookings = revenueData.reduce((sum, item) => sum + item.bookings, 0);
+
     const currentMonthStart = startOfMonth(now);
     const currentMonthEnd = endOfMonth(now);
-
     const currentMonthBookings = bookings.filter(b => {
       if (!b.date) return false;
       const bDate = parseISO(b.date);
@@ -413,38 +653,98 @@ export default function AppDashboard() {
       .filter(b => b.paymentStatus === 'paid' || b.status === 'completed')
       .reduce((sum, b) => sum + (Number(b.price) || 0), 0);
 
-    // Group by date for charts
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      return format(d, 'MMM dd');
-    }).reverse();
+    const uniqueCustomers = new Set(filteredBookingsList.map(b => b.userId).filter(Boolean)).size;
+    const uniqueDrivers = new Set(filteredBookingsList.map(b => b.driverId).filter(Boolean)).size;
 
-    const revenueData = last7Days.map(day => {
-      const dayBookings = bookings.filter(b => {
-        const bDate = b.createdAt?.seconds ? format(new Date(b.createdAt.seconds * 1000), 'MMM dd') : '';
-        return bDate === day && (b.paymentStatus === 'paid' || b.status === 'completed');
-      });
-      return {
-        name: day,
-        revenue: dayBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0),
-        bookings: dayBookings.length
-      };
-    });
+    const roleData = [
+      { name: 'Customers', value: uniqueCustomers, color: '#22D3EE' },
+      { name: 'Drivers', value: uniqueDrivers, color: '#F43F5E' }
+    ];
 
     return {
-      totalRevenue,
-      completedBookings,
-      pendingBookings,
-      cancelledBookings,
-      confirmedBookings,
-      assignedBookings,
-      acceptedBookings,
+      totalRevenue: filteredRevenue,
+      totalBookings: filteredBookings,
+      rangeDescription,
+      completedBookings: completedCount,
+      pendingBookings: pendingCount,
+      cancelledBookings: cancelledCount,
+      confirmedBookings: confirmedCount,
+      assignedBookings: assignedCount,
+      acceptedBookings: acceptedCount,
+      customerCount: uniqueCustomers,
+      driverCount: uniqueDrivers,
+      statusData,
+      roleData,
       currentMonthCount: currentMonthBookings.length,
       currentMonthRevenue,
-      revenueData
+      revenueData,
+      topDrivers: [...new Set(filteredBookingsList.map(b => b.driverId).filter(Boolean))].map(id => {
+        const name = allUsers.find(u => u.id === id)?.name || 'Unknown Driver';
+        const dBookings = filteredBookingsList.filter(b => b.driverId === id);
+        return { name, count: dBookings.length, revenue: dBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0) };
+      }).sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+      topCustomers: [...new Set(filteredBookingsList.map(b => b.userId).filter(Boolean))].map(id => {
+        const name = allUsers.find(u => u.id === id)?.name || 'Guest User';
+        const cBookings = filteredBookingsList.filter(b => b.userId === id);
+        return { name, count: cBookings.length, revenue: cBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0) };
+      }).sort((a, b) => b.revenue - a.revenue).slice(0, 5)
     };
-  }, [bookings]);
+  }, [bookings, analyticsTimeFilter, monthRange, yearRange]);
+
+  const userDetailStats = useMemo(() => {
+    const stats: Record<string, any> = {};
+    allUsers.forEach(u => {
+      // For Drivers
+      if (u.role === 'driver') {
+        const driverBookings = bookings.filter(b => b.driverId === u.id);
+        const completed = driverBookings.filter(b => b.status === 'completed');
+        const rated = completed.filter(b => b.rating);
+        const totalRatingValue = rated.reduce((sum, b) => sum + (Number(b.rating) || 0), 0);
+        const avgRating = rated.length ? totalRatingValue / rated.length : 0;
+        const totalEarnings = completed.reduce((sum, b) => sum + (Number(b.price) || 0), 0);
+        const unreviewed = completed.filter(b => !b.rating);
+        const feedbacks = completed.map(b => {
+          const customer = allUsers.find(cu => cu.id === b.userId);
+
+          return {
+            comment: b.ratingComment?.trim() || '',
+            rating: b.rating || 0,
+            customerName: customer?.name || 'Anonymous'
+          };
+        });
+
+        stats[u.id] = {
+          completedRides: completed.length,
+          avgRating: avgRating,
+          totalRatingValue: totalRatingValue,
+          ratingCount: rated.length,
+          unreviewedCount: unreviewed.length,
+          totalEarnings: totalEarnings,
+          feedbacks: feedbacks
+        };
+      } else if (u.role === 'admin') {
+        const unassigned = bookings.filter(b => !b.driverId && b.status !== 'cancelled' && b.status !== 'completed');
+        const cancelled = bookings.filter(b => b.status === 'cancelled');
+        stats[u.id] = {
+          unassignedCount: unassigned.length,
+          cancelledCount: cancelled.length
+        };
+      } else if (u.role === 'customer' || !u.role || u.role === 'user') {
+        // For Customers
+        const customerBookings = bookings.filter(b => b.userId === u.id);
+        const completed = customerBookings.filter(b => b.status === 'completed');
+        const totalSpend = customerBookings
+          .filter(b => b.status === 'completed' || b.paymentStatus === 'paid')
+          .reduce((sum, b) => sum + (Number(b.price) || 0), 0);
+        stats[u.id] = {
+          totalBookings: customerBookings.length,
+          completedRides: completed.length,
+          totalSpend
+        };
+      }
+    });
+    return stats;
+  }, [allUsers, bookings]);
 
   // Calendar Helpers
   const calendarDays = useMemo(() => {
@@ -672,7 +972,7 @@ export default function AppDashboard() {
     try {
       // Ensure the internal id field always matches the document path ID
       const sanitizedData = { ...data, id: userId };
-      
+
       await setDoc(doc(db, 'users', userId), {
         ...sanitizedData,
         updatedAt: serverTimestamp()
@@ -738,6 +1038,39 @@ export default function AppDashboard() {
   const filteredAndSortedBookings = useMemo(() => {
     let result = [...bookings];
 
+    // Filter by time period
+    if (bookingTimeFilter !== 'all') {
+      const now = new Date();
+      let startDate: Date;
+      let endDate: Date;
+
+      if (bookingTimeFilter === '3d') {
+        startDate = startOfDay(subDays(now, 3));
+        endDate = endOfDay(now);
+      } else if (bookingTimeFilter === '7d') {
+        startDate = startOfDay(subDays(now, 7));
+        endDate = endOfDay(now);
+      } else if (bookingTimeFilter === '30d') {
+        startDate = startOfDay(subDays(now, 30));
+        endDate = endOfDay(now);
+      } else if (bookingTimeFilter === 'month') {
+        startDate = startOfMonth(parseISO(`${bookingMonthRange.start}-01`));
+        endDate = endOfMonth(parseISO(`${bookingMonthRange.end}-01`));
+      } else { // year
+        startDate = startOfYear(new Date(bookingYearRange.start, 0, 1));
+        endDate = endOfYear(new Date(bookingYearRange.end, 11, 31));
+      }
+
+      result = result.filter(b => {
+        const dateToCompare = bookingDateTypeFilter === 'pickup'
+          ? parseISO(b.date)
+          : (b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : null);
+
+        if (!dateToCompare) return false;
+        return dateToCompare >= startDate && dateToCompare <= endDate;
+      });
+    }
+
     // Filter by search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -785,8 +1118,13 @@ export default function AppDashboard() {
       return createdB - createdA;
     });
 
-    return result;
-  }, [bookings, searchQuery, typeFilter, serviceFilter, statusFilter, priceSort, dateSort]);
+    // Deduplicate by id to prevent React key errors
+    const uniqueBookings = result.filter((booking, index, self) =>
+      index === self.findIndex(b => b.id === booking.id)
+    );
+
+    return uniqueBookings;
+  }, [bookings, searchQuery, typeFilter, serviceFilter, statusFilter, priceSort, dateSort, bookingTimeFilter, bookingDateTypeFilter, bookingMonthRange, bookingYearRange]);
 
   const handleDeleteUser = async (userId: string) => {
     setConfirmDelete({ type: 'user', id: userId });
@@ -986,7 +1324,7 @@ export default function AppDashboard() {
       // Convert keywords string to array if it's a string
       const processedData = {
         ...data,
-        keywords: typeof data.keywords === 'string' 
+        keywords: typeof data.keywords === 'string'
           ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
           : data.keywords
       };
@@ -1012,7 +1350,7 @@ export default function AppDashboard() {
       // Convert keywords string to array if it's a string
       const processedData = {
         ...data,
-        keywords: typeof data.keywords === 'string' 
+        keywords: typeof data.keywords === 'string'
           ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
           : data.keywords
       };
@@ -1030,6 +1368,42 @@ export default function AppDashboard() {
       setEditingBlog(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'blogs');
+    }
+  };
+
+  const handleDuplicatePage = async (page: any) => {
+    try {
+      const duplicatedData = {
+        ...page,
+        title: `${page.title} (Copy)`,
+        slug: `${page.slug}-copy-${Math.floor(Math.random() * 1000)}`,
+      };
+      // Clean up metadata from Firestore if present
+      delete duplicatedData.id;
+      delete duplicatedData.createdAt;
+      delete duplicatedData.updatedAt;
+
+      await handleUpdatePage(null, duplicatedData);
+    } catch (err) {
+      console.error('Error duplicating page:', err);
+    }
+  };
+
+  const handleDuplicateBlog = async (blog: any) => {
+    try {
+      const duplicatedData = {
+        ...blog,
+        title: `${blog.title} (Copy)`,
+        slug: `${blog.slug}-copy-${Math.floor(Math.random() * 1000)}`,
+      };
+      // Clean up metadata from Firestore if present
+      delete duplicatedData.id;
+      delete duplicatedData.createdAt;
+      delete duplicatedData.updatedAt;
+
+      await handleUpdateBlog(null, duplicatedData);
+    } catch (err) {
+      console.error('Error duplicating blog:', err);
     }
   };
 
@@ -1093,14 +1467,12 @@ export default function AppDashboard() {
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       Total Bookings
                     </p>
-                    <div className="p-1.5 bg-gold/10 text-gold rounded-xl">
-                      <LayoutGrid size={12} />
-                    </div>
                   </div>
-                  <div className="space-y-1">
+                  <div className="flex items-center gap-2">
                     <h3 className="text-2xl font-bold text-gold font-display">{bookings.length}</h3>
-                    <p className="text-[10px] text-white/60">All Time</p>
+                    <span className="text-[10px] font-bold text-green-400">+5%</span>
                   </div>
+                  <p className="text-[10px] text-white/60">All Time</p>
                 </div>
 
                 {/* Revenue */}
@@ -1109,14 +1481,12 @@ export default function AppDashboard() {
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       Total Revenue
                     </p>
-                    <div className="p-1.5 bg-green-500/10 text-green-500 rounded-xl">
-                      <DollarSign size={12} />
-                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <h3 className="text-2xl font-bold text-green-500 font-display">${analytics.totalRevenue.toFixed(2)}</h3>
-                    <p className="text-[10px] text-white/60">From Completed Bookings</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-2xl font-bold text-green-500 font-display">${Math.round(analytics.totalRevenue)}</h3>
+                    <span className="text-[10px] font-bold text-green-400">+12%</span>
                   </div>
+                  <p className="text-[10px] text-white/60">From Completed Bookings</p>
                 </div>
 
                 {/* Monthly */}
@@ -1125,14 +1495,12 @@ export default function AppDashboard() {
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       This Month
                     </p>
-                    <div className="p-1.5 bg-blue-500/10 text-blue-500 rounded-xl">
-                      <Calendar size={12} />
-                    </div>
                   </div>
-                  <div className="space-y-1">
+                  <div className="flex items-center gap-2">
                     <h3 className="text-2xl font-bold text-blue-500 font-display">{analytics.currentMonthCount}</h3>
-                    <p className="text-[10px] text-white/60">${analytics.currentMonthRevenue?.toFixed(2) || '0.00'} revenue</p>
+                    <span className="text-[10px] font-bold text-green-400">+8%</span>
                   </div>
+                  <p className="text-[10px] text-white/60">${Math.round(analytics.currentMonthRevenue || 0)} revenue</p>
                 </div>
 
                 {/* Status Overview */}
@@ -1181,10 +1549,109 @@ export default function AppDashboard() {
                 </div>
               </div>
             )}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-display text-gold">Bookings</h2>
                 <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Manage and track all rides</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                  {[
+                    { label: 'All', value: 'all' },
+                    { label: '3D', value: '3d' },
+                    { label: '7D', value: '7d' },
+                    { label: '30D', value: '30d' },
+                    { label: 'Month', value: 'month' },
+                    { label: 'Year', value: 'year' }
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setBookingTimeFilter(opt.value as any)}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
+                        bookingTimeFilter === opt.value
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {bookingTimeFilter === 'year' && (
+                  <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9 relative z-10">
+                    <select
+                      value={bookingYearRange.start}
+                      onChange={(e) => setBookingYearRange(prev => ({ ...prev, start: parseInt(e.target.value) }))}
+                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
+                    >
+                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
+                        <option key={y} value={y} className="bg-black">{y}</option>
+                      ))}
+                    </select>
+                    <span className="text-white/20 text-[10px]">-</span>
+                    <select
+                      value={bookingYearRange.end}
+                      onChange={(e) => setBookingYearRange(prev => ({ ...prev, end: parseInt(e.target.value) }))}
+                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
+                    >
+                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
+                        <option key={y} value={y} className="bg-black">{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {bookingTimeFilter === 'month' && (
+                  <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9 relative z-10">
+                    <input
+                      type="month"
+                      value={bookingMonthRange.start}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) setBookingMonthRange(prev => ({ ...prev, start: val }));
+                      }}
+                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
+                    />
+                    <span className="text-white/20 text-[10px]">-</span>
+                    <input
+                      type="month"
+                      value={bookingMonthRange.end}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) setBookingMonthRange(prev => ({ ...prev, end: val }));
+                      }}
+                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
+                    />
+                  </div>
+                )}
+
+                <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                  <button
+                    onClick={() => setBookingDateTypeFilter('pickup')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                      bookingDateTypeFilter === 'pickup'
+                        ? "bg-gold text-black shadow-lg"
+                        : "text-white/40 hover:text-white"
+                    )}
+                  >
+                    Pickup
+                  </button>
+                  <button
+                    onClick={() => setBookingDateTypeFilter('booking')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                      bookingDateTypeFilter === 'booking'
+                        ? "bg-gold text-black shadow-lg"
+                        : "text-white/40 hover:text-white"
+                    )}
+                  >
+                    Booking
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1442,17 +1909,18 @@ export default function AppDashboard() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-4">
-                          <div className="flex items-center gap-1.5">
-                            <Navigation size={12} className="text-gold" />
-                            <span className="text-[10px] text-white/60 font-bold uppercase">
-                              {(() => {
-                                if (!booking.distance) return 'N/A';
-                                if (!booking.isReturn) return booking.distance;
-                                const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
-                                return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
-                              })()}
-                            </span>
-                          </div>
+                          {booking.distance && (
+                            <div className="flex items-center gap-1.5">
+                              <Navigation size={12} className="text-gold" />
+                              <span className="text-[10px] text-white/60 font-bold uppercase">
+                                {(() => {
+                                  if (!booking.isReturn) return booking.distance;
+                                  const num = parseFloat(booking.distance.replace(/[^\d.]/g, ''));
+                                  return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
+                                })()}
+                              </span>
+                            </div>
+                          )}
 
                           <div className="flex items-center gap-1.5">
                             <Clock size={12} className="text-gold" />
@@ -1627,16 +2095,35 @@ export default function AppDashboard() {
                     </div>
 
                     <div className="mt-auto space-y-3">
+                      <div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10">
+                        <div className="flex flex-col">
+                          <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-display text-gold">${booking.price}</span>
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
+                              {booking.paymentMethod === 'cash' ? (
+                                <DollarSign size={10} className="text-gold" />
+                              ) : (
+                                <CreditCard size={10} className="text-gold" />
+                              )}
+                              <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
+                          <p className="text-[10px] font-bold text-white uppercase">{booking.paymentStatus}</p>
+                        </div>
+                      </div>
 
                       {/* Driver & Feedback Section */}
                       <div className="space-y-3 mb-3">
-                        {booking.status !== "completed" && (
+                        {booking.status !== 'completed' && (
                           <div className="p-3 bg-white/5 rounded-xl border border-white/10">
                             <div className="flex justify-between items-center">
 
                               {/* Left side: Status badge + Driver details */}
                               <div className="flex items-center gap-2">
-                                {/* Status badge (icon only) */}
                                 <div
                                   className={cn(
                                     "w-6 h-6 rounded-full flex items-center justify-center",
@@ -1660,7 +2147,6 @@ export default function AppDashboard() {
                                   )}
                                 </div>
 
-                                {/* Driver info */}
                                 <div>
                                   <p className="text-[8px] uppercase tracking-widest font-bold">
                                     <span className="text-white/50">Driver: </span>{" "}
@@ -1689,11 +2175,6 @@ export default function AppDashboard() {
                                     <p className="text-[10px] text-white font-bold">
                                       {booking.driverId ? (allUsers.find(u => u.id === booking.driverId)?.name || "Unknown Driver") : "No Driver Assigned"}
                                     </p>
-                                    {(isAdmin && !isDriver && booking.driverId) && (
-                                      <p className="text-[9px] text-gold font-bold">
-                                        {allUsers.find(u => u.id === booking.driverId)?.phone || "No Contact"}
-                                      </p>
-                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1707,12 +2188,9 @@ export default function AppDashboard() {
                                     setIsMapLoading(true);
                                     setShowRouteModal(true);
                                   }}
-                                  className="flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-red-500/20 via-green-500/20 to-blue-500/20 border border-green-500/30 rounded-md hover:from-red-500/30 hover:via-green-500/30 hover:to-blue-500/30 transition-all text-[9px] font-bold uppercase tracking-widest"
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-red-500/10 via-green-500/10 to-blue-500/10 border border-white/10 rounded-xl hover:bg-white/5 transition-all text-[9px] font-bold uppercase tracking-widest text-white/60 hover:text-white"
                                 >
-                                  <Route
-                                    size={12}
-                                    className="text-blue-500"
-                                  />
+                                  <Route size={12} className="text-blue-400" />
                                   Route
                                 </button>
                               </div>
@@ -1747,8 +2225,13 @@ export default function AppDashboard() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                {booking.rating && <span className="text-[10px] font-display text-gold">{booking.rating}.0</span>}
-                                {!isAdmin && !isDriver && (
+                                {typeof booking.rating === "number" && booking.rating > 0 && (
+                                  <span className="text-[10px] font-display text-gold">
+                                    {booking.rating}   {/* integer only, no .0 */}
+                                  </span>
+                                )}
+
+                                {!isDriver && (
                                   <button
                                     onClick={() => {
                                       setRatingBooking(booking);
@@ -1758,7 +2241,11 @@ export default function AppDashboard() {
                                     className="p-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg text-gold transition-all"
                                     title={booking.rating ? "Edit Rating" : "Rate Now"}
                                   >
-                                    <Edit2 size={10} />
+                                    {booking.rating ? (
+                                      <Edit2 size={10} />
+                                    ) : (
+                                      <Plus size={10} />
+                                    )}
                                   </button>
                                 )}
                               </div>
@@ -1789,104 +2276,160 @@ export default function AppDashboard() {
                         )}
                       </div>
 
-                      < div className="flex items-center justify-between p-2.5 bg-gold/5 rounded-xl border border-gold/10 mb-4" >
-                        <div className="flex flex-col">
-                          <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Fare</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg font-display text-gold">${booking.price}</span>
-                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gold/10 rounded-md border border-gold/20">
-                              {booking.paymentMethod === 'cash' ? (
-                                <DollarSign size={10} className="text-gold" />
-                              ) : (
-                                <CreditCard size={10} className="text-gold" />
-                              )}
-                              <span className="text-[8px] font-bold text-gold uppercase">{booking.paymentMethod || 'Stripe'}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[9px] uppercase tracking-widest text-gold/40 font-bold">Status</span>
-                          <p className="text-[10px] font-bold text-white uppercase">{booking.paymentStatus}</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        {/* Admin-only quick actions (Confirm/Assign) */}
-                        {isAdmin && (
-                          <div className="flex items-center gap-2 w-full mb-2">
-                            {booking.status === 'pending' && (
+                      <div className="flex items-center gap-1.5 w-full mt-2">
+                        {isAdmin ? (
+                          booking.status === 'completed' ? (
+                            <>
                               <button
-                                onClick={() => updateBookingStatus(booking.id, 'confirmed')}
-                                className="p-2.5 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all shrink-0"
-                                title="Confirm"
+                                onClick={() => {
+                                  setViewingBooking(booking);
+                                  setShowViewModal(true);
+                                }}
+                                className="flex-1 p-2.5 bg-gold/5 border border-gold/20 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2"
+                                title="View Details"
                               >
-                                <CheckCircle size={16} />
+                                <Eye size={16} />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
                               </button>
-                            )}
-                            {booking.status === 'confirmed' && (
                               <button
-                                onClick={() => updateBookingStatus(booking.id, 'pending')}
-                                className="p-2.5 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all shrink-0"
-                                title="Unconfirm"
+                                onClick={() => {
+                                  setEditingBooking(booking);
+                                  setShowBookingModal(true);
+                                }}
+                                className="flex-1 p-2.5 bg-blue-500/5 border border-blue-500/20 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2"
+                                title="Edit Booking"
                               >
-                                <CircleX size={16} />
+                                <Edit2 size={16} />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
                               </button>
-                            )}
-                            {booking.status !== 'cancelled' && booking.status !== 'completed' && (
-                              <div className="flex-1 relative min-w-0">
-                                <select
-                                  onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
-                                  value={booking.driverId || ''}
-                                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] text-white outline-none focus:border-gold transition-all appearance-none truncate"
+                              <button
+                                onClick={() => handleDeleteBooking(booking.id)}
+                                className="flex-1 p-2.5 bg-red-500/5 border border-red-500/20 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"
+                                title="Delete Booking"
+                              >
+                                <Trash2 size={16} />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {booking.status === 'pending' && (
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'confirmed')}
+                                  className="w-10 h-10 border border-green-500/20 bg-green-500/5 rounded-xl text-green-400 hover:bg-green-500/10 transition-all flex items-center justify-center shrink-0"
+                                  title="Confirm"
                                 >
-                                  <option value="" className="bg-black">Assign Driver</option>
-                                  {drivers.map((driver) => (
-                                    <option key={driver.id} value={driver.id} className="bg-black">{driver.name}</option>
-                                  ))}
-                                </select>
-                                <User size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white pointer-events-none" />
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* General actions: View, Edit, Delete (Admin or Customer, NOT Driver) */}
-                        {(isAdmin || (!isDriver && booking.userId === user?.uid)) && (
-                          <div className="flex items-center gap-2 w-full">
+                                  <CheckCircle size={16} />
+                                </button>
+                              )}
+                              {booking.status === 'confirmed' && (
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'pending')}
+                                  className="w-10 h-10 border border-white/20 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-all flex items-center justify-center shrink-0"
+                                  title="Unconfirm"
+                                >
+                                  <CircleX size={16} />
+                                </button>
+                              )}
+                              {booking.status !== 'cancelled' && booking.status !== 'completed' && (
+                                <div className="flex-1 relative min-w-0 h-10">
+                                  <select
+                                    onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
+                                    value={booking.driverId || ''}
+                                    className="w-full h-full bg-white/5 border border-white/10 rounded-xl px-3 text-[10px] text-white/80 outline-none focus:border-gold transition-all appearance-none truncate font-bold tracking-widest pr-8"
+                                  >
+                                    <option value="" className="bg-black">Assign Driver</option>
+                                    {drivers.map((driver) => {
+                                      const stats = userDetailStats[driver.id] || { avgRating: 0, completedRides: 0 };
+                                      return (
+                                        <option key={driver.id} value={driver.id} className="bg-black">
+                                          {driver.name} ({stats.avgRating?.toFixed(1)}★, {stats.completedRides}✓)
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                  <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                                </div>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setViewingBooking(booking);
+                                  setShowViewModal(true);
+                                }}
+                                className="w-10 h-10 bg-gold/5 border border-gold/20 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center shrink-0"
+                                title="View"
+                              >
+                                <Eye size={16} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingBooking(booking);
+                                  setShowBookingModal(true);
+                                }}
+                                className="w-10 h-10 bg-blue-500/5 border border-blue-500/20 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center shrink-0"
+                                title="Edit"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteBooking(booking.id)}
+                                className="w-10 h-10 bg-red-500/5 border border-red-500/20 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center shrink-0"
+                                title="Delete"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )
+                        ) : !isDriver && booking.userId === user?.uid ? (
+                          booking.status === 'completed' ? (
                             <button
                               onClick={() => {
                                 setViewingBooking(booking);
                                 setShowViewModal(true);
                               }}
-                              className="flex-1 p-2.5 border border-gold/20 bg-gold/5 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2"
+                              className="flex-1 p-2.5 bg-gold/5 border border-gold/20 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2"
                               title="View Details"
                             >
                               <Eye size={16} />
-                              <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
+                              <span className="text-[10px] font-bold uppercase tracking-widest">View Booking</span>
                             </button>
-
-                            <button
-                              onClick={() => {
-                                setEditingBooking(booking);
-                                setShowBookingModal(true);
-                              }}
-                              className="flex-1 p-2.5 border border-blue-500/20 bg-blue-500/5 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2"
-                              title="Edit Booking"
-                            >
-                              <Edit2 size={16} />
-                              <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleDeleteBooking(booking.id)}
-                              className="flex-1 p-2.5 border border-red-500/20 bg-red-500/5 rounded-xl text-red-400 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"
-                              title="Delete Booking"
-                            >
-                              <Trash2 size={16} />
-                              <span className="text-[10px] font-bold uppercase tracking-widest">Delete</span>
-                            </button>
-                          </div>
-                        )}
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setViewingBooking(booking);
+                                  setShowViewModal(true);
+                                }}
+                                className="flex-1 p-2.5 bg-gold/5 border border-gold/20 rounded-xl text-gold hover:bg-gold/10 transition-all flex items-center justify-center gap-2"
+                                title="View"
+                              >
+                                <Eye size={16} />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">View</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingBooking(booking);
+                                  setShowBookingModal(true);
+                                }}
+                                className="flex-1 p-2.5 bg-blue-500/5 border border-blue-500/20 rounded-xl text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2"
+                                title="Edit"
+                              >
+                                <Edit2 size={16} />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Edit</span>
+                              </button>
+                              {booking.status !== 'cancelled' && (
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'cancelled')}
+                                  className="flex-1 p-2.5 bg-red-500/5 border border-red-500/20 rounded-xl text-red-500 hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"
+                                  title="Cancel Booking"
+                                >
+                                  <XCircle size={16} />
+                                  <span className="text-[10px] font-bold uppercase tracking-widest">Cancel</span>
+                                </button>
+                              )}
+                            </>
+                          )
+                        ) : null}
 
                         {isDriver && booking.driverId === user.uid && (
                           <div className="space-y-2">
@@ -1947,69 +2490,371 @@ export default function AppDashboard() {
         );
       case 'analytics':
         return (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {[
-                { label: 'Total Revenue', value: `$${analytics.totalRevenue.toFixed(2)}`, icon: DollarSign, color: 'text-green-500' },
-                { label: 'Completed', value: analytics.completedBookings, icon: CheckCircle, color: 'text-blue-500' },
-                { label: 'Pending', value: analytics.pendingBookings, icon: Clock, color: 'text-gold' },
-                { label: 'Total Rides', value: bookings.length, icon: LayoutGrid, color: 'text-purple-500' },
-              ].map((stat, i) => (
-                <div key={`stat-${i}`} className="glass p-6 rounded-2xl border border-white/5">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className={cn("p-2 rounded-lg bg-white/5", stat.color)}>
-                      <stat.icon size={20} />
+          <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Header with Filters */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-2xl font-display text-gold">Analytics Overview</h3>
+                <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                  Business performance & insights
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-4">
+
+                  {/* View Mode Filter FIRST */}
+                  <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                    {[
+                      { id: 'charts', label: 'Visual', icon: BarChart3 },
+                      { id: 'numerical', label: 'Data', icon: LayoutGrid },
+                    ].map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={() => setAnalyticsViewMode(v.id as any)}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                          analyticsViewMode === v.id
+                            ? "bg-gold text-black shadow-lg shadow-gold/20"
+                            : "text-white/40 hover:text-white"
+                        )}
+                      >
+                        <v.icon size={12} />
+                        <span className="hidden sm:inline">{v.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Time Filters (only show if NOT Data mode) */}
+                  {analyticsViewMode !== 'numerical' && (
+                    <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                      {[
+                        { id: '7d', label: '7D' },
+                        { id: '30d', label: '30D' },
+                        { id: 'month', label: 'Monthly' },
+                        { id: 'year', label: 'Yearly' },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => setAnalyticsTimeFilter(f.id as any)}
+                          className={cn(
+                            "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                            analyticsTimeFilter === f.id
+                              ? "bg-gold text-black shadow-lg shadow-gold/20"
+                              : "text-white/40 hover:text-white"
+                          )}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Range Selectors (only show if NOT Data mode AND month/year selected) */}
+                  {analyticsViewMode !== 'numerical' &&
+                    (analyticsTimeFilter === 'month' || analyticsTimeFilter === 'year') && (
+                      <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10 animate-in fade-in slide-in-from-right-4 duration-300">
+                        {/* Start Select */}
+                        <select
+                          value={
+                            analyticsTimeFilter === 'month'
+                              ? monthRange.start
+                              : yearRange.start
+                          }
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (analyticsTimeFilter === 'month')
+                              setMonthRange((prev) => ({ ...prev, start: val }));
+                            else setYearRange((prev) => ({ ...prev, start: val }));
+                          }}
+                          className="custom-select bg-transparent border-none py-1 h-auto text-[10px] pr-8"
+                        >
+                          {analyticsTimeFilter === 'month'
+                            ? Array.from({ length: 12 }, (_, i) => (
+                              <option key={i} value={i} className="bg-black">
+                                {format(new Date(2024, i, 1), 'MMM')}
+                              </option>
+                            ))
+                            : Array.from({ length: 10 }, (_, i) => {
+                              const year = new Date().getFullYear() - 9 + i;
+                              return (
+                                <option key={year} value={year} className="bg-black">
+                                  {year}
+                                </option>
+                              );
+                            })}
+                        </select>
+
+                        <span className="text-white/20 text-[10px]">—</span>
+
+                        {/* End Select */}
+                        <select
+                          value={
+                            analyticsTimeFilter === 'month'
+                              ? monthRange.end
+                              : yearRange.end
+                          }
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (analyticsTimeFilter === 'month')
+                              setMonthRange((prev) => ({ ...prev, end: val }));
+                            else setYearRange((prev) => ({ ...prev, end: val }));
+                          }}
+                          className="custom-select bg-transparent border-none py-1 h-auto text-[10px] pr-8"
+                        >
+                          {analyticsTimeFilter === 'month'
+                            ? Array.from({ length: 12 }, (_, i) => (
+                              <option key={i} value={i} className="bg-black">
+                                {format(new Date(2024, i, 1), 'MMM')}
+                              </option>
+                            ))
+                            : Array.from({ length: 10 }, (_, i) => {
+                              const year = new Date().getFullYear() - 9 + i;
+                              return (
+                                <option key={year} value={year} className="bg-black">
+                                  {year}
+                                </option>
+                              );
+                            })}
+                        </select>
+                      </div>
+                    )}
+
+                  {/* Add Chart Button INLINE with same height */}
+                  <button
+                    onClick={() => setShowAddChartModal(true)}
+                    className="flex items-center justify-center px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-white/5 border border-white/10 hover:border-gold/50 hover:bg-gold/5 text-gold transition-all"
+                    title="Add Custom Chart"
+                  >
+                    <Plus size={12} />
+                    <span className="hidden sm:inline">Add</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Main Stats Grid */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 px-1">
+                <div className="w-1 h-4 bg-gold rounded-full" />
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
+                  Insights for {analytics.rangeDescription}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Revenue', value: `$${Math.round(analytics.totalRevenue)}`, icon: DollarSign, color: 'text-green-500', trend: '+13%' },
+                  { label: 'Completed', value: analytics.completedBookings, icon: CheckCircle, color: 'text-blue-500', trend: '+5%' },
+                  { label: 'Pending Requests', value: analytics.pendingBookings, icon: Clock, color: 'text-gold' },
+                  { label: 'Total Volume', value: analytics.totalBookings, icon: LayoutGrid, color: 'text-purple-500' },
+                ].map((stat, i) => (
+                  <div key={`stat-${i}`} className="glass p-6 rounded-2xl border border-white/5 relative overflow-hidden group">
+                    <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-30 transition-opacity">
+                      <stat.icon size={20} className={stat.color} />
+                    </div>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start mb-4">
+                        <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/40">{stat.label}</p>
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <h3 className={cn("text-3xl font-display", stat.color)}>{stat.value}</h3>
+                        {stat.trend && (
+                          <span className="text-[10px] font-bold text-green-400">
+                            {stat.trend}
+                          </span>
+                        )}
+                        <div className={cn("w-1 h-1 rounded-full animate-pulse", stat.color.replace('text-', 'bg-'))} />
+                      </div>
                     </div>
                   </div>
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1">{stat.label}</p>
-                  <h3 className="text-2xl font-display">{stat.value}</h3>
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="glass p-8 rounded-2xl border border-white/5">
-                <h3 className="text-lg font-display text-gold mb-6 uppercase tracking-widest">Revenue Trend (Last 7 Days)</h3>
-                <div className="h-80 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={analytics.revenueData}>
-                      <defs>
-                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#D4AF37" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#D4AF37" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                      <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                        itemStyle={{ color: '#D4AF37', fontSize: '12px' }}
-                      />
-                      <Area type="monotone" dataKey="revenue" stroke="#D4AF37" fillOpacity={1} fill="url(#colorRevenue)" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="glass p-8 rounded-2xl border border-white/5">
-                <h3 className="text-lg font-display text-gold mb-6 uppercase tracking-widest">Booking Volume</h3>
-                <div className="h-80 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analytics.revenueData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                      <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                        cursor={{ fill: '#ffffff05' }}
-                      />
-                      <Bar dataKey="bookings" fill="#D4AF37" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                ))}
               </div>
             </div>
+
+            {/* Analytics Content Sections */}
+            {analyticsViewMode === 'charts' ? (
+              <div className="space-y-8 animate-in fade-in duration-500">
+                {/* Dynamic Charts Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {dashboardCharts.map((chart) => (
+                    <div
+                      key={chart.id}
+                      className={cn(
+                        "glass p-8 rounded-3xl border border-white/5 relative group transition-all duration-500",
+                        chart.width === 'small' ? "lg:col-span-4" :
+                          chart.width === 'large' ? "lg:col-span-12" : "lg:col-span-8"
+                      )}
+                    >
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h4 className="text-sm font-bold text-gold uppercase tracking-widest">{chart.title}</h4>
+                          <p className="text-[10px] text-white/40 mt-1">
+                            {analyticsTimeFilter === 'month' ? 'Monthly distribution' :
+                              analyticsTimeFilter === 'year' ? 'Yearly performance' : 'Performance metrics'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setDashboardCharts(prev => prev.filter(c => c.id !== chart.id))}
+                          className="p-2 opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 transition-all"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div className="h-80 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          {chart.type === 'area' ? (
+                            <AreaChart data={analytics.revenueData}>
+                              <defs>
+                                <linearGradient id={`color-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor={chart.color || '#D4AF37'} stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor={chart.color || '#D4AF37'} stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                              <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                              <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
+                                itemStyle={{ color: chart.color || '#D4AF37', fontSize: '12px' }}
+                              />
+                              <Area type="monotone" dataKey={chart.dataKey} stroke={chart.color || '#D4AF37'} fillOpacity={1} fill={`url(#color-${chart.id})`} strokeWidth={2} />
+                            </AreaChart>
+                          ) : chart.type === 'bar' ? (
+                            <BarChart data={analytics.revenueData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                              <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                              <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
+                                cursor={{ fill: '#ffffff05' }}
+                              />
+                              <Bar dataKey={chart.dataKey} fill={chart.color || '#D4AF37'} radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          ) : chart.type === 'line' ? (
+                            <LineChart data={analytics.revenueData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                              <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                              <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
+                              />
+                              <Line type="monotone" dataKey={chart.dataKey} stroke={chart.color || '#D4AF37'} strokeWidth={3} dot={{ r: 4, fill: '#0a0a0a', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                            </LineChart>
+                          ) : chart.type === 'pie' ? (
+                            <PieChart>
+                              <Pie
+                                data={chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={80}
+                                paddingAngle={5}
+                                dataKey="value"
+                                stroke="none"
+                              >
+                                {(chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData).map((entry: any, index: number) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
+                              />
+                            </PieChart>
+                          ) : null}
+                        </ResponsiveContainer>
+                      </div>
+                      {chart.type === 'pie' && (
+                        <div className="mt-6 flex flex-wrap gap-x-4 gap-y-2 justify-center">
+                          {(chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData).map((status: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: status.color }} />
+                              <span className="text-[10px] text-white/60 font-medium">{status.name}</span>
+                              <span className="text-[10px] text-white/40">{status.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Add Chart Placeholder */}
+                  <button
+                    onClick={() => setShowAddChartModal(true)}
+                    className="lg:col-span-12 h-[300px] rounded-3xl border-2 border-dashed border-white/5 hover:border-gold/30 hover:bg-gold/5 flex flex-col items-center justify-center gap-4 group transition-all"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Plus className="text-white/40 group-hover:text-gold" size={24} />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-white group-hover:text-gold uppercase tracking-widest">Add More Insights</p>
+                      <p className="text-[10px] text-white/20 mt-1">Customize your analytics dashboard</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Performance Rankings */
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8 animate-in slide-in-from-bottom-4 duration-500">
+                <div className="glass p-8 rounded-3xl border border-white/5">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h4 className="text-lg font-display text-gold">Top Performing Drivers</h4>
+                      <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Based on revenue generated</p>
+                    </div>
+                    <Car size={20} className="text-gold opacity-20" />
+                  </div>
+                  <div className="space-y-4">
+                    {analytics.topDrivers.map((driver, i) => (
+                      <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 group hover:border-gold/30 transition-all">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center text-gold font-bold text-xs border border-gold/20">
+                            {i + 1}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-white">{driver.name}</p>
+                            <p className="text-[10px] text-white/40">{driver.count} Bookings</p>
+                          </div>
+                        </div>
+                        <p className="text-sm font-display text-gold">${Math.round(driver.revenue)}</p>
+                      </div>
+                    ))}
+                    {analytics.topDrivers.length === 0 && (
+                      <div className="text-center py-8 text-white/20 text-xs italic">No driver data for this period</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="glass p-8 rounded-3xl border border-white/5">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h4 className="text-lg font-display text-gold">Top Customers</h4>
+                      <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Highest spending clients</p>
+                    </div>
+                    <Users size={20} className="text-gold opacity-20" />
+                  </div>
+                  <div className="space-y-4">
+                    {analytics.topCustomers.map((customer, i) => (
+                      <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 group hover:border-blue-500/30 transition-all">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400 font-bold text-xs border border-blue-500/20">
+                            {i + 1}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-white">{customer.name}</p>
+                            <p className="text-[10px] text-white/40">{customer.count} Bookings</p>
+                          </div>
+                        </div>
+                        <p className="text-sm font-display text-gold">${Math.round(customer.revenue)}</p>
+                      </div>
+                    ))}
+                    {analytics.topCustomers.length === 0 && (
+                      <div className="text-center py-8 text-white/20 text-xs italic">No customer data for this period</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       case 'calendar':
@@ -2148,32 +2993,41 @@ export default function AppDashboard() {
             </div>
 
             {/* Role Filter Tabs */}
-            <div className="flex items-center gap-2 border-b border-white/5 p-1 bg-white/5 rounded-lg w-fit">
+            <div className="flex items-center gap-2 border-b border-white/5 p-1 bg-white/5 rounded-lg w-fit overflow-x-auto no-scrollbar">
               {[
-                { id: 'all', label: 'All Users', icon: Users },
-                { id: 'admin', label: 'Admins', icon: Shield },
-                { id: 'driver', label: 'Drivers', icon: Car },
-                { id: 'customer', label: 'Customers', icon: User },
+                { id: 'all', label: 'All Users', icon: Users, count: allUsers.length },
+                { id: 'admin', label: 'Admins', icon: Shield, count: allUsers.filter(u => u.role === 'admin').length },
+                { id: 'driver', label: 'Drivers', icon: Car, count: allUsers.filter(u => u.role === 'driver').length },
+                { id: 'customer', label: 'Customers', icon: User, count: allUsers.filter(u => u.role === 'customer' || !u.role || u.role === 'user').length },
               ].map((roleTab) => (
                 <button
                   key={`user-role-tab-${roleTab.id}`}
                   onClick={() => setUserRoleFilter(roleTab.id)}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                    "flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all whitespace-nowrap",
                     userRoleFilter === roleTab.id
-                      ? "bg-gold text-black"
+                      ? "bg-gold text-black shadow-lg shadow-gold/20"
                       : "text-white/40 hover:text-white hover:bg-white/5"
                   )}
+                  title={`${roleTab.label} (${roleTab.count})`}
                 >
                   <roleTab.icon size={14} />
-                  <span className="hidden md:inline">{roleTab.label}</span>
+                  <span className="hidden md:inline-flex items-center">
+                    {roleTab.label}
+                    <span className={cn(
+                      "ml-1.5 opacity-60 font-mono",
+                      userRoleFilter === roleTab.id ? "text-black" : "text-gold"
+                    )}>
+                      ({roleTab.count})
+                    </span>
+                  </span>
                 </button>
               ))}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredUsers.map((u) => (
-                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group">
+                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
                   <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-4">
                       <div
@@ -2196,8 +3050,17 @@ export default function AppDashboard() {
                       </div>
 
                       <div className="flex flex-col">
-                        <h4 className="text-[14px] font-bold font-display text-white group-hover:text-gold transition-colors leading-tight">
-                          {u.name || "No Name"}
+                        <h4 className="text-[14px] font-bold font-display text-white group-hover:text-gold transition-colors flex items-center justify-between gap-2 w-full min-w-0">
+                          <span className="truncate leading-tight">
+                            {u.name || "No Name"}
+                          </span>
+
+                          {u.role === "driver" && (
+                            <span className="flex items-center gap-1 text-gold text-[11px] font-bold shrink-0 leading-none">
+                              <Star size={12} className="fill-gold text-gold" />
+                              {userDetailStats[u.id]?.avgRating?.toFixed(1) || "0.0"}
+                            </span>
+                          )}
                         </h4>
                       </div>
                     </div>
@@ -2233,7 +3096,192 @@ export default function AppDashboard() {
                       </div>
                     )}
                   </div>
+                  {/* User Activity Stats container with fixed min height for consistency */}
+                  <div className="pt-4 border-t border-white/5 pb-4 flex-1 flex flex-col justify-center min-h-[140px]">
+                    {u.role === 'admin' ? (
+                      <div className="grid grid-cols-2 gap-4 h-full">
+                        <div className="flex flex-col">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">System Load</p>
+                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20 shrink-0">
+                              <Calendar size={14} className="text-purple-400" />
+                            </div>
+                            <div className="flex flex-col truncate">
+                              <span className="text-xs font-bold text-white truncate">{userDetailStats[u.id]?.unassignedCount || 0}</span>
+                              <span className="text-[7px] text-white/40 font-bold uppercase tracking-tight truncate">Unassigned</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">Cancellations</p>
+                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center border border-red-500/20 shrink-0">
+                              <XCircle size={14} className="text-red-400" />
+                            </div>
+                            <div className="flex flex-col truncate">
+                              <span className="text-xs font-bold text-white truncate">{userDetailStats[u.id]?.cancelledCount || 0}</span>
+                              <span className="text-[7px] text-white/40 font-bold uppercase tracking-tight truncate">Cancelled</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : u.role === 'driver' ? (
+                      <div className="flex flex-col justify-center h-full">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold">
+                            Driver Performance
+                          </p>
 
+                          {userDetailStats[u.id]?.feedbacks?.length > 0 && (
+                            <div className="relative group/feedback">
+                              <button className="text-gold hover:text-white transition-colors p-1 -m-1">
+                                <MessageSquare size={12} />
+                              </button>
+
+                              {/* Feedback Popup Content */}
+                              <div className="invisible opacity-0 group-hover/feedback:visible group-hover/feedback:opacity-100 absolute right-0 bottom-full mb-3 w-64 bg-black/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[100] transition-all duration-300 transform translate-y-2 group-hover/feedback:translate-y-0">
+                                <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-2">
+                                  <p className="text-[10px] font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                                    <MessageSquare size={12} />
+                                    Client Feedback
+                                  </p>
+                                  <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                                    {userDetailStats[u.id]?.feedbacks?.length}
+                                  </span>
+                                </div>
+
+                                {userDetailStats[u.id]?.feedbacks?.map((f: any, i: number) => (
+                                  <div
+                                    key={i}
+                                    className="group/item relative bg-white/5 p-2.5 rounded-xl border border-white/5 hover:border-white/10 transition-colors mb-1.5"
+                                  >
+                                    <div className="flex justify-between items-start mb-1">
+
+                                      {/* NAME + STARS */}
+                                      <div className="min-w-0 flex-1">
+                                        <span className="text-[10px] font-bold text-white block truncate">
+                                          {f.customerName}
+                                        </span>
+
+                                        <div className="flex gap-0.5 mt-0.5">
+                                          {[...Array(5)].map((_, j) => (
+                                            <Star
+                                              key={j}
+                                              size={8}
+                                              className={
+                                                j < (f.rating || 0)
+                                                  ? "text-gold fill-gold"
+                                                  : "text-white/10"
+                                              }
+                                            />
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* COMMENT (SAFE FALLBACK) */}
+                                    <p className="text-[10px] text-white/70 italic leading-relaxed line-clamp-4">
+                                      {f.comment?.trim()
+                                        ? `"${f.comment}"`
+                                        : "No comment provided"}
+                                    </p>
+                                  </div>
+                                ))}
+
+                                {/* Pointer arrow */}
+                                <div className="absolute right-2 top-full w-3 h-3 bg-black/95 border-r border-b border-white/10 transform rotate-45 -translate-y-1.5"></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="bg-white/5 p-2 rounded-2xl border border-white/5 flex-1 flex items-center">
+
+                          <div className="grid grid-cols-5 gap-2 w-full text-center">
+
+                            <div className="flex flex-col items-center justify-center">
+                              <CheckCircle size={14} className="text-gold mb-1" />
+                              <span className="text-[11px] text-white font-bold">
+                                {userDetailStats[u.id]?.completedRides || 0}
+                              </span>
+                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
+                                Done
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col items-center justify-center">
+                              <MessageSquare size={14} className="text-gold mb-1" />
+                              <span className="text-[11px] text-white font-bold">
+                                {userDetailStats[u.id]?.ratingCount || 0}
+                              </span>
+                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
+                                Reviews
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col items-center justify-center">
+                              <AlertCircle size={14} className="text-gold mb-1" />
+                              <span className="text-[11px] text-white font-bold">
+                                {userDetailStats[u.id]?.unreviewedCount || 0}
+                              </span>
+                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
+                                Pending
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col items-center justify-center">
+                              <Star size={14} className="text-gold fill-gold mb-1" />
+                              <span className="text-[11px] text-gold font-bold">
+                                {userDetailStats[u.id]?.totalRatingValue || 0}
+                              </span>
+                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
+                                Stars
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col items-center justify-center">
+                              <PiggyBank size={14} className="text-green-400 mb-1" />
+                              <span className="text-[11px] text-green-400 font-bold">
+                                ${Math.round(userDetailStats[u.id]?.totalEarnings || 0).toLocaleString()}
+                              </span>
+                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
+                                Revenue
+                              </span>
+                            </div>
+
+                          </div>
+
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4 h-full">
+                        <div className="flex flex-col">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">Booking Activity</p>
+                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
+                              <Calendar size={14} className="text-blue-400" />
+                            </div>
+                            <div className="flex flex-col truncate">
+                              <span className="text-xs font-bold text-white truncate">{userDetailStats[u.id]?.totalBookings || 0} Total</span>
+                              <span className="text-[7px] text-green-400 font-bold uppercase tracking-tighter truncate">{userDetailStats[u.id]?.completedRides || 0} Done</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">Total Spend</p>
+                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20 shrink-0">
+                              <DollarSign size={14} className="text-green-400" />
+                            </div>
+                            <div className="flex flex-col truncate">
+                              <span className="text-xs font-bold text-white truncate">${Math.round(userDetailStats[u.id]?.totalSpend || 0)}</span>
+                              <span className="text-[7px] text-white/40 font-bold uppercase tracking-tight truncate">Invested</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div className="pt-4 border-t border-white/5 flex items-center gap-2">
                     <button
                       onClick={() => {
@@ -2258,434 +3306,33 @@ export default function AppDashboard() {
             </div>
           </div>
         );
-      case 'cms':
-        if (!isAdmin) return null;
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center gap-4 border-b border-white/5 p-1 bg-white/5 rounded-lg">
-              {[
-                { id: 'pages', label: 'Pages', icon: LayoutGrid },
-                { id: 'blogs', label: 'Blogs', icon: Edit2 },
-                { id: 'global-seo', label: 'Global SEO', icon: Globe },
-              ].map((sub) => (
-                <button
-                  key={sub.id}
-                  onClick={() => setCmsActiveSubTab(sub.id)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
-                    cmsActiveSubTab === sub.id
-                      ? "bg-gold text-black"
-                      : "text-white/40 hover:text-white hover:bg-white/5"
-                  )}
-                >
-                  <sub.icon size={14} />
-                  <span className="hidden md:inline">{sub.label}</span>
-                </button>
-              ))}
-            </div>
-
-            {cmsActiveSubTab === 'pages' && (
-              <div className="space-y-8">
-                {/* System Pages Section */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Settings2 size={16} className="text-gold" />
-                    <h4 className="text-sm font-bold text-white uppercase tracking-widest">System Pages</h4>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {[
-                      { title: 'Home', slug: 'home' },
-                      { title: 'Fleet', slug: 'fleet' },
-                      { title: 'Services', slug: 'services' },
-                      { title: 'About Us', slug: 'about' },
-                      { title: 'Contact', slug: 'contact' },
-                      { title: 'Booking', slug: 'booking' },
-                      { title: 'Offers', slug: 'offers' },
-                      { title: 'Tours', slug: 'tours' }
-                    ].map(sysPage => {
-                      const existing = pages.find(p => p.slug === sysPage.slug);
-                      return (
-                        <div key={sysPage.slug} className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group">
-                          <div>
-                            <p className="text-xs font-bold text-white group-hover:text-gold transition-colors">{sysPage.title}</p>
-                            <p className="text-[8px] text-white/40 uppercase tracking-widest">/{sysPage.slug === 'home' ? '' : sysPage.slug}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              if (existing) {
-                                setEditingPage(existing);
-                              } else {
-                                setEditingPage({ title: sysPage.title, slug: sysPage.slug, content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                              }
-                              setShowPageModal(true);
-                            }}
-                            className={cn(
-                              "p-2 rounded-lg transition-all",
-                              existing ? "bg-gold/10 text-gold hover:bg-gold hover:text-black" : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
-                            )}
-                            title={existing ? "Edit SEO" : "Setup SEO"}
-                          >
-                            {existing ? <Edit2 size={14} /> : <Plus size={14} />}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="border-t border-white/5 pt-8">
-                  <div className="flex justify-between items-center mb-6">
-                    <div>
-                      <h3 className="text-2xl font-display text-gold">Dynamic Pages</h3>
-                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage custom landing pages</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                        setShowPageModal(true);
-                      }}
-                      className="btn-primary px-6 py-2 flex items-center gap-2"
-                    >
-                      <Plus size={18} />
-                      <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    {pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).length > 0 ? 
-                      pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).map(page => (
-                      <div key={page.id} className="glass p-6 rounded-2xl border border-white/5 flex items-center justify-between group hover:border-gold/30 transition-all">
-                        <div>
-                          <h4 className="text-lg font-bold text-white mb-1">{page.title}</h4>
-                          <p className="text-xs text-gold mb-2">/{page.slug}</p>
-                          <div className="flex gap-3">
-                            <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
-                              {page.noindex ? 'No Index' : 'Index'}
-                            </span>
-                            <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.includeInSitemap ? "bg-blue-500/10 text-blue-400" : "bg-white/5 text-white/40")}>
-                              {page.includeInSitemap ? 'In Sitemap' : 'Hidden'}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              setEditingPage(page);
-                              setShowPageModal(true);
-                            }}
-                            className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-                          <button
-                            onClick={() => handleDeletePage(page.id)}
-                            className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
-                      </div>
-                    )) : (
-                      <div className="text-center py-12 bg-white/5 rounded-2xl border border-dashed border-white/10">
-                        <p className="text-white/40 italic">No dynamic pages created yet.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {cmsActiveSubTab === 'blogs' && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-2xl font-display text-gold">Blog Posts</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your journal articles</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
-                      setShowBlogModal(true);
-                    }}
-                    className="btn-primary px-6 py-2 flex items-center gap-2"
-                  >
-                    <Plus size={18} />
-                    <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {blogs.length > 0 ? blogs.map(blog => (
-                    <div key={blog.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
-                      <div className="h-32 relative overflow-hidden">
-                        <img src={blog.featuredImage || blog.image || 'https://picsum.photos/seed/blog/800/400'} alt={blog.title} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40" />
-                        <div className="absolute bottom-3 left-4">
-                          <p className="text-sm font-bold text-white line-clamp-1">{blog.title}</p>
-                          <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
-                        </div>
-                      </div>
-                      <div className="p-4 flex items-center justify-between">
-                        <div className="flex gap-2">
-                           <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", blog.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
-                            {blog.noindex ? 'No Index' : 'Index'}
-                          </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              setEditingBlog(blog);
-                              setShowBlogModal(true);
-                            }}
-                            className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
-                          >
-                            <Edit2 size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteBlog(blog.id)}
-                            className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="col-span-full text-center py-12 bg-white/5 rounded-2xl border border-dashed border-white/10">
-                      <p className="text-white/40 italic">No blog posts created yet.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {cmsActiveSubTab === 'global-seo' && (
-              <div className="space-y-8">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-2xl font-display text-gold">Global SEO & Contact</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage site-wide settings and contact info</p>
-                  </div>
-                  <button
-                    onClick={() => handleUpdateSettings(systemSettings)}
-                    disabled={isSavingSettings}
-                    className="btn-primary px-6 py-2 flex items-center gap-2"
-                  >
-                    {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                    <span className="text-xs font-bold uppercase tracking-widest">Save Changes</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  {/* Contact Details */}
-                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
-                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
-                      <Phone size={16} /> Contact Details
-                    </h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Website Address</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.contact?.address || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, address: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="123 Luxury Way, Melbourne VIC 3000"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone Number</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.contact?.phone || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, phone: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="+61 400 000 000"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Contact Email</label>
-                          <input
-                            type="email"
-                            value={systemSettings?.contact?.email || ''}
-                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, email: e.target.value } })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            placeholder="info@merlux.com.au"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Booking Email</label>
-                          <input
-                            type="email"
-                            value={systemSettings?.contact?.bookingEmail || ''}
-                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, bookingEmail: e.target.value } })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                            placeholder="bookings@merlux.com.au"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Global SEO */}
-                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
-                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
-                      <Globe size={16} /> Global SEO
-                    </h4>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Logo</label>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={systemSettings?.seo?.logo || ''}
-                              onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, logo: e.target.value } })}
-                              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                              placeholder="Logo URL..."
-                            />
-                            <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
-                              <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={isUploading} />
-                              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-                            </label>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Favicon (.ico/png)</label>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={systemSettings?.seo?.favicon || ''}
-                              onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, favicon: e.target.value } })}
-                              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                              placeholder="Favicon URL..."
-                            />
-                            <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
-                              <input type="file" className="hidden" accept="image/*" onChange={handleFaviconUpload} disabled={isUploading} />
-                              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Name</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.seo?.siteName || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, siteName: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="Merlux Chauffeur Services"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Meta Title</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.seo?.defaultTitle || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultTitle: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="Luxury Chauffeur Melbourne | Merlux"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Meta Description</label>
-                        <textarea
-                          value={systemSettings?.seo?.defaultDescription || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultDescription: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
-                          placeholder="Book luxury chauffeur services in Melbourne..."
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Keywords (comma separated)</label>
-                        <input
-                          type="text"
-                          value={Array.isArray(systemSettings?.seo?.defaultKeywords) ? systemSettings.seo.defaultKeywords.join(', ') : systemSettings?.seo?.defaultKeywords || ''}
-                          onChange={(e) => {
-                            const keywords = e.target.value.split(',').map(k => k.trim()).filter(k => k !== '');
-                            setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultKeywords: keywords } });
-                          }}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="chauffeur, melbourne, luxury travel"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Analytics & Schema */}
-                  <div className="glass p-8 rounded-3xl border border-white/5 space-y-6 lg:col-span-2">
-                    <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
-                      <BarChart3 size={16} /> Analytics & Schema
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Google Analytics ID</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.seo?.googleAnalyticsId || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, googleAnalyticsId: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="G-XXXXXXXXXX"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Search Console ID</label>
-                        <input
-                          type="text"
-                          value={systemSettings?.seo?.searchConsoleId || ''}
-                          onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, searchConsoleId: e.target.value } })}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                          placeholder="verification-code"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Organization Schema (JSON-LD)</label>
-                        <textarea
-                          value={systemSettings?.seo?.organizationSchema ? JSON.stringify(systemSettings.seo.organizationSchema, null, 2) : ''}
-                          onChange={(e) => {
-                            try {
-                              const schema = JSON.parse(e.target.value);
-                              setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, organizationSchema: schema } });
-                            } catch (err) {
-                              // Allow typing invalid JSON temporarily
-                            }
-                          }}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-48 font-mono"
-                          placeholder='{ "@context": "https://schema.org", "@type": "Organization", ... }'
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
       case 'management':
         if (!isAdmin) return null;
         return (
           <div className="space-y-4">
-            <div className="flex items-center gap-4 border-b border-white/5 p-1 bg-white/5 rounded-lg">
+            <div className="flex w-full justify-between items-center border-b border-white/5 p-1 bg-white/5 rounded-lg mb-6">
               {[
                 { id: 'fleet', label: 'Fleet', icon: Truck },
                 { id: 'extras', label: 'Extras', icon: Plus },
                 { id: 'coupons', label: 'Coupons', icon: Percent },
+                { id: 'seo', label: 'SEO', icon: Globe },
                 { id: 'booking-mgmt', label: 'Booking', icon: CalendarCog },
               ].map((sub) => (
                 <button
                   key={sub.id}
                   onClick={() => setActiveSubTab(sub.id)}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
+                    "flex-1 flex items-center justify-center gap-2 px-2 py-3 lg:px-4 lg:py-2 rounded-lg transition-all",
                     activeSubTab === sub.id
-                      ? "bg-gold text-black"
+                      ? "bg-gold text-black shadow-lg shadow-gold/20"
                       : "text-white/40 hover:text-white hover:bg-white/5"
                   )}
+                  title={sub.label}
                 >
-                  <sub.icon size={14} />
-                  {/* Hide labels on small screens, show on md+ */}
-                  <span className="hidden md:inline">{sub.label}</span>
+                  <sub.icon size={18} className="lg:size-[14px]" />
+                  <span className="hidden lg:inline text-xs font-bold uppercase tracking-widest whitespace-nowrap">
+                    {sub.label}
+                  </span>
                 </button>
               ))}
             </div>
@@ -2740,7 +3387,7 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {fleet.filter(v =>
                     v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     v.model?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -3064,6 +3711,441 @@ export default function AppDashboard() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'seo' && (
+              <div className="space-y-12">
+                {/* 1st: Global SEO Section */}
+                <div className="space-y-8">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Global SEO & Contact</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage site-wide settings and contact info</p>
+                    </div>
+                    <button
+                      onClick={() => handleUpdateSettings(systemSettings)}
+                      disabled={isSavingSettings}
+                      className="btn-primary px-6 py-2 flex items-center gap-2"
+                    >
+                      {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      <span className="text-xs font-bold uppercase tracking-widest">Save Changes</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Contact Details */}
+                    <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
+                      <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                        <Phone size={16} /> Contact Details
+                      </h4>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Website Address</label>
+                          <input
+                            type="text"
+                            value={systemSettings?.contact?.address || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, address: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="123 Luxury Way, Melbourne VIC 3000"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Phone Number</label>
+                          <input
+                            type="text"
+                            value={systemSettings?.contact?.phone || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, phone: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="+61 400 000 000"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Contact Email</label>
+                            <input
+                              type="email"
+                              value={systemSettings?.contact?.email || ''}
+                              onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, email: e.target.value } })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="info@merlux.com.au"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Booking Email</label>
+                            <input
+                              type="email"
+                              value={systemSettings?.contact?.bookingEmail || ''}
+                              onChange={(e) => setSystemSettings({ ...systemSettings, contact: { ...systemSettings.contact, bookingEmail: e.target.value } })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="bookings@merlux.com.au"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Global SEO Details */}
+                    <div className="glass p-8 rounded-3xl border border-white/5 space-y-6">
+                      <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                        <Globe size={16} /> Global SEO
+                      </h4>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Logo</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={systemSettings?.seo?.logo || ''}
+                              onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, logo: e.target.value } })}
+                              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="Logo URL..."
+                            />
+                            <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
+                              <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={isUploading} />
+                              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                            </label>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Favicon (.ico/png)</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={systemSettings?.seo?.favicon || ''}
+                              onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, favicon: e.target.value } })}
+                              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="Favicon URL..."
+                            />
+                            <label className="cursor-pointer bg-white/5 hover:bg-gold hover:text-black border border-white/10 rounded-xl px-4 flex items-center justify-center transition-all">
+                              <input type="file" className="hidden" accept="image/*" onChange={handleFaviconUpload} disabled={isUploading} />
+                              {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                            </label>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Site Name</label>
+                          <input
+                            type="text"
+                            value={systemSettings?.seo?.siteName || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, siteName: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="Merlux Chauffeur Services"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Meta Title</label>
+                          <input
+                            type="text"
+                            value={systemSettings?.seo?.defaultTitle || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultTitle: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="Luxury Chauffeur Melbourne | Merlux"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Meta Description</label>
+                          <textarea
+                            value={systemSettings?.seo?.defaultDescription || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultDescription: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
+                            placeholder="Book luxury chauffeur services in Melbourne..."
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Default Keywords (comma separated)</label>
+                          <input
+                            type="text"
+                            value={Array.isArray(systemSettings?.seo?.defaultKeywords) ? systemSettings.seo.defaultKeywords.join(', ') : systemSettings?.seo?.defaultKeywords || ''}
+                            onChange={(e) => {
+                              const keywords = e.target.value.split(',').map(k => k.trim()).filter(k => k !== '');
+                              setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, defaultKeywords: keywords } });
+                            }}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="chauffeur, melbourne, luxury travel"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Analytics & Schema */}
+                    <div className="glass p-8 rounded-3xl border border-white/5 space-y-6 lg:col-span-2">
+                      <h4 className="text-sm font-bold text-gold uppercase tracking-widest flex items-center gap-2">
+                        <BarChart3 size={16} /> Analytics & Schema
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Google Analytics ID</label>
+                          <input
+                            type="text"
+                            value={systemSettings?.seo?.googleAnalyticsId || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, googleAnalyticsId: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="G-XXXXXXXXXX"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Search Console ID</label>
+                          <input
+                            type="text"
+                            value={systemSettings?.seo?.searchConsoleId || ''}
+                            onChange={(e) => setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, searchConsoleId: e.target.value } })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="verification-code"
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Organization Schema (JSON-LD)</label>
+                          <textarea
+                            value={systemSettings?.seo?.organizationSchema ? JSON.stringify(systemSettings.seo.organizationSchema, null, 2) : ''}
+                            onChange={(e) => {
+                              try {
+                                const schema = JSON.parse(e.target.value);
+                                setSystemSettings({ ...systemSettings, seo: { ...systemSettings.seo, organizationSchema: schema } });
+                              } catch (err) {
+                                // Allow typing invalid JSON temporarily
+                              }
+                            }}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-48 font-mono"
+                            placeholder='{ "@context": "https://schema.org", "@type": "Organization", ... }'
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2nd: Blogs Section */}
+                <div className="space-y-6 border-t border-white/5 pt-12">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Blog Posts</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your journal articles</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setCssConfig({
+                            type: 'global',
+                            content: systemSettings?.seo?.globalCmsCss || '',
+                            isActive: systemSettings?.seo?.isGlobalCssActive !== false,
+                            title: 'Global CMS CSS'
+                          });
+                          setShowCssModal(true);
+                        }}
+                        className="bg-white/5 border border-white/10 text-white/60 hover:text-gold hover:border-gold px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
+                      >
+                        <Globe size={16} />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Global CSS</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                          setShowBlogModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                      >
+                        <Plus size={18} />
+                        <span className="text-xs font-bold uppercase tracking-widest">Add Post</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {blogs.length > 0 ? blogs.map(blog => (
+                      <div key={blog.id || blog.slug || blog.title} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+                        <div className="h-32 relative overflow-hidden">
+                          <img src={blog.featuredImage || blog.image || 'https://picsum.photos/seed/blog/800/400'} alt={blog.title} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40" />
+                          <div className="absolute bottom-3 left-4">
+                            <p className="text-sm font-bold text-white line-clamp-1">{blog.title}</p>
+                            <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
+                          </div>
+                        </div>
+                        <div className="p-4 flex items-center justify-between">
+                          <div className="flex gap-2">
+                            <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", blog.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
+                              {blog.noindex ? 'No Index' : 'Index'}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => window.open(`/blog/${blog.slug}`, '_blank')}
+                              className="p-2 bg-white/5 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
+                              title="View Post"
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCssConfig({
+                                  type: 'blog',
+                                  id: blog.id,
+                                  content: blog.customCss || '',
+                                  isActive: blog.isCustomCssActive !== false,
+                                  title: `CSS: ${blog.title}`
+                                });
+                                setShowCssModal(true);
+                              }}
+                              className="p-2 bg-white/5 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
+                              title="Custom CSS"
+                            >
+                              <Code2 size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDuplicateBlog(blog)}
+                              className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                              title="Duplicate Post"
+                            >
+                              <Copy size={14} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingBlog(blog);
+                                setShowBlogModal(true);
+                              }}
+                              className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBlog(blog.id)}
+                              className="p-2 bg-white/5 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="md:col-span-2 lg:col-span-3 py-20 text-center glass rounded-3xl border border-white/5">
+                        <Globe size={48} className="text-white/10 mx-auto mb-4" />
+                        <h4 className="text-lg font-display text-white/40">No blog posts found</h4>
+                        <p className="text-xs text-white/20 mt-1 uppercase tracking-widest font-bold">Start writing by clicking 'Add Post'</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3rd: Dynamic Pages Section */}
+                <div className="space-y-8 border-t border-white/5 pt-12">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Dynamic Pages</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage custom landing pages</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setCssConfig({
+                            type: 'global',
+                            content: systemSettings?.seo?.globalCmsCss || '',
+                            isActive: systemSettings?.seo?.isGlobalCssActive !== false,
+                            title: 'Global CMS CSS'
+                          });
+                          setShowCssModal(true);
+                        }}
+                        className="bg-white/5 border border-white/10 text-white/60 hover:text-gold hover:border-gold px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
+                      >
+                        <Globe size={16} />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Global CSS</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                          setShowPageModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                      >
+                        <Plus size={18} />
+                        <span className="text-xs font-bold uppercase tracking-widest">Add Page</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {pages.filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug)).length > 0 ? (
+                      pages
+                        .filter(p => !['home', 'fleet', 'services', 'about', 'contact', 'booking', 'offers', 'tours'].includes(p.slug))
+                        .map(page => (
+                          <div
+                            key={page.id || page.slug}
+                            className="glass p-6 rounded-2xl border border-white/5 group hover:border-gold/30 transition-all flex flex-col justify-between"
+                          >
+                            {/* Top row: title left, badges right */}
+                            <div className="flex justify-between items-center mb-4">
+                              <div>
+                                <h4 className="text-lg font-bold text-white">{page.title}</h4>
+                                <p className="text-xs text-gold">/{page.slug}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
+                                  {page.noindex ? 'No Index' : 'Index'}
+                                </span>
+                                <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.includeInSitemap ? "bg-blue-500/10 text-blue-400" : "bg-white/5 text-white/40")}>
+                                  {page.includeInSitemap ? 'In Sitemap' : 'Hidden'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Bottom row: action buttons pinned */}
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                onClick={() => window.open(`/${page.slug}`, '_blank')}
+                                className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
+                                title="View Page"
+                              >
+                                <Eye size={18} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCssConfig({
+                                    type: 'page',
+                                    id: page.id,
+                                    content: page.customCss || '',
+                                    isActive: page.isCustomCssActive !== false,
+                                    title: `CSS: ${page.title}`
+                                  });
+                                  setShowCssModal(true);
+                                }}
+                                className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
+                                title="Custom CSS"
+                              >
+                                <Code2 size={18} />
+                              </button>
+                              <button
+                                onClick={() => handleDuplicatePage(page)}
+                                className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                                title="Duplicate Page"
+                              >
+                                <Copy size={18} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingPage(page);
+                                  setShowPageModal(true);
+                                }}
+                                className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                              >
+                                <Edit2 size={18} />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePage(page.id)}
+                                className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="col-span-full text-center py-12 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                        <p className="text-white/40 italic">No dynamic pages created yet.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -3392,56 +4474,142 @@ export default function AppDashboard() {
         );
       case 'profile':
         return (
-          <div className="space-y-8 max-w-2xl">
-            <h3 className="text-2xl font-display text-gold">Profile Settings</h3>
-            <div className="glass p-8 rounded-3xl border border-white/5">
-              <div className="flex items-center gap-6 mb-8">
-                <div className="w-20 h-20 bg-gold/10 rounded-full flex items-center justify-center border-2 border-gold/20">
-                  <User size={40} className="text-gold" />
+          <div className="space-y-8 w-full max-w-4xl mx-auto">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-2xl font-display text-gold">Profile Settings</h3>
+                <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage your account and security</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Profile Card */}
+              <div className="lg:col-span-1 border border-white/5 rounded-3xl overflow-hidden bg-white/5 h-fit">
+                <div className={cn(
+                  "h-24 relative",
+                  userProfile?.role === 'admin' ? "bg-red-500/20" :
+                    userProfile?.role === 'driver' ? "bg-blue-500/20" : "bg-gold/20"
+                )}>
+                  {/* Decorative background element */}
+                  <div className="absolute top-0 right-0 p-4 opacity-10">
+                    {userProfile?.role === 'admin' ? <Shield size={80} /> :
+                      userProfile?.role === 'driver' ? <Car size={80} /> : <User size={80} />}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-lg font-display">{userProfile?.name || 'User'}</p>
-                  <p className="text-xs text-white/40">{user?.email}</p>
-                  <span className="text-[8px] bg-gold/10 text-gold px-2 py-0.5 rounded uppercase font-bold mt-1 inline-block">
-                    {userProfile?.role}
-                  </span>
+                <div className="px-6 pb-6 -mt-10 relative">
+                  <div className={cn(
+                    "w-20 h-20 rounded-2xl flex items-center justify-center border-4 border-black mb-4",
+                    userProfile?.role === 'admin' ? "bg-red-500 text-white" :
+                      userProfile?.role === 'driver' ? "bg-blue-500 text-white" : "bg-gold text-black"
+                  )}>
+                    {userProfile?.role === 'admin' ? <Shield size={32} /> :
+                      userProfile?.role === 'driver' ? <Car size={32} /> : <User size={32} />}
+                  </div>
+                  <h4 className="text-lg font-bold text-white">{userProfile?.name || 'User'}</h4>
+                  <p className="text-xs text-white/40 mb-4">{user?.email}</p>
+
+                  <div className="flex flex-wrap gap-2">
+                    <span className={cn(
+                      "text-[10px] uppercase font-bold px-3 py-1 rounded-full",
+                      userProfile?.role === 'admin' ? "bg-red-500/10 text-red-500" :
+                        userProfile?.role === 'driver' ? "bg-blue-500/10 text-blue-500" : "bg-gold/10 text-gold"
+                    )}>
+                      {userProfile?.role}
+                    </span>
+                    <span className="text-[10px] bg-white/5 text-white/40 px-3 py-1 rounded-full uppercase font-bold">
+                      Account Verified
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-6">
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Full Name</label>
-                  <input
-                    type="text"
-                    value={profileName}
-                    onChange={(e) => setProfileName(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
+              {/* Settings Forms */}
+              <div className="lg:col-span-2 space-y-6">
+                <div className="glass p-8 rounded-3xl border border-white/5">
+                  <h4 className="text-sm font-bold text-gold uppercase tracking-widest mb-6">Personal Details</h4>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Full Name</label>
+                        <input
+                          type="text"
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="Your Name"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Phone Number</label>
+                        <input
+                          type="tel"
+                          value={profilePhone}
+                          onChange={(e) => setProfilePhone(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="+61 ..."
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Address</label>
+                      <input
+                        type="text"
+                        value={profileAddress}
+                        onChange={(e) => setProfileAddress(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                        placeholder="Street Address, Suburb, City"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Phone Number</label>
-                  <input
-                    type="tel"
-                    value={profilePhone}
-                    onChange={(e) => setProfilePhone(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
+
+                <div className="glass p-8 rounded-3xl border border-white/5">
+                  <h4 className="text-sm font-bold text-gold uppercase tracking-widest mb-6">Security</h4>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">New Password</label>
+                        <input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="••••••••"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Confirm Password</label>
+                        <input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                          placeholder="••••••••"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-white/20 italic">
+                      Leave password fields blank if you don't want to change your password.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Address (Optional)</label>
-                  <input
-                    type="text"
-                    value={profileAddress}
-                    onChange={(e) => setProfileAddress(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                  />
-                </div>
+
                 <button
                   onClick={handleUpdateProfile}
                   disabled={isUpdatingProfile}
-                  className="w-full bg-gold text-black py-4 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50"
+                  className="w-full bg-gold text-black py-4 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {isUpdatingProfile ? 'Updating...' : 'Update Profile'}
+                  {isUpdatingProfile ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Updating Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={16} />
+                      <span>Save Profile Settings</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -3663,6 +4831,16 @@ export default function AppDashboard() {
                     />
                   </button>
                 ))}
+
+                {/* Clear option */}
+                <button
+                  onClick={() => setRatingValue(0)}
+                  className="ml-4 px-2 py-1 text-[10px] font-bold uppercase rounded-lg 
+               bg-white/5 text-white/50 hover:text-gold hover:bg-gold/10 transition-all"
+                  title="Clear Rating"
+                >
+                  Clear
+                </button>
               </div>
 
               <div className="mb-6">
@@ -3685,9 +4863,8 @@ export default function AppDashboard() {
                   Cancel
                 </button>
                 <button
-                  disabled={ratingValue === 0}
                   onClick={() => handleRateDriver(ratingBooking.id, ratingValue, ratingComment)}
-                  className="flex-1 bg-gold text-black py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50 disabled:hover:bg-gold"
+                  className="flex-1 bg-gold text-black py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
                 >
                   Submit
                 </button>
@@ -4216,6 +5393,9 @@ export default function AppDashboard() {
                           }}
                         />
                       )}
+                      {!mapDirections && routeBooking.pickup && (
+                        <Marker position={{ lat: -37.8136, lng: 144.9631 }} />
+                      )}
                     </GoogleMap>
                   </>
                 ) : (
@@ -4364,6 +5544,148 @@ export default function AppDashboard() {
                 </div>
               </motion.div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* CSS Editor Modal */}
+        <AnimatePresence>
+          {showCssModal && (
+            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowCssModal(false)}
+                className="absolute inset-0 bg-black/90 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="relative w-full max-w-5xl glass p-8 rounded-3xl border border-white/10 shadow-2xl overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-2xl font-display text-gold">{cssConfig.title}</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                      {cssConfig.type === 'global' ? 'Applies to all CMS pages/blogs' : 'Applies to this specific item only'}
+                    </p>
+                  </div>
+                  <button onClick={() => setShowCssModal(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div className="space-y-6">
+                    {/* Status Toggle */}
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+                      <div>
+                        <p className="text-sm font-bold">CSS Status</p>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                          {cssConfig.isActive ? 'Active and applying styles' : 'Inactive (styles ignored)'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setCssConfig({ ...cssConfig, isActive: !cssConfig.isActive })}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          cssConfig.isActive ? "bg-gold" : "bg-white/10"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                            cssConfig.isActive ? "right-1" : "left-1"
+                          )}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Editor */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">CSS Content</label>
+                      <div className="relative group">
+                        <textarea
+                          value={cssConfig.content}
+                          onChange={e => setCssConfig({ ...cssConfig, content: e.target.value })}
+                          className="w-full h-80 bg-black/50 border border-white/10 rounded-2xl p-6 font-mono text-sm focus:border-gold outline-none transition-all resize-none shadow-inner"
+                          placeholder=".custom-class { color: gold; }"
+                        />
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Code2 size={16} className="text-white/20" />
+                        </div>
+                      </div>
+                      <p className="text-[9px] text-white/30 italic">
+                        Individual CSS overwrites Global CSS. Use unique selectors to avoid conflicts.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleSaveCss}
+                      disabled={cssEditingLoading}
+                      className="w-full btn-primary py-4 flex items-center justify-center gap-2"
+                    >
+                      {cssEditingLoading ? <Loader2 className="animate-spin" /> : <Save size={18} />}
+                      <span className="text-xs font-bold uppercase tracking-widest">Save CSS Profile</span>
+                    </button>
+                  </div>
+
+                  {/* Preview Section */}
+                  <div className="space-y-4">
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Live Style Preview</label>
+                    <div className="h-full min-h-[400px] bg-white/5 border border-white/10 rounded-2xl overflow-hidden relative">
+                      {/* Injecting CSS into Preview */}
+                      <style>
+                        {cssConfig.isActive ? cssConfig.content : ''}
+                      </style>
+
+                      <div className="p-8 space-y-6">
+                        <div className="preview-container space-y-4">
+                          <h1 className="preview-title text-2xl font-display text-white">Sample Heading (H1)</h1>
+                          <p className="preview-text text-sm text-white/60 leading-relaxed">
+                            This is a preview of how your custom CSS affects common elements.
+                            Target classes like <span className="text-gold">.preview-title</span>,
+                            <span className="text-gold">.preview-text</span>, or
+                            <span className="text-gold">.preview-button</span> to style them.
+                          </p>
+                          <div className="flex gap-4">
+                            <button className="preview-button px-6 py-2 bg-gold text-black rounded-lg font-bold text-xs uppercase tracking-widest">
+                              Sample Button
+                            </button>
+                            <div className="preview-card glass p-4 rounded-xl border border-white/10 w-full max-w-[200px]">
+                              <p className="text-[10px] uppercase font-bold text-white/30 mb-1">Card Component</p>
+                              <p className="text-xs text-white">Dynamic Content</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-8 pt-8 border-t border-white/5">
+                          <p className="text-[8px] uppercase tracking-widest font-bold text-white/20 mb-4">HTML Structure Reference</p>
+                          <div className="bg-black/40 p-4 rounded-xl font-mono text-[10px] text-white/40">
+                            &lt;h1 class="preview-title"&gt;...&lt;/h1&gt;<br />
+                            &lt;p class="preview-text"&gt;...&lt;/p&gt;<br />
+                            &lt;button class="preview-button"&gt;...&lt;/button&gt;<br />
+                            &lt;div class="preview-card"&gt;...&lt;/div&gt;
+                          </div>
+                        </div>
+                      </div>
+
+                      {!cssConfig.isActive && (
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center">
+                          <div className="text-center p-6 glass rounded-2xl border border-white/10">
+                            <Ban className="text-red-500 mx-auto mb-2" size={24} />
+                            <p className="text-xs font-bold uppercase tracking-widest text-white/60">Preview Disabled</p>
+                            <p className="text-[9px] text-white/30 mt-1">Activate CSS to see preview</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
 
@@ -4719,7 +6041,7 @@ export default function AppDashboard() {
 
                 <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
                   <h4 className="text-sm font-bold text-gold uppercase tracking-widest">SEO Settings</h4>
-                  
+
                   <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Title</label>
                     <input
@@ -4854,7 +6176,7 @@ export default function AppDashboard() {
 
                 <div className="p-6 bg-white/5 rounded-2xl border border-white/10 space-y-4">
                   <h4 className="text-sm font-bold text-gold uppercase tracking-widest">SEO Settings</h4>
-                  
+
                   <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Meta Title</label>
                     <input
@@ -5490,6 +6812,142 @@ export default function AppDashboard() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Chart Modal */}
+      <AnimatePresence>
+        {showAddChartModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setShowAddChartModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-md space-y-6 shadow-2xl relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-xl font-display text-gold">Add Custom Insight</h3>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Configure your data visualization</p>
+                </div>
+                <button
+                  onClick={() => setShowAddChartModal(false)}
+                  className="p-2 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors"
+                >
+                  <XCircle size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Chart Title</label>
+                  <input
+                    type="text"
+                    value={newChartConfig.title}
+                    onChange={(e) => setNewChartConfig({ ...newChartConfig, title: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="e.g., Performance Metrics"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Chart Type</label>
+                    <select
+                      value={newChartConfig.type}
+                      onChange={(e) => {
+                        const type = e.target.value;
+                        let updates: any = { type };
+                        if (type === 'pie-roles') {
+                          updates.type = 'pie';
+                          updates.dataSource = 'roleData';
+                          updates.dataKey = 'value';
+                        } else if (type === 'pie') {
+                          updates.dataSource = 'statusData';
+                          updates.dataKey = 'value';
+                        }
+                        setNewChartConfig({ ...newChartConfig, ...updates });
+                      }}
+                      className="custom-select w-full"
+                    >
+                      <option value="line">Line Chart</option>
+                      <option value="area">Area Chart</option>
+                      <option value="bar">Bar Chart</option>
+                      <option value="pie">Pie Chart (Status)</option>
+                      <option value="pie-roles">Pie Chart (User Roles)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Data Source</label>
+                    <select
+                      value={newChartConfig.dataKey}
+                      onChange={(e) => setNewChartConfig({ ...newChartConfig, dataKey: e.target.value, dataSource: e.target.value === 'roles' ? 'roleData' : 'revenueData' })}
+                      className="custom-select w-full"
+                      disabled={newChartConfig.type === 'pie'}
+                    >
+                      <option value="revenue">Revenue</option>
+                      <option value="bookings">Booking Count</option>
+                      <option value="roles">User Roles</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Chart Width</label>
+                    <select
+                      value={newChartConfig.width}
+                      onChange={(e) => setNewChartConfig({ ...newChartConfig, width: e.target.value })}
+                      className="custom-select w-full"
+                    >
+                      <option value="small">Small (1/3)</option>
+                      <option value="medium">Medium (2/3)</option>
+                      <option value="large">Full Width</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Brand Color</label>
+                    <div className="flex gap-2">
+                      {['#D4AF37', '#60A5FA', '#4ADE80', '#F87171', '#C084FC'].map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setNewChartConfig({ ...newChartConfig, color: c })}
+                          className={cn(
+                            "w-8 h-8 rounded-full border-2 transition-all",
+                            newChartConfig.color === c ? "border-white scale-110" : "border-transparent"
+                          )}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4">
+                <button
+                  onClick={() => {
+                    if (!newChartConfig.title) return;
+                    const newId = `chart-${Date.now()}`;
+                    setDashboardCharts(prev => [...prev, { ...newChartConfig, id: newId }]);
+                    setShowAddChartModal(false);
+                    setNewChartConfig({ title: '', type: 'line', dataKey: 'revenue', dataSource: 'revenueData', color: '#D4AF37', width: 'medium' });
+                  }}
+                  className="w-full btn-primary py-4 flex items-center justify-center gap-2"
+                >
+                  <Plus size={18} />
+                  <span className="text-sm font-bold uppercase tracking-widest">Add to Dashboard</span>
+                </button>
               </div>
             </motion.div>
           </motion.div>

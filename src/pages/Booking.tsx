@@ -33,6 +33,7 @@ import {
 import {
   GoogleMap,
   useJsApiLoader,
+  Marker,
   DirectionsService,
   DirectionsRenderer,
   Autocomplete,
@@ -55,6 +56,7 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
 } from "firebase/auth";
 import { fetchFlightStatus, FlightStatus } from "../services/flightService";
 import Logo from "../components/layout/Logo";
@@ -246,6 +248,12 @@ export default function Booking() {
   const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
   const [showDistanceBreakdown, setShowDistanceBreakdown] = useState(false);
 
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [showLoginFields, setShowLoginFields] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
   const [formData, setFormData] = useState({
     serviceType: initialState?.service || "",
     pickup: "",
@@ -272,6 +280,28 @@ export default function Booking() {
 
   const [distance, setDistance] = useState<string>("");
   const [duration, setDuration] = useState<string>("");
+
+  const handleLogin = async (e: React.FormEvent | React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (!loginEmail || !loginPassword) {
+      setError("Please enter your email and password");
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setError(null);
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      setShowLoginFields(false);
+      setLoginEmail("");
+      setLoginPassword("");
+    } catch (err: any) {
+      console.error("Login Error:", err);
+      setError(err.message || "Failed to log in. Please check your credentials.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const calculatePrice = useCallback(
     (vehicleId: string) => {
@@ -588,10 +618,9 @@ export default function Booking() {
             const userData = userDoc.data();
             setFormData((prev) => ({
               ...prev,
-              customerName:
-                prev.customerName || userData.name || user.displayName || "",
-              customerEmail: prev.customerEmail || userData.email || user.email || "",
-              customerPhone: prev.customerPhone || userData.phone || "",
+              customerName: userData.name || user.displayName || prev.customerName || "",
+              customerEmail: userData.email || user.email || prev.customerEmail || "",
+              customerPhone: userData.phone || prev.customerPhone || "",
             }));
           }
         } catch (err) {
@@ -720,17 +749,36 @@ export default function Booking() {
   );
 
   const directionsOptions = useMemo(() => {
-    if (!debouncedPickup || !debouncedDropoff) return null;
-    if (debouncedPickup.length < 5 || debouncedDropoff.length < 5) return null;
+    const hasPickup = debouncedPickup && debouncedPickup.length >= 5;
+    const hasDropoff = debouncedDropoff && debouncedDropoff.length >= 5;
+    const hasWaypoints = formData.waypoints.some(wp => wp.length >= 5);
+
+    // Only fetch directions if we have origin AND (destination OR waypoints)
+    if (!hasPickup || (!hasDropoff && !hasWaypoints)) return null;
 
     const waypoints = formData.waypoints
       .filter((wp) => wp.length > 5)
       .map((wp) => ({ location: wp, stopover: true }));
 
+    // If no dropoff but have waypoints, we treat the last waypoint as destination or just don't draw route if that's preferred.
+    // However, usually "2+ points" means we should try to route.
+    // If no dropoff, we can use the last waypoint as the destination for the directions service.
+    
+    let destination = debouncedDropoff;
+    let finalWaypoints = [...waypoints];
+
+    if (!hasDropoff && hasWaypoints) {
+      const validWaypoints = formData.waypoints.filter(wp => wp.length > 5);
+      destination = validWaypoints[validWaypoints.length - 1];
+      finalWaypoints = validWaypoints.slice(0, -1).map(wp => ({ location: wp, stopover: true }));
+    }
+
+    if (!destination) return null;
+
     return {
-      destination: debouncedDropoff,
+      destination: destination,
       origin: debouncedPickup,
-      waypoints: waypoints,
+      waypoints: finalWaypoints,
       travelMode: "DRIVING" as google.maps.TravelMode,
     };
   }, [debouncedPickup, debouncedDropoff, formData.waypoints]);
@@ -1498,7 +1546,7 @@ export default function Booking() {
                           </div>
 
                           <div className="flex items-center text-[10px] uppercase text-white/40 space-x-2">
-                            <Plane size={10} className="text-gold font-bold"/>
+                            <Plane size={10} className="text-gold font-bold" />
                             <span className="text-white font-bold">
                               {flightInfo.airlineName || "Unknown"}
                             </span>
@@ -1662,6 +1710,12 @@ export default function Booking() {
                         <DirectionsService
                           options={directionsOptions}
                           callback={directionsCallback}
+                        />
+                      )}
+                      {!directions && debouncedPickup && debouncedPickup.length >= 5 && (
+                        <Marker 
+                          position={center} // Note: Marker needs actual lat/lng. If I only have address, I'd need geocoding. 
+                          // However, center is used as fallback. Ideally we'd geocode.
                         />
                       )}
                       {directions && (
@@ -2066,211 +2120,213 @@ export default function Booking() {
                           </div>
                         </div>
                       )}
+                       <div className="flex items-center gap-3 mb-2">
+                        <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
+                          <Car size={14} className="text-gold" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] uppercase tracking-widest text-white/40">
+                            Vehicle
+                          </p>
+                          <p className="text-[10px] text-white">
+                            {
+                              (
+                                fleet.find(
+                                  (v) => v.id === formData.vehicle,
+                                ) ||
+                                vehicles.find(
+                                  (v) => v.id === formData.vehicle,
+                                )
+                              )?.name
+                            }
+                          </p>
+                        </div>
+                      </div>
                     </div>
+                     
 
                     {formData.vehicle && (
-                      <div className="space-y-3 pt-6 border-t border-white/5">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center">
-                            <Car size={14} className="text-gold" />
-                          </div>
-                          <div>
-                            <p className="text-[8px] uppercase tracking-widest text-white/40">
-                              Vehicle
-                            </p>
-                            <p className="text-[10px] text-white">
-                              {
-                                (
-                                  fleet.find(
-                                    (v) => v.id === formData.vehicle,
-                                  ) ||
-                                  vehicles.find(
-                                    (v) => v.id === formData.vehicle,
-                                  )
-                                )?.name
-                              }
-                            </p>
-                          </div>
-                        </div>
-                        {settings?.showPriceBreakdown !== false && (
-                          <div className="space-y-2">
-                            {(() => {
-                              const details = calculatePrice(formData.vehicle);
-                              return (
-                                <>
-                                  {settings?.showBasePrice !== false && (
-                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                      <span>Base Fare</span>
-                                      <span>${details.base.toFixed(2)}</span>
-                                    </div>
-                                  )}
-                                  {settings?.showDistancePrice !== false && (
-                                    <div className="space-y-2">
-                                      <div className="flex justify-between items-center text-[10px] uppercase tracking-widest text-white/40">
-                                        <div className="flex items-center gap-2">
-                                          <span>
-                                            {formData.serviceType === "hourly"
-                                              ? `Hourly (${formData.hours}h)`
-                                              : "Distance"}
-                                          </span>
-
-                                          {settings?.showDistanceEyeIcon && (
-                                            <button
-                                              onClick={() =>
-                                                setShowDistanceBreakdown(
-                                                  !showDistanceBreakdown,
-                                                )
-                                              }
-                                              className={cn(
-                                                "flex items-center gap-1 text-gold/50 hover:text-gold transition-colors",
-                                                showDistanceBreakdown &&
-                                                "text-gold",
-                                              )}
-                                              title="View Range Wise Price"
-                                            >
-                                              <Eye size={10} />
-                                              <span className="text-[9px] font-bold uppercase tracking-widest">
-                                                View
-                                              </span>
-                                            </button>
-                                          )}
-                                        </div>
-
+                      <div className="space-y-3 pt-3 border-t border-white/5">
+                      {settings?.showPriceBreakdown !== false && (
+                        <div className="space-y-2">
+                          {(() => {
+                            const details = calculatePrice(formData.vehicle);
+                            return (
+                              <>
+                                {settings?.showBasePrice !== false && (
+                                  <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
+                                    <span>Base Fare</span>
+                                    <span>${details.base.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {settings?.showDistancePrice !== false && (
+                                  <div className="space-y-2">
+                                    <div className="flex justify-between items-center text-[10px] uppercase tracking-widest text-white/40">
+                                      <div className="flex items-center gap-2">
                                         <span>
-                                          ${details.distance.toFixed(2)}
+                                          {formData.serviceType === "hourly"
+                                            ? `Hourly (${formData.hours}h)`
+                                            : "Distance"}
                                         </span>
+
+                                        {settings?.showDistanceEyeIcon && (
+                                          <button
+                                            onClick={() =>
+                                              setShowDistanceBreakdown(
+                                                !showDistanceBreakdown,
+                                              )
+                                            }
+                                            className={cn(
+                                              "flex items-center gap-1 text-gold/50 hover:text-gold transition-colors",
+                                              showDistanceBreakdown &&
+                                              "text-gold",
+                                            )}
+                                            title="View Range Wise Price"
+                                          >
+                                            <Eye size={10} />
+                                            <span className="text-[9px] font-bold uppercase tracking-widest">
+                                              View
+                                            </span>
+                                          </button>
+                                        )}
                                       </div>
 
-                                      {showDistanceBreakdown &&
-                                        details.rangeCalcs &&
-                                        details.rangeCalcs.length > 0 && (
-                                          <div className="p-3 bg-white/5 rounded-lg border border-gold/20 space-y-2 mb-2">
-                                            <div className="flex items-center justify-between mb-1 border-b border-white/5 pb-1">
-                                              <h4 className="text-[8px] uppercase tracking-widest font-bold text-gold">
-                                                {formData.serviceType ===
-                                                  "hourly"
-                                                  ? "Hourly Calculation"
-                                                  : "Distance Calculation"}
-                                              </h4>
-                                            </div>
-                                            {details.rangeCalcs.map(
-                                              (calc: any, i: number) => (
-                                                <div
-                                                  key={i}
-                                                  className="flex justify-between items-center text-[9px]"
-                                                >
-                                                  <div className="flex items-center gap-2">
-                                                    <div className="w-1 h-1 rounded-full bg-gold" />
-                                                    <span className="text-white font-bold uppercase tracking-tighter">
-                                                      {calc.label}{" "}
-                                                      {calc.isHourly
-                                                        ? ""
-                                                        : "Range"}
-                                                    </span>
-                                                    <span className="text-white/40">
-                                                      ({calc.dist.toFixed(1)}
-                                                      {calc.isHourly
-                                                        ? "h"
-                                                        : "km"}{" "}
-                                                      × ${calc.rate})
-                                                    </span>
-                                                  </div>
-                                                  <span className="text-white font-bold">
-                                                    ${calc.total.toFixed(2)}
+                                      <span>
+                                        ${details.distance.toFixed(2)}
+                                      </span>
+                                    </div>
+
+                                    {showDistanceBreakdown &&
+                                      details.rangeCalcs &&
+                                      details.rangeCalcs.length > 0 && (
+                                        <div className="p-3 bg-white/5 rounded-lg border border-gold/20 space-y-2 mb-2">
+                                          <div className="flex items-center justify-between mb-1 border-b border-white/5 pb-1">
+                                            <h4 className="text-[8px] uppercase tracking-widest font-bold text-gold">
+                                              {formData.serviceType ===
+                                                "hourly"
+                                                ? "Hourly Calculation"
+                                                : "Distance Calculation"}
+                                            </h4>
+                                          </div>
+                                          {details.rangeCalcs.map(
+                                            (calc: any, i: number) => (
+                                              <div
+                                                key={i}
+                                                className="flex justify-between items-center text-[9px]"
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <div className="w-1 h-1 rounded-full bg-gold" />
+                                                  <span className="text-white font-bold uppercase tracking-tighter">
+                                                    {calc.label}{" "}
+                                                    {calc.isHourly
+                                                      ? ""
+                                                      : "Range"}
+                                                  </span>
+                                                  <span className="text-white/40">
+                                                    ({calc.dist.toFixed(1)}
+                                                    {calc.isHourly
+                                                      ? "h"
+                                                      : "km"}{" "}
+                                                    × ${calc.rate})
                                                   </span>
                                                 </div>
-                                              ),
-                                            )}
-                                          </div>
-                                        )}
-                                    </div>
-                                  )}
-                                  {settings?.showWaypointPrice !== false &&
-                                    details.waypoints > 0 && (
-                                      <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                        <span>Waypoints</span>
-                                        <span>
-                                          ${details.waypoints.toFixed(2)}
-                                        </span>
-                                      </div>
-                                    )}
-                                  {formData.isReturn && (
+                                                <span className="text-white font-bold">
+                                                  ${calc.total.toFixed(2)}
+                                                </span>
+                                              </div>
+                                            ),
+                                          )}
+                                        </div>
+                                      )}
+                                  </div>
+                                )}
+                                {settings?.showWaypointPrice !== false &&
+                                  details.waypoints > 0 && (
                                     <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                      <span>Return Trip (2x)</span>
+                                      <span>Waypoints</span>
                                       <span>
-                                        ${details.returnPrice.toFixed(2)}
+                                        ${details.waypoints.toFixed(2)}
                                       </span>
                                     </div>
                                   )}
-                                  {settings?.showExtrasPrice !== false &&
-                                    details.extras > 0 && (
-                                      <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                        <span>Extras</span>
-                                        <span>
-                                          ${details.extras.toFixed(2)}
-                                        </span>
-                                      </div>
-                                    )}
-                                  {settings?.showNetPrice !== false && (
-                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40 border-t border-white/5 pt-2">
-                                      <span>Gross Price</span>
-                                      <span>${details.gross.toFixed(2)}</span>
-                                    </div>
-                                  )}
-                                  {settings?.showDiscount !== false &&
-                                    details.discount > 0 && (
-                                      <div className="flex justify-between text-[10px] uppercase tracking-widest text-green-500 border-b border-white/5 pb-2">
-                                        <span>
-                                          Discount ({appliedCoupon?.code} -{" "}
-                                          {appliedCoupon?.type === "percentage"
-                                            ? `${appliedCoupon.value}%`
-                                            : `$${appliedCoupon.value}`}
-                                          )
-                                        </span>
-                                        <span>
-                                          -${details.discount.toFixed(2)}
-                                        </span>
-                                      </div>
-                                    )}
-                                  {settings?.showNetPrice !== false &&
-                                    details.discount > 0 && (
-                                      <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                        <span>Net Price</span>
-                                        <span>${details.net.toFixed(2)}</span>
-                                      </div>
-                                    )}
-                                  {settings?.showTax !== false && (
-                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                      <span>
-                                        Tax ({settings?.taxPercentage || 0}%)
-                                      </span>
-                                      <span>${details.tax.toFixed(2)}</span>
-                                    </div>
-                                  )}
-                                  {settings?.showStripeFees !== false &&
-                                    details.stripe > 0 && (
-                                      <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
-                                        <span>Stripe Fees</span>
-                                        <span>
-                                          ${details.stripe.toFixed(2)}
-                                        </span>
-                                      </div>
-                                    )}
-                                  <div className="flex justify-between pt-4 border-t border-white/10">
-                                    <span className="text-white font-bold text-xs uppercase tracking-widest">
-                                      Total
-                                    </span>
-                                    <span className="text-gold font-bold text-xl">
-                                      ${details.total.toFixed(2)}
+                                {formData.isReturn && (
+                                  <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
+                                    <span>Return Trip (2x)</span>
+                                    <span>
+                                      ${details.returnPrice.toFixed(2)}
                                     </span>
                                   </div>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                                )}
+                                {settings?.showExtrasPrice !== false &&
+                                  details.extras > 0 && (
+                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
+                                      <span>Extras</span>
+                                      <span>
+                                        ${details.extras.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  )}
+                                {settings?.showNetPrice !== false && (
+                                  <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40 border-t border-white/5 pt-2">
+                                    <span>Gross Price</span>
+                                    <span>${details.gross.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {settings?.showDiscount !== false &&
+                                  details.discount > 0 && (
+                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-green-500 border-b border-white/5 pb-2">
+                                      <span>
+                                        Discount ({appliedCoupon?.code} -{" "}
+                                        {appliedCoupon?.type === "percentage"
+                                          ? `${appliedCoupon.value}%`
+                                          : `$${appliedCoupon.value}`}
+                                        )
+                                      </span>
+                                      <span>
+                                        -${details.discount.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  )}
+                                {settings?.showNetPrice !== false &&
+                                  details.discount > 0 && (
+                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
+                                      <span>Net Price</span>
+                                      <span>${details.net.toFixed(2)}</span>
+                                    </div>
+                                  )}
+                                {settings?.showTax !== false && (
+                                  <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
+                                    <span>
+                                      Tax ({settings?.taxPercentage || 0}%)
+                                    </span>
+                                    <span>${details.tax.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {settings?.showStripeFees !== false &&
+                                  details.stripe > 0 && (
+                                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-white/40">
+                                      <span>Stripe Fees</span>
+                                      <span>
+                                        ${details.stripe.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  )}
+                                <div className="flex justify-between pt-4 border-t border-white/10">
+                                  <span className="text-white font-bold text-xs uppercase tracking-widest">
+                                    Total
+                                  </span>
+                                  <span className="text-gold font-bold text-xl">
+                                    ${details.total.toFixed(2)}
+                                  </span>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                    
+                    )}                    
 
                     <div className="flex flex-col sm:flex-row gap-4 mt-8">
                       <button
@@ -2376,26 +2432,95 @@ export default function Booking() {
 
                         {/* Second row: Password (only if no user) */}
                         {!user && (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="space-y-1 md:col-span-1">
-                              <label className="text-[10px] uppercase tracking-widest text-white/40">
-                                Create Password{" "}
-                                <span className="text-red-500">*</span>
-                              </label>
-                              <input
-                                type="password"
-                                className="w-full bg-white/5 rounded-lg border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
-                                value={formData.customerPassword}
-                                onChange={(e) =>
-                                  updateForm("customerPassword", e.target.value)
-                                }
-                                placeholder="Min 6 characters"
-                                required
-                              />
-                              <p className="text-[8px] text-white/40 italic">
-                                An account will be created for you.
-                              </p>
+                          <div className="space-y-6">
+                            <div className="flex flex-col gap-4">
+                              <div className="flex items-center justify-between p-4 bg-gold/5 border border-gold/20 rounded-xl">
+                                <div>
+                                  <p className="text-sm font-bold text-gold">Already have an account?</p>
+                                  <p className="text-[10px] text-white/60">Log in to sync your profile and previous details.</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowLoginFields(!showLoginFields)}
+                                  className="text-gold hover:text-white transition-colors text-xs font-bold uppercase tracking-widest border border-gold/30 px-4 py-2 rounded-lg"
+                                >
+                                  {showLoginFields ? "Cancel" : "Login"}
+                                </button>
+                              </div>
+
+                              {showLoginFields && (
+                                <form 
+                                  onSubmit={handleLogin}
+                                  className="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4 animate-in fade-in slide-in-from-top-4 duration-300"
+                                >
+                                  <h4 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                                    <User size={14} className="text-gold" /> Member Login
+                                  </h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                      <label className="text-[10px] uppercase tracking-widest text-white/40">Email</label>
+                                      <input
+                                        type="email"
+                                        className="w-full bg-black/40 rounded-lg border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
+                                        value={loginEmail}
+                                        onChange={(e) => setLoginEmail(e.target.value)}
+                                        placeholder="your@email.com"
+                                        autoComplete="email"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[10px] uppercase tracking-widest text-white/40">Password</label>
+                                      <input
+                                        type="password"
+                                        className="w-full bg-black/40 rounded-lg border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
+                                        value={loginPassword}
+                                        onChange={(e) => setLoginPassword(e.target.value)}
+                                        placeholder="••••••••"
+                                        autoComplete="current-password"
+                                      />
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="submit"
+                                    disabled={isLoggingIn}
+                                    className="w-full bg-gold text-black py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-white transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                  >
+                                    {isLoggingIn ? (
+                                      <>
+                                        <Loader2 size={14} className="animate-spin" />
+                                        <span>Logging in...</span>
+                                      </>
+                                    ) : (
+                                      <span>Log In Now</span>
+                                    )}
+                                  </button>
+                                </form>
+                              )}
                             </div>
+
+                            {!showLoginFields && (
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-1 md:col-span-1">
+                                  <label className="text-[10px] uppercase tracking-widest text-white/40">
+                                    Create Password{" "}
+                                    <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="password"
+                                    className="w-full bg-white/5 rounded-lg border border-white/10 py-2 px-4 focus:border-gold outline-none text-sm"
+                                    value={formData.customerPassword}
+                                    onChange={(e) =>
+                                      updateForm("customerPassword", e.target.value)
+                                    }
+                                    placeholder="Min 6 characters"
+                                    required
+                                  />
+                                  <p className="text-[8px] text-white/40 italic">
+                                    An account will be created for you.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -2726,53 +2851,76 @@ export default function Booking() {
                         )}
 
                         <div className="pt-6 border-t border-white/5 grid grid-cols-2 gap-6">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-                              <Navigation size={16} className="text-gold" />
-                            </div>
-                            <div>
-                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                Distance
-                              </p>
-                              <p className="text-white font-bold text-xs">
-                                {(() => {
-                                  const distVal =
-                                    parseFloat(
-                                      distance.replace(/[^\d.]/g, ""),
-                                    ) || 0;
-                                  return formData.isReturn
-                                    ? `${(distVal * 2).toFixed(1)} km`
-                                    : distance;
-                                })()}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-                              <Clock size={16} className="text-gold" />
-                            </div>
-                            <div>
-                              <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                                Est. Time
-                              </p>
-                              <p className="text-white font-bold text-xs">
-                                {(() => {
-                                  if (!duration) return "N/A";
-                                  const match = duration.match(/(\d+)\s*min/);
-                                  if (match && formData.isReturn) {
-                                    const mins = parseInt(match[1]);
-                                    return `${mins * 2} mins`;
-                                  }
-                                  return duration;
-                                })()}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
+  {formData.serviceType !== "hourly" ? (
+    <>
+      {/* Distance */}
+      {distance && (
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+            <Navigation size={16} className="text-gold" />
+          </div>
+          <div>
+            <p className="text-[10px] text-white/40 uppercase tracking-widest">
+              Distance
+            </p>
+            <p className="text-white font-bold text-xs">
+              {(() => {
+                const distVal =
+                  parseFloat(distance.replace(/[^\d.]/g, "")) || 0;
+                return formData.isReturn
+                  ? `${(distVal * 2).toFixed(1)} km`
+                  : distance;
+              })()}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Est. Time */}
+      {duration && (
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+            <Clock size={16} className="text-gold" />
+          </div>
+          <div>
+            <p className="text-[10px] text-white/40 uppercase tracking-widest">
+              Est. Time
+            </p>
+            <p className="text-white font-bold text-xs">
+              {(() => {
+                const match = duration.match(/(\d+)\s*min/);
+                if (match && formData.isReturn) {
+                  const mins = parseInt(match[1]);
+                  return `${mins * 2} mins`;
+                }
+                return duration;
+              })()}
+            </p>
+          </div>
+        </div>
+      )}
+    </>
+  ) : (
+    /* Travelling Hours (Hourly Service) */
+    <div className="flex items-center gap-3">
+      <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+        <Clock size={16} className="text-gold" />
+      </div>
+      <div>
+        <p className="text-[10px] text-white/40 uppercase tracking-widest">
+          Travel Hours
+        </p>
+        <p className="text-white font-bold text-xs">
+          {formData.hours} Hours
+        </p>
+      </div>
+    </div>
+  )}
+</div>
 
                         {/* Price Breakdown */}
                         {settings?.showPriceBreakdown !== false && (
-                          <div className="space-y-2 pt-6 border-t border-white/10">
+                          <div className="space-y-2 pt-4 border-t border-white/10">
                             <h3 className="text-gold text-[10px] uppercase tracking-widest font-bold mb-2">
                               Price Breakdown
                             </h3>

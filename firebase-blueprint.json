@@ -105,7 +105,9 @@
             "twitterHandle": { "type": "string" },
             "googleAnalyticsId": { "type": "string" },
             "searchConsoleId": { "type": "string" },
-            "organizationSchema": { "type": "object" }
+            "organizationSchema": { "type": "object" },
+            "globalCmsCss": { "type": "string", "description": "Global CSS applied to all CMS pages and blogs." },
+            "isGlobalCssActive": { "type": "boolean", "description": "Toggle to activate/deactivate global CMS CSS." }
           }
         },
         "services": { 
@@ -169,6 +171,8 @@
         "schema": { "type": "object" },
         "noindex": { "type": "boolean" },
         "includeInSitemap": { "type": "boolean" },
+        "customCss": { "type": "string", "description": "Custom CSS for this individual page." },
+        "isCustomCssActive": { "type": "boolean", "description": "Toggle to activate/deactivate individual custom CSS." },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "slug", "content"]
@@ -186,6 +190,8 @@
         "metaTitle": { "type": "string" },
         "metaDescription": { "type": "string" },
         "keywords": { "type": "array", "items": { "type": "string" } },
+        "customCss": { "type": "string", "description": "Custom CSS for this individual blog post." },
+        "isCustomCssActive": { "type": "boolean", "description": "Toggle to activate/deactivate individual custom CSS." },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "slug", "content"]
