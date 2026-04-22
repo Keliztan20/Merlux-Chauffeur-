@@ -12,7 +12,7 @@ import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer, Marke
 import { cn } from '../lib/utils';
 import { auth, db, storage } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, getDocs, addDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, uploadBytesResumable } from 'firebase/storage';
 import { onAuthStateChanged, signOut, updateProfile, updatePassword } from 'firebase/auth';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
@@ -993,12 +993,20 @@ export default function AppDashboard() {
       unsubscribeMedia = onSnapshot(mediaQ, (snapshot) => {
         const mediaData = snapshot.docs.map(doc => {
           const data = doc.data();
-          // Use a composite ID for the internal state to prevent any key collisions
-          return { ...data, id: doc.id, _key: `${doc.id}_${data.createdAt?.seconds || Date.now()}` };
+          return { ...data, id: doc.id };
         });
-        setMediaList(mediaData);
+        
+        // Final deduplication check before setting state
+        const seen = new Set();
+        const uniqueMedia = mediaData.filter(item => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+
+        setMediaList(uniqueMedia);
         // Calculate storage usage
-        const totalSize = mediaData.reduce((sum, item: any) => sum + (Number(item.size) || 0), 0);
+        const totalSize = uniqueMedia.reduce((sum, item: any) => sum + (Number(item.size) || 0), 0);
         setStorageUsageBytes(totalSize);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'media');
@@ -1440,6 +1448,25 @@ export default function AppDashboard() {
     setConfirmDelete({ type: 'extra', id: id });
   };
 
+  const handleCopyUrl = (url: string) => {
+    navigator.clipboard.writeText(url);
+    alert('URL copied to clipboard!');
+  };
+
+  const handleUpdateMedia = async (id: string, data: any) => {
+    try {
+      await updateDoc(doc(db, 'media', id), {
+        ...data,
+        updatedAt: serverTimestamp()
+      });
+      setEditingMedia({ alt: '', title: '', description: '', caption: '' });
+      setShowMediaModal(false);
+    } catch (err) {
+      console.error('Error updating media:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `media/${id}`);
+    }
+  };
+
   const uploadMedia = async (file: File, metadata: any, folder: string) => {
     if (!file) {
       alert('Please select a file to upload');
@@ -1447,6 +1474,7 @@ export default function AppDashboard() {
     }
     setUploadingMedia(true);
     console.log('Starting upload to folder:', folder, 'File:', file.name);
+    
     try {
       // Use a truly unique path for storage
       const timestamp = Date.now();
@@ -1454,17 +1482,39 @@ export default function AppDashboard() {
       const fileName = `${timestamp}_${sanitizedName}`;
       const storageRef = ref(storage, `media/${folder}/${fileName}`);
       
-      console.log('Uploading bytes to storage...');
-      const uploadResult = await uploadBytes(storageRef, file);
-      console.log('Upload successful, getting download URL...');
-      const url = await getDownloadURL(uploadResult.ref);
+      console.log('Initiating uploadBytesResumable...');
+
+      const uploadTask = uploadBytesResumable(storageRef, file);
+
+      // We wrap the resumable task in a promise to use await normally
+      const url = await new Promise<string>((resolve, reject) => {
+        uploadTask.on('state_changed', 
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            console.log(`Upload is ${progress}% done`);
+          }, 
+          (error) => {
+            console.error('UploadTask failed:', error);
+            reject(error);
+          }, 
+          async () => {
+            console.log('Upload finished, fetching download URL...');
+            try {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(downloadURL);
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
 
       const mediaData = {
         name: file.name,
         url,
         size: file.size,
         type: file.type,
-        folder: folder,
+        folder: folder || 'general',
         alt: metadata.alt || '',
         title: metadata.title || '',
         description: metadata.description || '',
@@ -1480,15 +1530,14 @@ export default function AppDashboard() {
       setShowMediaModal(false);
       setMediaFile(null);
       setEditingMedia({ alt: '', title: '', description: '', caption: '' });
-      // Using a slightly delayed alert to ensure UI has updated
-      setTimeout(() => alert('Media uploaded successfully!'), 100);
+      setTimeout(() => alert('Media uploaded successfully!'), 150);
     } catch (err) {
-      console.error('CRITICAL: Error uploading media:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      alert(`Failed to upload media: ${errorMsg}`);
+      console.error('CRITICAL ERROR during upload process:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Unknown storage error';
+      alert(`Upload Failed: ${errorMsg}`);
     } finally {
       setUploadingMedia(false);
-      console.log('Upload process lifecycle complete.');
+      console.log('Upload lifecycle concluded.');
     }
   };
 
@@ -4156,31 +4205,90 @@ export default function AppDashboard() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {mediaList.map((media) => (
-                    <div key={media._key || media.id} className="glass rounded-xl overflow-hidden group relative">
-                      <div className="aspect-square bg-black border border-white/10 flex items-center justify-center overflow-hidden">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+                  {mediaList.map((media, idx) => (
+                    <motion.div
+                      layout
+                      key={`${media.id}-${idx}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="group relative bg-[#050505] rounded-xl overflow-hidden border border-white/5 hover:border-gold/30 transition-all duration-500"
+                    >
+                      {/* Media Preview Area */}
+                      <div className="aspect-square flex items-center justify-center overflow-hidden bg-black/40">
                         {media.type?.startsWith('image/') ? (
-                          <img src={media.url} alt={media.alt || media.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                          <img
+                            src={media.url}
+                            alt={media.alt || media.name}
+                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                            referrerPolicy="no-referrer"
+                          />
                         ) : (
-                          <Image className="text-white/20" size={32} />
+                          <div className="flex flex-col items-center gap-3">
+                            <FileUp className="text-white/20" size={32} />
+                            <span className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-medium">
+                              {media.type?.split('/')[1] || 'FILE'}
+                            </span>
+                          </div>
                         )}
-                      </div>
 
-                      <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black via-black/80 to-transparent translate-y-full group-hover:translate-y-0 transition-transform duration-300">
-                        <p className="text-xs text-white truncate font-bold">{media.name}</p>
-                        <p className="text-[10px] text-white/50 uppercase tracking-widest mt-1">{(media.size / 1024).toFixed(1)} KB</p>
-
-                        <div className="flex gap-2 mt-3">
-                          <a href={media.url} target="_blank" rel="noopener noreferrer" className="flex-1 text-center py-1.5 bg-white/10 hover:bg-gold hover:text-black rounded text-[10px] uppercase font-bold tracking-widest transition-colors">
-                            View
-                          </a>
-                          <button onClick={() => handleDeleteMedia(media.id, media.url)} className="flex-1 py-1.5 bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded text-[10px] uppercase font-bold tracking-widest transition-colors">
-                            Del
-                          </button>
+                        {/* Top Metadata Badge */}
+                        <div className="absolute top-2 left-2 z-10">
+                          <span className="px-2 py-0.5 bg-black/60 backdrop-blur-md border border-white/10 rounded text-[8px] uppercase tracking-widest font-black text-gold">
+                            {media.folder || 'General'}
+                          </span>
                         </div>
                       </div>
-                    </div>
+
+                      {/* Content & Hidden Actions Area */}
+                      <div className="p-3 bg-black/60 backdrop-blur-sm border-t border-white/5">
+                        <div className="flex justify-between items-start mb-1 gap-2">
+                          <p className="text-[11px] text-white/90 truncate font-medium flex-1" title={media.name}>
+                            {media.name}
+                          </p>
+                          <span className="text-[9px] text-white/30 font-mono tracking-tighter">
+                            {(media.size / 1024).toFixed(1)}K
+                          </span>
+                        </div>
+
+                        {/* Expandable Actions on Hover */}
+                        <div className="max-h-0 group-hover:max-h-24 overflow-hidden transition-all duration-500 ease-out">
+                          <div className="pt-3 grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleCopyUrl(media.url)}
+                              className="flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-gold/10 hover:text-gold border border-white/10 hover:border-gold/30 rounded text-[9px] uppercase font-bold tracking-widest transition-all"
+                            >
+                              <Copy size={10} /> Link
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingMedia(media);
+                                setMediaFile(null);
+                                setMediaFolder(media.folder || 'general');
+                                setShowMediaModal(true);
+                              }}
+                              className="flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[9px] uppercase font-bold tracking-widest transition-all"
+                            >
+                              <Edit2 size={10} /> Edit
+                            </button>
+                            <a
+                              href={media.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[9px] uppercase font-bold tracking-widest transition-all"
+                            >
+                              <Eye size={10} /> View
+                            </a>
+                            <button
+                              onClick={() => handleDeleteMedia(media.id, media.url)}
+                              className="flex items-center justify-center gap-1.5 py-1.5 bg-red-500/5 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/10 hover:border-red-500/30 rounded text-[9px] uppercase font-bold tracking-widest transition-all"
+                            >
+                              <Trash2 size={10} /> Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
                   ))}
                   {mediaList.length === 0 && (
                     <div className="col-span-full py-20 text-center glass rounded-2xl border border-white/5 border-dashed">
@@ -6165,16 +6273,33 @@ export default function AppDashboard() {
                 </div>
 
                 <button
+                  disabled={uploadingMedia || (mediaFolder === 'new' && !newFolder)}
                   onClick={() => {
                     const finalFolder = mediaFolder === 'new' ? newFolder : mediaFolder;
-                    if (mediaFile && finalFolder) uploadMedia(mediaFile, editingMedia, finalFolder);
-                    else alert('Please enter a folder name');
+                    if (editingMedia.id) {
+                      handleUpdateMedia(editingMedia.id, editingMedia);
+                    } else if (mediaFile && finalFolder) {
+                      uploadMedia(mediaFile, editingMedia, finalFolder);
+                    } else {
+                      alert('Please select a file and folder');
+                    }
                   }}
-                  disabled={!mediaFile || uploadingMedia || (mediaFolder === 'new' && !newFolder)}
-                  className="w-full btn-primary py-4 uppercase tracking-widest font-bold text-xs mt-4 flex items-center justify-center gap-2"
+                  className="w-full btn-primary py-4 rounded-xl flex items-center justify-center gap-3 transition-all relative overflow-hidden group mt-4 mb-2"
                 >
-                  {uploadingMedia ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                  {uploadingMedia ? 'Uploading...' : 'Upload File'}
+                  <div className="absolute inset-0 bg-gold/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
+                  {uploadingMedia ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      <span className="text-xs font-bold uppercase tracking-[0.2em]">Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      {editingMedia.id ? <Save size={18} /> : <Upload size={18} />}
+                      <span className="text-xs font-bold uppercase tracking-[0.2em]">
+                        {editingMedia.id ? 'Save Changes' : 'Confirm Upload'}
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
 
