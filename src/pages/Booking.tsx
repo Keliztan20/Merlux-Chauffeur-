@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   MapPin,
   Calendar,
+  BadgePercent,
   Clock,
   Car,
   User,
@@ -167,16 +168,22 @@ const serviceTypes = [
     desc: "Luxury for your special day",
   },
   {
+    id: "hourly",
+    name: "Hourly Hire",
+    icon: Clock,
+    desc: "Chauffeur at your disposal",
+  },
+    {
     id: "tour",
     name: "Private Tour",
     icon: Map,
     desc: "Bespoke regional Victoria tours",
   },
-  {
-    id: "hourly",
-    name: "Hourly Hire",
-    icon: Clock,
-    desc: "Chauffeur at your disposal",
+    {
+    id: "offer",
+    name: "Offer Ride Packages",
+    icon: BadgePercent,
+    desc: "Suburbs to/from Airport Ride Packages",
   },
 ];
 
@@ -228,6 +235,7 @@ export default function Booking() {
   } | null;
 
   const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries: libraries,
   });

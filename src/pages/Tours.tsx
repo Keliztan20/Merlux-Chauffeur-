@@ -1,48 +1,16 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapPin, Clock, Users, ArrowRight, Star, Calendar, User, Mail, Phone, CreditCard, Minus, Plus } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import Logo from '../components/layout/Logo';
 
-const TOURS = [
-  {
-    id: 'great-ocean-road',
-    title: "Great Ocean Road",
-    image: "https://images.unsplash.com/photo-1590559063737-0874996513f0?q=80&w=2070&auto=format&fit=crop",
-    duration: "10-12 Hours",
-    description: "Experience one of the world's most scenic coastal drives, including the 12 Apostles.",
-    fleets: [
-      { type: '8-Seater Mercedes', pricePerVehicle: 1048.80, capacity: '1-7 Passengers' },
-      { type: '12-Seater Vehicle', pricePerVehicle: 1248.80, capacity: '8-11 Passengers' }
-    ]
-  },
-  {
-    id: 'phillip-island',
-    title: "Phillip Island Penguin Parade",
-    image: "https://images.unsplash.com/photo-1591154706845-496bc721dbaf?q=80&w=2070&auto=format&fit=crop",
-    duration: "8-9 Hours",
-    description: "Witness the famous Penguin Parade and explore the island's wildlife.",
-    fleets: [
-      { type: '8-Seater Mercedes', pricePerVehicle: 848.80, capacity: '1-7 Passengers' },
-      { type: '12-Seater Vehicle', pricePerVehicle: 1048.80, capacity: '8-11 Passengers' }
-    ]
-  },
-  {
-    id: 'yarra-valley',
-    title: "Yarra Valley Wine Tour",
-    image: "https://images.unsplash.com/photo-1516594915697-87eb3b1c14ea?q=80&w=2070&auto=format&fit=crop",
-    duration: "7-8 Hours",
-    description: "Indulge in premium wine tastings and gourmet food in Victoria's premier wine region.",
-    fleets: [
-      { type: '8-Seater Mercedes', pricePerVehicle: 748.80, capacity: '1-7 Passengers' },
-      { type: '12-Seater Vehicle', pricePerVehicle: 948.80, capacity: '8-11 Passengers' }
-    ]
-  }
-];
-
 export default function Tours() {
   const navigate = useNavigate();
+  const [tours, setTours] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [step, setStep] = useState(1);
   const [selectedTour, setSelectedTour] = useState<any>(null);
   const [selectedFleet, setSelectedFleet] = useState<any>(null);
@@ -56,8 +24,24 @@ export default function Tours() {
     time: ''
   });
 
+  useEffect(() => {
+    const q = query(collection(db, 'tours'), where('active', '==', true));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const parsedTours = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTours(parsedTours);
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const handleTourSelect = (tour: any) => {
     setSelectedTour(tour);
+    // Auto-select a fleet based on tour data
+    setSelectedFleet({
+      type: '8-Seater Mercedes',
+      pricePerVehicle: tour.price,
+      capacity: `1-${tour.capacity} Passengers`
+    });
     setStep(2);
   };
 
@@ -126,29 +110,43 @@ export default function Tours() {
               exit={{ opacity: 0, x: -20 }}
               className="grid grid-cols-1 md:grid-cols-3 gap-8"
             >
-              {TOURS.map((tour) => (
-                <div
-                  key={tour.id}
-                  onClick={() => handleTourSelect(tour)}
-                  className="group bg-white/5 border border-white/10 rounded-[2.5rem] overflow-hidden hover:border-gold/50 transition-all duration-500 cursor-pointer"
-                >
-                  <div className="aspect-[16/10] overflow-hidden">
-                    <img src={tour.image} alt={tour.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                  </div>
-                  <div className="p-8">
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="flex items-center gap-1 text-gold text-[10px] uppercase tracking-widest font-bold">
-                        <Clock size={12} /> {tour.duration}
+              {isLoading ? (
+                <div className="col-span-full flex flex-col items-center justify-center py-24">
+                  <div className="w-12 h-12 border-4 border-gold/20 border-t-gold rounded-full animate-spin mb-4" />
+                  <p className="text-white/40 uppercase tracking-[0.2em] text-[10px] font-bold">Loading exclusive tours...</p>
+                </div>
+              ) : tours.length > 0 ? (
+                tours.map((tour) => (
+                  <div
+                    key={tour.id}
+                    onClick={() => handleTourSelect(tour)}
+                    className="group bg-white/5 border border-white/10 rounded-[2.5rem] overflow-hidden hover:border-gold/50 transition-all duration-500 cursor-pointer"
+                  >
+                    <div className="aspect-[16/10] overflow-hidden">
+                      <img src={tour.image || null} alt={tour.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" referrerPolicy="no-referrer" />
+                    </div>
+                    <div className="p-8">
+                      <div className="flex items-center gap-4 mb-4">
+                        <div className="flex items-center gap-1 text-gold text-[10px] uppercase tracking-widest font-bold">
+                          <Clock size={12} /> {tour.duration}
+                        </div>
+                      </div>
+                      <h3 className="text-2xl font-display mb-4">{tour.title}</h3>
+                      <p className="text-white/60 text-sm mb-6 leading-relaxed italic line-clamp-2">"{tour.description}"</p>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-gold font-bold uppercase tracking-widest text-[10px]">
+                          View Packages <ArrowRight size={14} />
+                        </div>
+                        <p className="text-xl font-display text-white">From ${tour.price}</p>
                       </div>
                     </div>
-                    <h3 className="text-2xl font-display mb-4">{tour.title}</h3>
-                    <p className="text-white/60 text-sm mb-6 leading-relaxed">{tour.description}</p>
-                    <div className="flex items-center gap-2 text-gold font-bold uppercase tracking-widest text-[10px]">
-                      View Packages <ArrowRight size={14} />
-                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="col-span-full py-24 text-center glass rounded-3xl border border-white/5">
+                  <p className="text-white/40 italic">No luxury tours currently available for booking.</p>
                 </div>
-              ))}
+              )}
             </motion.div>
           )}
 
@@ -166,9 +164,12 @@ export default function Tours() {
               <h2 className="text-3xl font-display mb-8">Select <span className="text-gold italic">Vehicle & Quantity</span></h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {selectedTour.fleets.map((fleet: any) => (
+                {(selectedTour?.fleets && Array.isArray(selectedTour.fleets) ? selectedTour.fleets : [
+                  { type: '8-Seater Mercedes', pricePerVehicle: selectedTour?.price || 0, capacity: `1-${selectedTour?.capacity || 7} Passengers` },
+                  { type: '12-Seater Vehicle', pricePerVehicle: Math.round((selectedTour?.price || 0) * 1.25), capacity: '8-11 Passengers' }
+                ]).map((fleet: any, idx: number) => (
                   <div
-                    key={fleet.type}
+                    key={`${fleet.type}-${idx}`}
                     onClick={() => handleFleetSelect(fleet)}
                     className="bg-white/5 border border-white/10 p-10 rounded-[2.5rem] hover:border-gold/50 transition-all cursor-pointer group relative overflow-hidden"
                   >

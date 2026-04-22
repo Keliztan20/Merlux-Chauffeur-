@@ -1,52 +1,32 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plane, Car, ArrowRight, Tag, MapPin, Star, CheckCircle2, User, Mail, Phone, Calendar, Clock, CreditCard } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Plane, Car, ArrowRight, Tag, MapPin, Star, User, Mail, Phone, Calendar, Clock, CreditCard, ChevronRight, Info, AlertCircle, Search, XCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { collection, onSnapshot, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { useJsApiLoader, Autocomplete } from '@react-google-maps/api';
+import { db, auth } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import Logo from '../components/layout/Logo';
 
-const OFFERS = [
-  {
-    id: 'mel-city',
-    title: "Airport to Melbourne CBD",
-    image: "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=2070&auto=format&fit=crop",
-    description: "Fixed rate transfer between Melbourne Airport and the CBD.",
-    fleets: [
-      { type: 'Executive Sedan', basePrice: 120, salePrice: 99, capacity: '3 Passengers' },
-      { type: 'Premium SUV', basePrice: 180, salePrice: 159, capacity: '6 Passengers' },
-      { type: 'Luxury Van', basePrice: 220, salePrice: 195, capacity: '7 Passengers' },
-      { type: 'Luxury Van', basePrice: 220, salePrice: 195, capacity: '7 Passengers' }
-    ]
-  },
-  {
-    id: 'mel-suburbs',
-    title: "Airport to Eastern Suburbs",
-    image: "https://images.unsplash.com/photo-1542362567-b058c02b9ac1?q=80&w=2070&auto=format&fit=crop",
-    description: "Premium transfer to Box Hill, Glen Waverley, and surrounding areas.",
-    fleets: [
-      { type: 'Executive Sedan', basePrice: 150, salePrice: 129, capacity: '3 Passengers' },
-      { type: 'Premium SUV', basePrice: 210, salePrice: 189, capacity: '6 Passengers' },
-      { type: 'Luxury Van', basePrice: 250, salePrice: 225, capacity: '7 Passengers' }
-    ]
-  },
-  {
-    id: 'mel-mornington',
-    title: "Airport to Mornington Peninsula",
-    image: "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=2070&auto=format&fit=crop",
-    description: "Long distance luxury transfer to the beautiful Mornington Peninsula.",
-    fleets: [
-      { type: 'Executive Sedan', basePrice: 280, salePrice: 249, capacity: '3 Passengers' },
-      { type: 'Premium SUV', basePrice: 340, salePrice: 309, capacity: '6 Passengers' },
-      { type: 'Luxury Van', basePrice: 380, salePrice: 345, capacity: '7 Passengers' }
-    ]
-  }
-];
+const LIBRARIES: ("places" | "drawing" | "geometry" | "visualization")[] = ["places", "geometry"];
 
 export default function Offers() {
   const navigate = useNavigate();
+  const [offers, setOffers] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [step, setStep] = useState(1);
+
+  // Filter States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [tagFilter, setTagFilter] = useState('all');
+  const [discountFilter, setDiscountFilter] = useState('all');
+  const [priceSort, setPriceSort] = useState<'none' | 'asc' | 'desc'>('none');
+
+  // Selection States
   const [selectedPackage, setSelectedPackage] = useState<any>(null);
   const [selectedFleet, setSelectedFleet] = useState<any>(null);
+
+  // Form States
   const [details, setDetails] = useState({
     name: '',
     email: '',
@@ -54,322 +34,895 @@ export default function Offers() {
     pickup: '',
     dropoff: '',
     date: '',
-    time: ''
+    time: '',
+    notes: ''
   });
+
+  // Google Maps
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    libraries: LIBRARIES
+  });
+
+  const pickupAutocompleteRef = useRef<any>(null);
+  const dropoffAutocompleteRef = useRef<any>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, 'offers'), where('active', '==', true));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const parsedOffers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setOffers(parsedOffers);
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handlePackageSelect = (pkg: any) => {
     setSelectedPackage(pkg);
     setStep(2);
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleFleetSelect = (fleet: any) => {
     setSelectedFleet(fleet);
     setStep(3);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDetailsSubmit = (e: FormEvent) => {
     e.preventDefault();
     setStep(4);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const onPlaceChanged = (type: 'pickup' | 'dropoff') => {
+    const autocomplete = type === 'pickup' ? pickupAutocompleteRef.current : dropoffAutocompleteRef.current;
+    if (autocomplete) {
+      const place = autocomplete.getPlace();
+      if (place?.formatted_address) {
+        setDetails(prev => ({ ...prev, [type]: place.formatted_address }));
+      }
+    }
   };
 
   const reset = () => {
     setStep(1);
     setSelectedPackage(null);
     setSelectedFleet(null);
+    setDetails({
+      name: '', email: '', phone: '', pickup: '', dropoff: '', date: '', time: '', notes: ''
+    });
   };
 
+  // Helper to get price range for an offer
+  const getPriceRange = (pkg: any) => {
+    const fleets = pkg.fleets || [
+      { salePrice: pkg.price || 0 },
+      { salePrice: Math.round((pkg.price || 0) * 1.5) }
+    ];
+    const prices = fleets.map((f: any) => Number(f.salePrice)).filter((p: number) => !isNaN(p));
+    if (prices.length === 0) return { min: 0, max: 0 };
+    return {
+      min: Math.min(...prices),
+      max: Math.max(...prices)
+    };
+  };
+
+  const allTags = Array.from(new Set(offers.flatMap(o => o.tags || []).filter(t => typeof t === 'string' && t.trim() !== '')));
+
+  const filteredOffers = useMemo(() => {
+    let result = [...offers];
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(o =>
+        o.title?.toLowerCase().includes(q) ||
+        o.description?.toLowerCase().includes(q)
+      );
+    }
+
+    if (tagFilter !== 'all') {
+      result = result.filter(o => o.tags?.includes(tagFilter));
+    }
+
+    if (discountFilter !== 'all') {
+      result = result.filter(o => {
+        const dType = o.discountType || 'percentage'; // assume percentage if missing
+        return dType === discountFilter;
+      });
+    }
+
+    if (priceSort !== 'none') {
+      result.sort((a, b) => {
+        const minA = getPriceRange(a).min;
+        const minB = getPriceRange(b).min;
+        return priceSort === 'asc' ? minA - minB : minB - minA;
+      });
+    }
+
+    return result;
+  }, [offers, searchQuery, tagFilter, discountFilter, priceSort]);
+
   return (
-    <div className="pt-32 pb-24 bg-black min-h-screen">
-      <section className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-16">
-          <Logo className="justify-center mb-8" />
-          <motion.span 
-            initial={{ opacity: 0, y: 10 }}
+    <div className="pt-32 pb-24 bg-black min-h-screen text-white font-sans overflow-x-hidden">
+      <div className="max-w-7xl mx-auto px-6">
+
+        {/* Header Section */}
+        <header className="mb-12">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-gold uppercase tracking-[0.3em] text-xs font-bold mb-4 block"
+            className="flex flex-col items-center text-center space-y-4"
           >
-            Exclusive Deals
-          </motion.span>
-          <motion.h1 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-5xl md:text-7xl font-display mb-6"
-          >
-            Special <span className="text-gold italic">Offers</span>
-          </motion.h1>
-          
-          {/* Progress Bar */}
-          <div className="flex items-center justify-center gap-4 mb-12">
-            {[1, 2, 3, 4].map((s) => (
-              <div key={s} className="flex items-center gap-2">
-                <div className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center font-bold transition-all duration-500",
-                  step >= s ? "bg-gold text-black" : "bg-white/10 text-white/40"
-                )}>
-                  {s}
+            <Logo className="justify-center scale-110 mb-4" />
+            <span className="text-gold tracking-[0.4em] text-[10px] uppercase font-bold px-4 py-1.5 border border-gold/20 rounded-full bg-gold/5">
+              Premium Collections
+            </span>
+            <h1 className="text-4xl md:text-6xl font-display leading-tight">
+              Exclusive <span className="text-gold italic">Travel Packages</span>
+            </h1>
+            <p className="text-white/40 max-w-xl mx-auto text-sm leading-relaxed lowercase italic tracking-wide">
+              luxury transport solutions curated for your most significant journeys. select a package to begin your reservation.
+            </p>
+          </motion.div>
+
+          {/* Stepper */}
+          <div className="flex items-center justify-center gap-4 mt-12 mb-16 overflow-x-auto pb-4 scrollbar-hide">
+            {[
+              { id: 1, label: 'Packages' },
+              { id: 2, label: 'Fleet' },
+              { id: 3, label: 'Details' },
+              { id: 4, label: 'Summary' }
+            ].map((s, idx, arr) => (
+              <div key={s.id} className="flex items-center gap-3 shrink-0">
+                <div
+                  className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-700 border",
+                    step === s.id ? "bg-gold text-black border-gold shadow-[0_0_20px_rgba(212,175,55,0.3)]" :
+                      step > s.id ? "bg-gold/10 text-gold border-gold/30" : "bg-white/5 text-white/20 border-white/10"
+                  )}
+                >
+                  {s.id}
                 </div>
-                {s < 4 && <div className={cn("w-8 h-px", step > s ? "bg-gold" : "bg-white/10")} />}
+                <span className={cn(
+                  "text-[10px] uppercase tracking-[0.2em] font-bold transition-colors duration-500",
+                  step === s.id ? "text-white" : "text-white/20"
+                )}>
+                  {s.label}
+                </span>
+                {idx < arr.length - 1 && (
+                  <div className={cn("w-8 h-[1px] mx-2", step > s.id ? "bg-gold/30" : "bg-white/5")} />
+                )}
               </div>
             ))}
           </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start relative">
+
+          {/* Main Content Area */}
+          <div className={cn(
+            (step === 1 || step === 4) ? "lg:col-span-12" : "lg:col-span-8"
+          )}>
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div
+                  key="step1"
+                  initial={{ opacity: 0, x: -30 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={{ duration: 0.5, ease: "circOut" }}
+                  className="space-y-8"
+                >
+                  {/* Filters & Search */}
+                  <div className="flex flex-wrap items-center justify-between gap-4 bg-[#0A0A0A] p-4 rounded-2xl border border-white/5">
+                    <div className="relative w-full md:w-64 mt-2 md:mt-0">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
+                      <input
+                        type="text"
+                        placeholder="Search standard and special offers..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl py-2 pl-10 pr-4 text-xs text-white focus:outline-none focus:border-gold/50 transition-all"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors"
+                        >
+                          <XCircle size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-4 items-center w-full md:w-auto">
+                      <div className="flex items-center gap-2">
+                        <label className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                          Tags
+                        </label>
+                        <select
+                          value={tagFilter}
+                          onChange={(e) => setTagFilter(e.target.value)}
+                          className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-gold/50 transition-all custom-select appearance-none cursor-pointer w-full sm:w-40"
+                        >
+                          <option value="all">All Packages</option>
+                          {allTags.map(tag => (
+                            <option key={tag} value={tag}>{tag}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                          Discount
+                        </label>
+                        <select
+                          value={discountFilter}
+                          onChange={(e) => setDiscountFilter(e.target.value)}
+                          className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-gold/50 transition-all custom-select appearance-none cursor-pointer w-full sm:w-40"
+                        >
+                          <option value="all">All Discounts</option>
+                          <option value="percentage">Percentage (%)</option>
+                          <option value="fixed">Fixed Amount ($)</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label className="text-[9px] uppercase tracking-widest font-bold text-white/40">
+                          Sort Price
+                        </label>
+                        <select
+                          value={priceSort}
+                          onChange={(e) => setPriceSort(e.target.value as any)}
+                          className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-gold/50 transition-all custom-select appearance-none cursor-pointer w-full sm:w-40"
+                        >
+                          <option value="none">Default Sort</option>
+                          <option value="asc">Low to High</option>
+                          <option value="desc">High to Low</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {isLoading ? (
+                      <div className="col-span-full py-32 flex flex-col items-center">
+                        <div className="w-16 h-16 border-2 border-gold/10 border-t-gold rounded-full animate-spin-slow mb-6" />
+                        <p className="text-gold/60 text-[10px] uppercase tracking-[0.3em] animate-pulse">Initializing Portals...</p>
+                      </div>
+                    ) : filteredOffers.length > 0 ? (
+                      filteredOffers.map((pkg) => {
+                        const range = getPriceRange(pkg);
+                        return (
+                          <motion.div
+                            key={pkg.id}
+                            whileHover={{ y: -8 }}
+                            onClick={() => handlePackageSelect(pkg)}
+                            className="group flex flex-col relative bg-[#0A0A0A] border border-white/5 rounded-3xl overflow-hidden cursor-pointer hover:border-gold/30 transition-all duration-700 h-full"
+                          >
+                            <div className="h-48 relative overflow-hidden shrink-0">
+                              <img
+                                src={pkg.image || `https://picsum.photos/seed/${pkg.id}/800/500`}
+                                alt={pkg.title}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110 opacity-70 group-hover:opacity-100"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent" />
+
+                              <div className="absolute top-4 left-4 flex flex-wrap gap-2">
+                                {pkg.tags?.slice(0, 3).map((tag: string, tIdx: number) => (
+                                  <span key={tIdx} className="bg-black/60 backdrop-blur-md border border-white/10 text-white shadow-xl text-[8px] font-bold uppercase tracking-widest px-2 py-1 rounded">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="absolute top-4 right-4">
+                                {pkg.discountType === 'percentage'
+                                  ? <span className="bg-gold text-black text-[10px] font-black uppercase tracking-tighter px-3 py-1 rounded-full shadow-xl">{pkg.discountValue || pkg.offerPercentage || 15}% OFF</span>
+                                  : <span className="bg-gold text-black text-[10px] font-black uppercase tracking-tighter px-3 py-1 rounded-full shadow-xl">${pkg.discountValue || 15} OFF</span>}
+                              </div>
+                            </div>
+
+                            <div className="p-6 flex-1 flex flex-col relative z-10 bg-[#0A0A0A] -mt-4 border-t border-white/5 backdrop-blur-lg rounded-t-2xl">
+                              <h3 className="text-xl font-display mb-2 group-hover:text-gold transition-colors">{pkg.title}</h3>
+                              <p className="text-white/50 text-xs mb-4 leading-relaxed italic line-clamp-2">
+                                "{pkg.description || 'Experience the pinnacle of luxury travel with our curated selection of premium transportation services.'}"
+                              </p>
+                              <div className="mt-auto flex items-center justify-between pt-4 border-t border-white/5">
+                                <div className="space-y-1">
+                                  <p className="text-[9px] uppercase tracking-widest text-white/40">From</p>
+                                  <p className="text-lg font-display text-white">
+                                    {range.min === range.max ? `$${range.min}` : `$${range.min} - $${range.max}`}
+                                  </p>
+                                </div>
+                                <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-gold group-hover:text-black group-hover:border-gold transition-all duration-500">
+                                  <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })
+                    ) : (
+                      <div className="col-span-full py-24 text-center border border-dashed border-white/10 rounded-[3rem]">
+                        <p className="text-white/30 italic text-sm tracking-wide">No specialized packages match your current preferences.</p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div
+                  key="step2"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-8"
+                >
+                  <div className="flex items-center justify-between mb-8">
+                    <button onClick={() => setStep(1)} className="text-gold hover:text-white flex items-center gap-2 uppercase tracking-[0.2em] text-[10px] font-bold transition-all">
+                      <ArrowRight size={14} className="rotate-180" /> Back to Packages
+                    </button>
+                    <div className="flex items-center gap-3">
+                      <Info size={14} className="text-gold/40" />
+                      <p className="text-[10px] uppercase tracking-widest text-white/40">Select a fleet model to continue</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-6">
+                    {(selectedPackage?.fleets || [
+                      { type: 'Executive Sedan', basePrice: 120, salePrice: 90, capacity: '3 Passengers', image: 'https://picsum.photos/seed/sedan/400/250' },
+                      { type: 'Luxury Sedan', basePrice: 150, salePrice: 120, capacity: '3 Passengers', image: 'https://picsum.photos/seed/luxsedan/400/250' },
+                      { type: 'Premium SUV', basePrice: 180, salePrice: 140, capacity: '6 Passengers', image: 'https://picsum.photos/seed/suv/400/250' },
+                      { type: 'Luxury SUV', basePrice: 220, salePrice: 180, capacity: '6 Passengers', image: 'https://picsum.photos/seed/luxsuv/400/250' },
+                      { type: 'Luxury Van', basePrice: 280, salePrice: 240, capacity: '12 Passengers', image: 'https://picsum.photos/seed/van/400/250' }
+                    ]).map((fleet: any, idx: number) => (
+                      <motion.div
+                        key={`${fleet.type}-${idx}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.1 }}
+                        onClick={() => handleFleetSelect(fleet)}
+                        className={cn(
+                          "group relative flex flex-col md:flex-row items-center gap-8 bg-[#0A0A0A] border border-white/5 p-8 rounded-[2rem] hover:border-gold/40 transition-all duration-500 cursor-pointer overflow-hidden",
+                          selectedFleet?.type === fleet.type && "border-gold bg-gold/5 shadow-[0_0_40px_rgba(212,175,55,0.05)]"
+                        )}
+                      >
+                        <div className="w-full md:w-64 aspect-[16/10] overflow-hidden rounded-2xl relative shrink-0">
+                          <img
+                            src={fleet.image || `https://picsum.photos/seed/${fleet.type}/400/250`}
+                            alt={fleet.type}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
+                          />
+                          <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-md text-gold text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border border-gold/20">
+                            {fleet.capacity}
+                          </div>
+                        </div>
+                        <div className="flex-1 space-y-4">
+                          <div>
+                            <h4 className="text-2xl font-display mb-1 group-hover:text-gold transition-colors">{fleet.type}</h4>
+                            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Fully Serviced & Chauffeur Driven</p>
+                          </div>
+                          <div className="flex items-end gap-4">
+                            <div className="space-y-0.5">
+                              <p className="text-[9px] uppercase tracking-widest text-white/40">Standard Price</p>
+                              <p className="text-xl text-white/20 font-bold line-through">${fleet.basePrice}</p>
+                            </div>
+                            <div className="space-y-0.5">
+                              <p className="text-[9px] uppercase tracking-widest text-gold/60">Your Special Offer</p>
+                              <p className="text-4xl font-display text-white">${fleet.salePrice}</p>
+                            </div>
+                            <div className="ml-auto mb-1">
+                              <div className="flex items-center gap-2 text-gold font-bold uppercase tracking-widest text-[10px]">
+                                <span className="hidden md:block">Select Fleet</span>
+                                <ChevronRight size={16} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        {selectedFleet?.type === fleet.type && (
+                          <div className="absolute top-0 right-0 p-4">
+                            <Tag className="text-gold animate-bounce" size={16} />
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 3 && (
+                <motion.div
+                  key="step3"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-8"
+                >
+                  <button onClick={() => setStep(2)} className="text-gold hover:text-white flex items-center gap-2 uppercase tracking-[0.2em] text-[10px] font-bold transition-all mb-4">
+                    <ArrowRight size={14} className="rotate-180" /> Back to Fleet selection
+                  </button>
+
+                  <div className="bg-[#0A0A0A] border border-white/5 rounded-[3rem] p-10 md:p-14">
+                    <div className="mb-12">
+                      <h2 className="text-3xl font-display mb-3">Booking <span className="text-gold italic">Information</span></h2>
+                      <p className="text-white/40 text-sm italic">Please provide your contact and journey details to finalize the reservation.</p>
+                    </div>
+
+                    <form onSubmit={handleDetailsSubmit} className="space-y-10">
+                      {/* Identity Section */}
+                      <div className="space-y-6">
+                        <div className="flex items-center gap-3 mb-2">
+                          <User size={14} className="text-gold" />
+                          <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-white/30">
+                            Personal Details
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <input
+                              required
+                              type="text"
+                              value={details.name}
+                              onChange={(e) => setDetails({ ...details, name: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                     focus:border-gold outline-none transition-all 
+                     placeholder:text-white/20 text-sm font-medium"
+                              placeholder="Full name"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <input
+                              required
+                              type="email"
+                              value={details.email}
+                              onChange={(e) => setDetails({ ...details, email: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                     focus:border-gold outline-none transition-all 
+                     placeholder:text-white/20 text-sm font-medium"
+                              placeholder="Email address"
+                            />
+                          </div>
+                          <div className="md:col-span-2 space-y-2">
+                            <input
+                              required
+                              type="tel"
+                              value={details.phone}
+                              onChange={(e) => setDetails({ ...details, phone: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                     focus:border-gold outline-none transition-all 
+                     placeholder:text-white/20 text-sm font-medium"
+                              placeholder="Phone number"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Journey Section */}
+                      <div className="space-y-6 pt-4">
+                        <div className="flex items-center gap-3 mb-2">
+                          <MapPin size={14} className="text-gold" />
+                          <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-white/30">
+                            Route & Logistics
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {isLoaded ? (
+                            <>
+                              <div className="space-y-2">
+                                <Autocomplete
+                                  onLoad={(ref) => (pickupAutocompleteRef.current = ref)}
+                                  onPlaceChanged={() => onPlaceChanged('pickup')}
+                                >
+                                  <input
+                                    required
+                                    type="text"
+                                    value={details.pickup}
+                                    onChange={(e) => setDetails({ ...details, pickup: e.target.value })}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                           focus:border-gold outline-none transition-all 
+                           placeholder:text-white/20 text-sm font-medium"
+                                    placeholder="Pickup address"
+                                  />
+                                </Autocomplete>
+                              </div>
+                              <div className="space-y-2">
+                                <Autocomplete
+                                  onLoad={(ref) => (dropoffAutocompleteRef.current = ref)}
+                                  onPlaceChanged={() => onPlaceChanged('dropoff')}
+                                >
+                                  <input
+                                    type="text"
+                                    value={details.dropoff}
+                                    onChange={(e) => setDetails({ ...details, dropoff: e.target.value })}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                           focus:border-gold outline-none transition-all 
+                           placeholder:text-white/20 text-sm font-medium"
+                                    placeholder="Dropoff address (optional)"
+                                  />
+                                </Autocomplete>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="col-span-2 p-4 text-[10px] text-white/20 uppercase tracking-widest text-center animate-pulse">
+                              Loading map services...
+                            </div>
+                          )}
+                          <div className="space-y-2">
+                            <input
+                              required
+                              type="date"
+                              value={details.date}
+                              onChange={(e) => setDetails({ ...details, date: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                     focus:border-gold outline-none transition-all 
+                     text-sm font-medium appearance-none h-[53px]"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <input
+                              required
+                              type="time"
+                              value={details.time}
+                              onChange={(e) => setDetails({ ...details, time: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                     focus:border-gold outline-none transition-all 
+                     text-sm font-medium appearance-none h-[53px]"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Notes Section */}
+                      <div className="space-y-4 pt-4">
+                        <div className="flex items-center gap-3 mb-2">
+                          <Info size={14} className="text-gold" />
+                          <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-white/30">
+                            Additional Notes
+                          </span>
+                        </div>
+                        <textarea
+                          rows={3}
+                          value={details.notes}
+                          onChange={(e) => setDetails({ ...details, notes: e.target.value })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-6 
+                 focus:border-gold outline-none transition-all 
+                 placeholder:text-white/20 text-sm font-medium custom-scrollbar"
+                          placeholder="Any special requests or instructions for your chauffeur..."
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="w-full bg-gold text-black py-6 rounded-2xl font-black uppercase 
+               tracking-[0.3em] text-[11px] hover:bg-white transition-all 
+               shadow-2xl shadow-gold/20 flex items-center justify-center gap-3"
+                      >
+                        Review booking summary <ChevronRight size={18} />
+                      </button>
+                    </form>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 4 && (
+                <motion.div
+                  key="step4"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="space-y-8"
+                >
+                  <div className="bg-[#0A0A0A] border border-white/5 rounded-[4rem] p-8 md:p-16 relative overflow-hidden group">
+                    {/* Background Accent */}
+                    <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-gold/5 to-transparent pointer-events-none" />
+
+                    <div className="relative z-10">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-16">
+                        <div className="space-y-4">
+                          <button onClick={() => setStep(3)} className="text-gold hover:text-white flex items-center gap-2 uppercase tracking-[0.2em] text-[10px] font-bold transition-all group/back">
+                            <div className="w-8 h-8 rounded-full border border-gold/20 flex items-center justify-center group-hover/back:bg-gold group-hover/back:text-black transition-all">
+                              <ArrowRight size={14} className="rotate-180" />
+                            </div>
+                            Modify details
+                          </button>
+                          <h2 className="text-4xl md:text-5xl font-display leading-tight">Confirmation <span className="text-gold italic">Summary</span></h2>
+                          <p className="text-white/40 text-sm italic max-w-md leading-relaxed lowercase">
+                            your exclusive journey is ready for launch. please verify all details before initiating the secure transaction.
+                          </p>
+                        </div>
+
+                        <div className="hidden md:block">
+                          <div className="w-48 h-48 rounded-[2rem] border border-gold/20 p-2 bg-gradient-to-br from-gold/5 to-transparent">
+                            <img
+                              src={selectedFleet.image || selectedPackage.image}
+                              alt="Vehicle Selection"
+                              className="w-full h-full object-cover rounded-[1.5rem] opacity-80 group-hover:opacity-100 transition-opacity"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Full Width Integrated Summary */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-12 border-t border-white/5 pt-16">
+                        <div className="space-y-10">
+                          <div className="space-y-6">
+                            <div className="space-y-1">
+                              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-gold/60">Selected Package</p>
+                              <p className="text-xl font-bold text-white uppercase tracking-tighter">{selectedPackage.title}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-gold/60">Vehicle Choice</p>
+                              <p className="text-xl font-bold text-white uppercase tracking-tighter">{selectedFleet.type}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="md:col-span-2 space-y-12">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
+                            <div className="space-y-1">
+                              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-white/30">Reserved For</p>
+                              <p className="text-sm font-bold text-white uppercase tracking-tighter">{details.name}</p>
+                              <p className="text-[10px] text-white/40 tracking-wider lowercase italic">{details.email}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-white/30">Trip Schedule</p>
+                              <p className="text-sm font-bold text-white uppercase tracking-tighter">{details.date} at {details.time}</p>
+                              <p className="text-[10px] text-white/40 tracking-wider">M: {details.phone}</p>
+                            </div>
+                            <div className="space-y-1 sm:col-span-2">
+                              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-white/30">Route Profile</p>
+                              <div className="space-y-2 mt-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-gold" />
+                                  <p className="text-sm font-medium text-white/80 line-clamp-1">{details.pickup}</p>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-1.5 h-1.5 rounded-full border border-gold" />
+                                  <p className="text-sm font-medium text-white/40 line-clamp-1">{details.dropoff || 'N/A'}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {details.notes && (
+                            <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl italic">
+                              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-gold/40 mb-3 italic">Special Directives</p>
+                              <p className="text-sm text-white/60 leading-relaxed font-medium capitalize">"{details.notes}"</p>
+                            </div>
+                          )}
+
+                          <div className="pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-6">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <CreditCard size={14} className="text-gold" />
+                                <span className="text-gold text-[10px] uppercase tracking-[0.3em] font-bold italic">Premier Reservation Asset</span>
+                              </div>
+                              <p className="text-[9px] text-white/20 uppercase tracking-[0.2em]">Inclusive of all terminal taxes & luxury surcharges</p>
+                            </div>
+                            <div className="text-center sm:text-right">
+                              <span className="text-5xl font-display text-white tracking-tighter">${selectedFleet.salePrice}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-16">
+                        <button
+                          onClick={async () => {
+                            setIsLoading(true);
+                            try {
+                              const bookingData = {
+                                customerName: details.name,
+                                customerEmail: details.email?.toLowerCase(),
+                                customerPhone: details.phone,
+                                pickup: details.pickup,
+                                dropoff: details.dropoff || 'N/A',
+                                date: details.date,
+                                time: details.time,
+                                purpose: details.notes || "",
+                                packageId: selectedPackage.id,
+                                packageTitle: selectedPackage.title,
+                                vehicleType: selectedFleet.type,
+                                price: selectedFleet.salePrice,
+                                status: 'pending',
+                                type: 'offer',
+                                paymentStatus: 'unpaid',
+                                paymentMethod: 'cash',
+                                serviceType: 'offer',
+                                createdAt: serverTimestamp(),
+                                userId: auth.currentUser?.uid || 'guest'
+                              };
+                              await addDoc(collection(db, 'bookings'), bookingData);
+                              navigate('/payment/success');
+                            } catch (err) {
+                              console.error("Booking error:", err);
+                              alert("There was an issue processing your booking. Please try again.");
+                            } finally {
+                              setIsLoading(false);
+                            }
+                          }}
+                          disabled={isLoading}
+                          className="w-full bg-gold text-black py-8 rounded-[2rem] font-black uppercase tracking-[0.5em] text-sm hover:bg-white transition-all shadow-[0_30px_60px_rgba(212,175,55,0.15)] flex items-center justify-center gap-6"
+                        >
+                          {isLoading ? 'Processing Luxury Asset...' : `Finalize & Secure Ride — $${selectedFleet.salePrice}`}
+                          <ArrowRight size={22} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Sticky Sidebar Booking Summary */}
+          {(step === 2 || step === 3) && (
+            <div className="lg:col-span-4 sticky top-24">
+              <motion.div
+                initial={{ opacity: 0, x: 30 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="bg-[#0A0A0A] border border-white/5 rounded-[2.5rem] overflow-hidden"
+              >
+                <div className="bg-gold/5 p-8 border-b border-white/5">
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.4em] text-gold mb-1">Reservation Info</h3>
+                  <p className="text-white text-lg font-display">Booking Summary</p>
+                </div>
+
+                <div className="p-8 space-y-8">
+                  {selectedPackage ? (
+                    <>
+                      {/* Step 1 Data */}
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-1">
+                            <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">Package</p>
+                            <p className="text-sm font-bold text-white leading-tight uppercase tracking-tighter">{selectedPackage.title}</p>
+                          </div>
+                          <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                            <Tag size={16} className="text-gold" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-gold bg-gold/10 px-2 py-0.5 rounded-md">-{selectedPackage.offerPercentage || 15}%</span>
+                          <span className="text-[9px] uppercase tracking-widest text-white/20 italic">Seasonal Special</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2 Data */}
+                      {selectedFleet && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="space-y-4 pt-8 border-t border-white/5"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-1">
+                              <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">Selected Fleet</p>
+                              <p className="text-sm font-bold text-white leading-tight uppercase tracking-tighter">{selectedFleet.type}</p>
+                              <p className="text-[9px] uppercase tracking-widest font-bold text-white/20">{selectedFleet.capacity}</p>
+                            </div>
+                            <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                              <Car size={16} className="text-gold" />
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Step 3 Data */}
+                      {(details.pickup || details.date) && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="space-y-5 pt-8 border-t border-white/5"
+                        >
+                          {details.pickup && (
+                            <div className="flex gap-4">
+                              <div className="w-8 shrink-0 flex flex-col items-center">
+                                <div className="w-2 h-2 rounded-full border border-gold" />
+                                <div className="w-[1px] h-8 bg-white/10 my-1" />
+                                <div className="w-2 h-2 rounded-full bg-gold shadow-[0_0_8px_rgba(212,175,55,0.8)]" />
+                              </div>
+                              <div className="flex-1 space-y-4">
+                                <div className="space-y-1">
+                                  <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">Pickup</p>
+                                  <p className="text-[11px] font-bold text-white leading-tight line-clamp-2 uppercase tracking-tighter">{details.pickup}</p>
+                                </div>
+                                {details.dropoff && (
+                                  <div className="space-y-1">
+                                    <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">Dropoff</p>
+                                    <p className="text-[11px] font-bold text-white leading-tight line-clamp-2 uppercase tracking-tighter">{details.dropoff}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          {(details.date || details.time) && (
+                            <div className="flex items-center gap-6 pt-2">
+                              <div className="space-y-1 flex-1">
+                                <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">Departure</p>
+                                <div className="flex items-center gap-2">
+                                  <Calendar size={12} className="text-gold/40" />
+                                  <p className="text-[11px] font-bold text-white uppercase tracking-tighter">{details.date || 'TBD'}</p>
+                                </div>
+                              </div>
+                              <div className="space-y-1 flex-1 text-right">
+                                <p className="text-[9px] uppercase tracking-widest font-bold text-white/30">Time</p>
+                                <div className="flex items-center gap-2 justify-end">
+                                  <Clock size={12} className="text-gold/40" />
+                                  <p className="text-[11px] font-bold text-white uppercase tracking-tighter">{details.time || 'TBD'}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+
+                      {/* Total Section */}
+                      <div className="mt-12 pt-8 border-t border-gold/20">
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/30">Premium total</span>
+                          <div className="h-[1px] flex-1 bg-white/5 mx-4" />
+                          <span className="text-2xl font-display text-white">
+                            ${selectedFleet?.salePrice || selectedPackage?.price || '0'}
+                          </span>
+                        </div>
+                        <p className="text-[9px] text-white/20 italic text-right leading-none lowercase tracking-tight">exclusive airport fees & taxes included.</p>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="py-20 flex flex-col items-center justify-center text-center space-y-4">
+                      <div className="w-16 h-16 rounded-full border border-dashed border-white/10 flex items-center justify-center text-white/10">
+                        <Star size={24} className="animate-pulse" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/20">Awaiting Select</p>
+                        <p className="text-[9px] text-white/10 italic leading-relaxed lowercase px-8 prose prose-invert">your curated itinerary will appear here as you configure your journey.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+
+              {/* Assistance Card */}
+              <div className="mt-6 p-8 bg-gold/5 border border-gold/10 rounded-[2.5rem] flex items-center gap-5">
+                <div className="w-12 h-12 bg-black rounded-full border border-gold/20 flex items-center justify-center shrink-0">
+                  <Phone size={16} className="text-gold" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-gold leading-none">Need Assistance?</p>
+                  <p className="text-[11px] text-white/50 leading-tight uppercase tracking-tighter font-bold">VIP Priority Line: +61 400 000 000</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <AnimatePresence mode="wait">
-          {step === 1 && (
-            <motion.div
-              key="step1"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="grid grid-cols-1 md:grid-cols-3 gap-8"
-            >
-              {OFFERS.map((pkg) => (
-                <div 
-                  key={pkg.id}
-                  onClick={() => handlePackageSelect(pkg)}
-                  className="group bg-white/5 border border-white/10 rounded-[2.5rem] overflow-hidden hover:border-gold/50 transition-all duration-500 cursor-pointer"
-                >
-                  <div className="aspect-[16/10] overflow-hidden">
-                    <img src={pkg.image} alt={pkg.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                  </div>
-                  <div className="p-8">
-                    <h3 className="text-2xl font-display mb-4">{pkg.title}</h3>
-                    <p className="text-white/60 text-sm mb-6 leading-relaxed">{pkg.description}</p>
-                    <div className="flex items-center gap-2 text-gold font-bold uppercase tracking-widest text-[10px]">
-                      Select Package <ArrowRight size={14} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </motion.div>
-          )}
-
-          {step === 2 && (
-            <motion.div
-              key="step2"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="max-w-4xl mx-auto"
-            >
-              <button onClick={() => setStep(1)} className="text-gold mb-8 flex items-center gap-2 uppercase tracking-widest text-[10px] font-bold">
-                <ArrowRight size={14} className="rotate-180" /> Back to Packages
-              </button>
-              <h2 className="text-3xl font-display mb-8">Select <span className="text-gold italic">Fleet Type</span></h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {selectedPackage.fleets.map((fleet: any) => (
-                  <div 
-                    key={fleet.type}
-                    onClick={() => handleFleetSelect(fleet)}
-                    className="bg-white/5 border border-white/10 p-8 rounded-3xl hover:border-gold/50 transition-all cursor-pointer group"
-                  >
-                    <p className="text-gold text-[10px] uppercase tracking-widest font-bold mb-2">{fleet.capacity}</p>
-                    <h4 className="text-xl font-bold mb-4">{fleet.type}</h4>
-                    <div className="mb-6">
-                      <p className="text-white/30 text-xs line-through">${fleet.basePrice}</p>
-                      <p className="text-3xl font-display text-white">${fleet.salePrice}</p>
-                    </div>
-                    <div className="w-full bg-white/10 py-3 rounded-xl text-center text-[10px] uppercase tracking-widest font-bold group-hover:bg-gold group-hover:text-black transition-all">
-                      Select
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-
-          {step === 3 && (
-            <motion.div
-              key="step3"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="max-w-2xl mx-auto"
-            >
-              <button onClick={() => setStep(2)} className="text-gold mb-8 flex items-center gap-2 uppercase tracking-widest text-[10px] font-bold">
-                <ArrowRight size={14} className="rotate-180" /> Back to Fleet
-              </button>
-              <h2 className="text-3xl font-display mb-8">Enter <span className="text-gold italic">Details</span></h2>
-              <form onSubmit={handleDetailsSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Full Name</label>
-                    <div className="relative">
-                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                      <input 
-                        required
-                        type="text" 
-                        value={details.name}
-                        onChange={(e) => setDetails({...details, name: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                        placeholder="John Doe"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Email Address</label>
-                    <div className="relative">
-                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                      <input 
-                        required
-                        type="email" 
-                        value={details.email}
-                        onChange={(e) => setDetails({...details, email: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                        placeholder="john@example.com"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Phone Number</label>
-                  <div className="relative">
-                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                    <input 
-                      required
-                      type="tel" 
-                      value={details.phone}
-                      onChange={(e) => setDetails({...details, phone: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                      placeholder="+61 400 000 000"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Pickup Address</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                      <input 
-                        required
-                        type="text" 
-                        value={details.pickup}
-                        onChange={(e) => setDetails({...details, pickup: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                        placeholder="Melbourne Airport"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Dropoff Address</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                      <input 
-                        required
-                        type="text" 
-                        value={details.dropoff}
-                        onChange={(e) => setDetails({...details, dropoff: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                        placeholder="123 Collins St, Melbourne"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Pickup Date</label>
-                    <div className="relative">
-                      <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                      <input 
-                        required
-                        type="date" 
-                        value={details.date}
-                        onChange={(e) => setDetails({...details, date: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Pickup Time</label>
-                    <div className="relative">
-                      <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-gold" size={16} />
-                      <input 
-                        required
-                        type="time" 
-                        value={details.time}
-                        onChange={(e) => setDetails({...details, time: e.target.value})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:border-gold outline-none transition-all" 
-                      />
-                    </div>
-                  </div>
-                </div>
-                <button type="submit" className="w-full bg-gold text-black py-5 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-white transition-all shadow-2xl shadow-gold/20">
-                  Confirm Details
-                </button>
-              </form>
-            </motion.div>
-          )}
-
-          {step === 4 && (
-            <motion.div
-              key="step4"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="max-w-xl mx-auto"
-            >
-              <div className="bg-white/5 border border-white/10 rounded-[3rem] p-12 text-center">
-                <div className="w-20 h-20 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-8 border border-gold/20">
-                  <CreditCard className="text-gold" size={32} />
-                </div>
-                <h2 className="text-3xl font-display mb-4">Booking <span className="text-gold italic">Summary</span></h2>
-                <div className="space-y-4 mb-10 text-left bg-black/40 p-8 rounded-2xl border border-white/5">
-                  <div className="flex justify-between border-b border-white/10 pb-4">
-                    <span className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Service</span>
-                    <span className="text-white font-bold">{selectedPackage.title}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-white/10 pb-4">
-                    <span className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Vehicle</span>
-                    <span className="text-white font-bold">{selectedFleet.type}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-white/10 pb-4">
-                    <span className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Pickup</span>
-                    <span className="text-white font-bold">{details.pickup}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-white/10 pb-4">
-                    <span className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Date & Time</span>
-                    <span className="text-white font-bold">{details.date} at {details.time}</span>
-                  </div>
-                  <div className="flex justify-between pt-4">
-                    <span className="text-gold text-sm uppercase tracking-widest font-bold">Total Amount</span>
-                    <span className="text-3xl font-display text-white">${selectedFleet.salePrice}</span>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => navigate('/payment/success')}
-                  className="w-full bg-gold text-black py-5 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-white transition-all shadow-2xl shadow-gold/20 mb-4"
-                >
-                  Pay Now & Finalize
-                </button>
-                <button onClick={reset} className="text-white/40 uppercase tracking-widest text-[10px] font-bold hover:text-white transition-colors">
-                  Cancel & Start Over
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </section>
-
-      {/* Trust Badges */}
-      <section className="bg-white/5 py-16 border-y border-white/10 mt-24">
-        <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8">
+        {/* Global Features Footer */}
+        <div className="mt-32 pt-20 border-t border-white/5 grid grid-cols-2 md:grid-cols-4 gap-12">
           {[
-            { icon: Tag, title: "Fixed Rates", desc: "No surge pricing" },
-            { icon: Plane, title: "Flight Tracking", desc: "We wait for you" },
-            { icon: Car, title: "Premium Fleet", desc: "Late model luxury" },
-            { icon: Star, title: "5-Star Service", desc: "Professional drivers" }
-          ].map((item, i) => (
-            <div key={i} className="text-center">
-              <div className="w-12 h-12 bg-gold/10 rounded-xl flex items-center justify-center mx-auto mb-4 border border-gold/20">
-                <item.icon className="text-gold" size={20} />
+            { icon: MapPin, title: "Global Access", val: "Available in 50+ Cities" },
+            { icon: Car, title: "Platinum Fleet", val: "Model Year 2024+" },
+            { icon: User, title: "Lounge Access", val: "Complimentary VIP entry" },
+            { icon: Star, title: "Chauffeur", val: "Certfied Professionals" }
+          ].map((f, i) => (
+            <div key={i} className="space-y-4">
+              <div className="w-10 h-10 border border-white/5 bg-[#050505] rounded-xl flex items-center justify-center text-gold/60">
+                <f.icon size={18} />
               </div>
-              <h4 className="text-sm font-bold uppercase tracking-widest mb-1">{item.title}</h4>
-              <p className="text-[10px] text-white/40 uppercase tracking-widest">{item.desc}</p>
+              <div className="space-y-1">
+                <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-gold">{f.title}</p>
+                <p className="text-white text-xs font-display tracking-wide">{f.val}</p>
+              </div>
             </div>
           ))}
         </div>
-      </section>
+      </div>
     </div>
   );
 }

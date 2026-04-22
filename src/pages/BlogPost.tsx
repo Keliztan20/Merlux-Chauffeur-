@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, getDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { Calendar, User, ArrowLeft, Clock, Share2, Loader2 } from 'lucide-react';
+import { useSettings } from '../lib/SettingsContext';
 
 export default function BlogPost() {
   const { slug } = useParams();
+  const { settings } = useSettings();
   const [post, setPost] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -23,6 +25,59 @@ export default function BlogPost() {
           setPost(data);
           setError(false);
 
+          // SEO Metadata Updates
+          document.title = `${data.metaTitle || data.title} | Merlux`;
+          
+          let metaDesc = document.querySelector('meta[name="description"]');
+          if (!metaDesc) {
+            metaDesc = document.createElement('meta');
+            metaDesc.setAttribute('name', 'description');
+            document.head.appendChild(metaDesc);
+          }
+          metaDesc.setAttribute('content', data.metaDescription || data.excerpt || '');
+
+          let metaKeywords = document.querySelector('meta[name="keywords"]');
+          if (!metaKeywords) {
+            metaKeywords = document.createElement('meta');
+            metaKeywords.setAttribute('name', 'keywords');
+            document.head.appendChild(metaKeywords);
+          }
+          const keywordsStr = Array.isArray(data.keywords) ? data.keywords.join(', ') : (data.keywords || '');
+          metaKeywords.setAttribute('content', keywordsStr);
+
+          // Robots noindex
+          let metaRobots = document.querySelector('meta[name="robots"]');
+          if (data.noindex) {
+            if (!metaRobots) {
+              metaRobots = document.createElement('meta');
+              metaRobots.setAttribute('name', 'robots');
+              document.head.appendChild(metaRobots);
+            }
+            metaRobots.setAttribute('content', 'noindex, nofollow');
+          } else if (metaRobots) {
+            metaRobots.setAttribute('content', 'index, follow');
+          }
+          
+          window.scrollTo(0, 0);
+
+          // Global CMS CSS Injection
+          const globalStyleId = 'global-cms-css';
+          let globalStyleTag = document.getElementById(globalStyleId);
+          if (settings?.seo?.globalCmsCss && settings?.seo?.isGlobalCssActive !== false) {
+            if (!globalStyleTag) {
+              globalStyleTag = document.createElement('style');
+              globalStyleTag.id = globalStyleId;
+              document.head.appendChild(globalStyleTag);
+            }
+            // Scope CSS to content area
+            const scopedGlobal = settings.seo.globalCmsCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, (m: string) => 
+              m.split(',').map(s => s.trim() ? `.cms-rendered-content ${s.trim()}` : s).join(', ')
+            );
+            globalStyleTag.innerHTML = scopedGlobal;
+          } else if (globalStyleTag) {
+            globalStyleTag.remove();
+          }
+
           // Individual CSS Injection
           const styleId = `blog-css-${slug}`;
           let styleTag = document.getElementById(styleId);
@@ -32,7 +87,11 @@ export default function BlogPost() {
               styleTag.id = styleId;
               document.head.appendChild(styleTag);
             }
-            styleTag.innerHTML = data.customCss;
+            // Scope CSS to content area
+            const scopedIndividual = data.customCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, (m: string) => 
+              m.split(',').map(s => s.trim() ? `.cms-rendered-content ${s.trim()}` : s).join(', ')
+            );
+            styleTag.innerHTML = scopedIndividual;
           } else if (styleTag) {
             styleTag.remove();
           }
@@ -50,11 +109,17 @@ export default function BlogPost() {
     if (slug) fetchPost();
 
     return () => {
+      // Individual CSS cleanup
       const styleId = `blog-css-${slug}`;
       const styleTag = document.getElementById(styleId);
       if (styleTag) styleTag.remove();
+      
+      // Global CSS cleanup
+      const globalStyleId = 'global-cms-css';
+      const globalStyleTag = document.getElementById(globalStyleId);
+      if (globalStyleTag) globalStyleTag.remove();
     };
-  }, [slug]);
+  }, [slug, settings]);
 
   if (loading) {
     return (
@@ -76,6 +141,8 @@ export default function BlogPost() {
     );
   }
 
+  const articleDate = post.date || (post.createdAt?.seconds ? new Date(post.createdAt.seconds * 1000).toLocaleDateString() : '');
+
   return (
     <div className="pt-32 pb-24 bg-black min-h-screen">
       <article className="max-w-4xl mx-auto px-6">
@@ -90,7 +157,7 @@ export default function BlogPost() {
           
           <div className="flex items-center gap-4 text-[10px] uppercase tracking-widest text-white/40 font-bold mb-6">
             <span className="bg-gold/10 text-gold px-3 py-1 rounded-full">{post.category || 'Luxury Travel'}</span>
-            <span className="flex items-center gap-1"><Calendar size={12} /> {post.date || new Date(post.createdAt).toLocaleDateString()}</span>
+            <span className="flex items-center gap-1"><Calendar size={12} /> {articleDate}</span>
             <span className="flex items-center gap-1"><Clock size={12} /> {post.readTime || '5 min read'}</span>
           </div>
 
@@ -132,7 +199,7 @@ export default function BlogPost() {
             
             <div className="lg:col-span-3">
               <div 
-                className="prose prose-invert prose-gold max-w-none prose-p:text-white/60 prose-p:leading-relaxed prose-headings:font-display prose-headings:text-white prose-li:text-white/60"
+                className="cms-rendered-content prose prose-invert prose-gold max-w-none prose-p:text-white/60 prose-p:leading-relaxed prose-headings:font-display prose-headings:text-white prose-li:text-white/60"
                 dangerouslySetInnerHTML={{ __html: post.content }}
               />
             </div>

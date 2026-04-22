@@ -82,9 +82,10 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (
+          request.auth.token.email == "keliztan20@gmail.com" ||
+          request.auth.uid == "PuuxGMTbLGU5pMRfxp6ZPsNSKuq1" ||
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-          request.auth.token.email == "keliztan20@gmail.com"
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
         );
     }
 
@@ -128,13 +129,13 @@ service cloud.firestore {
         'status', 'basePrice', 'kmPrice', 'taxAmount', 'discountAmount', 'couponCode', 'netPrice', 
         'grossPrice', 'price', 'priceBreakdown', 'paymentStatus', 'paymentMethod', 'driverId', 'createdAt', 'updatedAt', 
         'read', 'rating', 'ratingComment', 'userId', 'customerName', 'customerEmail', 'customerPhone', 'flightNumber', 'flightStatus', 'flightETA',
-        'selectedExtras', 'stripeSessionId'
+        'selectedExtras', 'stripeSessionId', 'packageId', 'packageTitle', 'vehicleType', 'type'
       ];
       
       return hasOnlyAllowedFields(allowedFields) &&
-             (!('userId' in data) || data.userId == request.auth.uid || isAdmin() || isDriver()) &&
-             data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly'] &&
-             data.pickup is string && data.pickup.size() >= 5 && data.pickup.size() <= 500 &&
+             (!('userId' in data) || data.userId == request.auth.uid || data.userId == 'guest' || isAdmin() || isDriver()) &&
+             data.serviceType in ['airport', 'corporate', 'wedding', 'tour', 'hourly', 'offer'] &&
+             data.pickup is string && data.pickup.size() >= 1 && data.pickup.size() <= 500 &&
              (!('dropoff' in data) || (data.dropoff is string && data.dropoff.size() <= 500)) &&
              (!('passengers' in data) || (data.passengers is int && data.passengers >= 1 && data.passengers <= 100)) &&
              data.status in ['pending', 'confirmed', 'assigned', 'accepted', 'rejected', 'completed', 'cancelled'] &&
@@ -155,7 +156,7 @@ service cloud.firestore {
     }
 
     function isValidPage(data) {
-      let allowedFields = ['id', 'title', 'slug', 'content', 'metaTitle', 'metaDescription', 'keywords', 'canonicalUrl', 'ogImage', 'schema', 'noindex', 'includeInSitemap', 'createdAt', 'updatedAt'];
+      let allowedFields = ['id', 'title', 'slug', 'content', 'metaTitle', 'metaDescription', 'keywords', 'canonicalUrl', 'ogImage', 'schema', 'noindex', 'includeInSitemap', 'createdAt', 'updatedAt', 'customCss', 'isCustomCssActive'];
       return hasOnlyAllowedFields(allowedFields) &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.slug is string && data.slug.size() > 0 && data.slug.size() <= 200 &&
@@ -166,7 +167,7 @@ service cloud.firestore {
     }
 
     function isValidBlog(data) {
-      let allowedFields = ['id', 'title', 'slug', 'content', 'featuredImage', 'image', 'category', 'excerpt', 'metaTitle', 'metaDescription', 'keywords', 'createdAt', 'updatedAt', 'noindex', 'includeInSitemap'];
+      let allowedFields = ['id', 'title', 'slug', 'content', 'featuredImage', 'image', 'category', 'excerpt', 'metaTitle', 'metaDescription', 'keywords', 'createdAt', 'updatedAt', 'noindex', 'includeInSitemap', 'customCss', 'isCustomCssActive'];
       return hasOnlyAllowedFields(allowedFields) &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.slug is string && data.slug.size() > 0 && data.slug.size() <= 200 &&
@@ -174,6 +175,34 @@ service cloud.firestore {
              (!('featuredImage' in data) || isValidUrl(data.featuredImage)) &&
              (!('image' in data) || isValidUrl(data.image)) &&
              (!('excerpt' in data) || (data.excerpt is string && data.excerpt.size() <= 1000));
+    }
+
+    function isValidOffer(data) {
+      let allowedFields = ['id', 'title', 'description', 'image', 'price', 'originalPrice', 'active', 'slug', 'createdAt', 'updatedAt', 'fleets', 'tags', 'discountType', 'discountValue', 'discType', 'discVal', 'offerPercentage', 'type'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.title is string && data.title.size() > 0 &&
+             (!('active' in data) || data.active is bool);
+    }
+
+    function isValidTour(data) {
+      let allowedFields = ['id', 'title', 'description', 'image', 'price', 'duration', 'capacity', 'locations', 'active', 'slug', 'createdAt', 'updatedAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.title is string && data.title.size() > 0 &&
+             (!('active' in data) || data.active is bool);
+    }
+    
+    function isValidMedia(data) {
+        let allowedFields = ['name', 'url', 'size', 'type', 'folder', 'alt', 'title', 'description', 'caption', 'usedIn', 'createdAt', 'updatedAt'];
+        return hasOnlyAllowedFields(allowedFields) &&
+            data.name is string && data.name.size() > 0 &&
+            data.url is string && data.url.size() > 0 &&
+            data.size is number && data.size > 0 &&
+            data.type is string && data.type.size() > 0 &&
+            data.folder is string && data.folder.size() > 0 &&
+            (!('alt' in data) || data.alt is string) &&
+            (!('title' in data) || data.title is string) &&
+            (!('description' in data) || data.description is string) &&
+            (!('caption' in data) || data.caption is string);
     }
 
     // ===============================================================
@@ -252,6 +281,24 @@ service cloud.firestore {
     match /blogs/{blogId} {
       allow read: if true;
       allow create, update: if isAdmin() && isValidBlog(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /offers/{offerId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidOffer(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /tours/{tourId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidTour(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    
+    match /media/{mediaId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidMedia(request.resource.data);
       allow delete: if isAdmin();
     }
   }

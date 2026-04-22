@@ -19,20 +19,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setSettings(data);
-
-        // Global CSS Injection
-        const styleId = 'global-cms-css';
-        let styleTag = document.getElementById(styleId);
-        if (data.seo?.globalCmsCss && data.seo?.isGlobalCssActive !== false) {
-          if (!styleTag) {
-            styleTag = document.createElement('style');
-            styleTag.id = styleId;
-            document.head.appendChild(styleTag);
-          }
-          styleTag.innerHTML = data.seo.globalCmsCss;
-        } else if (styleTag) {
-          styleTag.remove();
-        }
       }
       setLoading(false);
     }, (err) => {

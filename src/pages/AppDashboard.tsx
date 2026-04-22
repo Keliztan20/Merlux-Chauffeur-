@@ -4,15 +4,15 @@ import {
   Settings, Bell, CreditCard, History,
   ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown,
   Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
-  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock, Copy,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2, Code2, MessageSquare, AlertCircle, PiggyBank
+  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock, Copy, Tag, Compass,
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, List, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2, Code2, Cog, MessageSquare, AlertCircle, PiggyBank, Activity, Award, Info, FileUp, Image, IdCard, Blocks
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer, Marker } from '@react-google-maps/api';
 import { cn } from '../lib/utils';
 import { auth, db, storage } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, getDocs, addDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { onAuthStateChanged, signOut, updateProfile, updatePassword } from 'firebase/auth';
 import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
@@ -84,7 +84,7 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 
 export default function AppDashboard() {
   const [activeTab, setActiveTab] = useState('bookings');
-  const [activeSubTab, setActiveSubTab] = useState('fleet');
+  const [activeSubTab, setActiveSubTab] = useState('seo');
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -108,8 +108,13 @@ export default function AppDashboard() {
   const [showBlogModal, setShowBlogModal] = useState(false);
   const [editingPage, setEditingPage] = useState<any>(null);
   const [editingBlog, setEditingBlog] = useState<any>(null);
+  const [mediaFolder, setMediaFolder] = useState('general');
+  const [newFolder, setNewFolder] = useState('');
+
+
 
   const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
   });
@@ -212,6 +217,20 @@ export default function AppDashboard() {
   const [editingCoupon, setEditingCoupon] = useState<any>(null);
   const [showCouponModal, setShowCouponModal] = useState(false);
 
+  // Offers State
+  const [offers, setOffers] = useState<any[]>([]);
+  const [editingOffer, setEditingOffer] = useState<any>(null);
+  const [showOfferModal, setShowOfferModal] = useState(false);
+
+  // Tours State
+  const [tours, setTours] = useState<any[]>([]);
+  const [editingTour, setEditingTour] = useState<any>(null);
+  const [showTourModal, setShowTourModal] = useState(false);
+  const [isUploadingCsv, setIsUploadingCsv] = useState(false);
+  const [showCsvImportModal, setShowCsvImportModal] = useState(false);
+  const [csvImportType, setCsvImportType] = useState<'offers' | 'tours'>('offers');
+  const [dragActive, setDragActive] = useState(false);
+
   // User Management State
   const [editingUser, setEditingUser] = useState<any>(null);
   const [showUserModal, setShowUserModal] = useState(false);
@@ -231,7 +250,11 @@ export default function AppDashboard() {
     content: string;
     isActive: boolean;
     title?: string;
+    itemContent?: string;
+    slug?: string;
+    featuredImage?: string;
   }>({ type: 'global', content: '', isActive: true });
+  const [calendarDateType, setCalendarDateType] = useState<'pickup' | 'booking'>('pickup');
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDistanceBreakdown, setShowDistanceBreakdown] = useState(false);
 
@@ -239,6 +262,20 @@ export default function AppDashboard() {
   const [systemSettings, setSystemSettings] = useState<any>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+
+  // Media Management State
+  const [mediaList, setMediaList] = useState<any[]>([]);
+  const [showMediaModal, setShowMediaModal] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [editingMedia, setEditingMedia] = useState<any>({
+    alt: '',
+    title: '',
+    description: '',
+    caption: '',
+  });
+  const [storageUsageBytes, setStorageUsageBytes] = useState(0);
+  const [storageLimitBytes, setStorageLimitBytes] = useState(5 * 1024 * 1024 * 1024); // 5GB Free Tier Simulation
 
   // Confirmation State
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra' | 'page' | 'blog', id: string } | null>(null);
@@ -278,6 +315,9 @@ export default function AppDashboard() {
     width: 'medium'
   });
 
+  const [bookingCategory, setBookingCategory] = useState<'standard' | 'offer'>('standard');
+  const [bookingViewMode, setBookingViewMode] = useState<'grid' | 'table'>('grid');
+  const [offerViewMode, setOfferViewMode] = useState<'grid' | 'list'>('grid');
   const navigate = useNavigate();
 
   const isAdmin = userProfile?.role === 'admin';
@@ -288,7 +328,7 @@ export default function AppDashboard() {
     { id: 'analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
     { id: 'calendar', label: 'Calendar', icon: Calendar, adminOnly: false },
     { id: 'users', label: 'Users', icon: Users, adminOnly: true },
-    { id: 'profile', label: 'Profile', icon: User, adminOnly: false },
+    { id: 'profile', label: 'Profile', icon: IdCard, adminOnly: false },
     { id: 'management', label: 'Management', icon: Settings, adminOnly: true },
   ];
 
@@ -379,12 +419,17 @@ export default function AppDashboard() {
   };
 
   useEffect(() => {
-    if (user) {
-      console.log('User signed in:', user.email);
-      console.log('Admin status:', isAdmin);
-      console.log('Driver status:', isDriver);
-    }
-  }, [user, isAdmin, isDriver]);
+    if (!isAdmin || coupons.length === 0) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const couponsToDeactivate = coupons.filter(c => c.active && c.endDate && c.endDate < today);
+
+    couponsToDeactivate.forEach(coupon => {
+      const couponRef = doc(db, 'coupons', coupon.id);
+      updateDoc(couponRef, { active: false });
+    });
+  }, [coupons, isAdmin]);
+
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -427,14 +472,18 @@ export default function AppDashboard() {
     try {
       if (cssConfig.type === 'global') {
         const settingsRef = doc(db, "settings", "system");
-        await updateDoc(settingsRef, {
-          "seo.globalCmsCss": cssConfig.content,
-          "seo.isGlobalCssActive": cssConfig.isActive
-        });
+        // Using setDoc with merge is safer if the seo object doesn't exist yet
+        await setDoc(settingsRef, {
+          seo: {
+            globalCmsCss: cssConfig.content,
+            isGlobalCssActive: cssConfig.isActive
+          }
+        }, { merge: true });
+
         setSystemSettings(prev => ({
           ...prev,
           seo: {
-            ...prev.seo,
+            ...prev?.seo,
             globalCmsCss: cssConfig.content,
             isGlobalCssActive: cssConfig.isActive
           }
@@ -443,20 +492,23 @@ export default function AppDashboard() {
         const pageRef = doc(db, "pages", cssConfig.id);
         await updateDoc(pageRef, {
           customCss: cssConfig.content,
-          isCustomCssActive: cssConfig.isActive
+          isCustomCssActive: cssConfig.isActive,
+          updatedAt: serverTimestamp()
         });
         setPages(prev => prev.map(p => p.id === cssConfig.id ? { ...p, customCss: cssConfig.content, isCustomCssActive: cssConfig.isActive } : p));
       } else if (cssConfig.type === 'blog' && cssConfig.id) {
         const blogRef = doc(db, "blogs", cssConfig.id);
         await updateDoc(blogRef, {
           customCss: cssConfig.content,
-          isCustomCssActive: cssConfig.isActive
+          isCustomCssActive: cssConfig.isActive,
+          updatedAt: serverTimestamp()
         });
         setBlogs(prev => prev.map(b => b.id === cssConfig.id ? { ...b, customCss: cssConfig.content, isCustomCssActive: cssConfig.isActive } : b));
       }
       setShowCssModal(false);
     } catch (err) {
       console.error("Error saving CSS:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `save-css-${cssConfig.type}`);
     } finally {
       setCssEditingLoading(false);
     }
@@ -725,21 +777,48 @@ export default function AppDashboard() {
       } else if (u.role === 'admin') {
         const unassigned = bookings.filter(b => !b.driverId && b.status !== 'cancelled' && b.status !== 'completed');
         const cancelled = bookings.filter(b => b.status === 'cancelled');
+        const confirmed = bookings.filter(b => b.status === 'confirmed');
+        const completed = bookings.filter(b => b.status === 'completed');
+        const activeCoupons = coupons.filter(c => c.active).length;
+
+        const totalRevenue = completed.reduce((sum, b) => sum + (Number(b.price) || 0), 0);
+        const lostRevenue = cancelled.reduce((sum, b) => sum + (Number(b.price) || 0), 0);
+
         stats[u.id] = {
           unassignedCount: unassigned.length,
-          cancelledCount: cancelled.length
+          cancelledCount: cancelled.length,
+          confirmedCount: confirmed.length,
+          activeCoupons: activeCoupons,
+          totalSystemUsers: allUsers.length,
+          totalRevenue,
+          lostRevenue
         };
       } else if (u.role === 'customer' || !u.role || u.role === 'user') {
         // For Customers
         const customerBookings = bookings.filter(b => b.userId === u.id);
         const completed = customerBookings.filter(b => b.status === 'completed');
+        const cancelled = customerBookings.filter(b => b.status === 'cancelled');
+        const reviewed = completed.filter(b => b.rating);
+        const unreviewed = completed.filter(b => !b.rating);
         const totalSpend = customerBookings
           .filter(b => b.status === 'completed' || b.paymentStatus === 'paid')
           .reduce((sum, b) => sum + (Number(b.price) || 0), 0);
+
+        // Find favorite vehicle/service
+        const serviceCounts: Record<string, number> = {};
+        customerBookings.forEach(b => {
+          if (b.serviceType) serviceCounts[b.serviceType] = (serviceCounts[b.serviceType] || 0) + 1;
+        });
+        const favoriteService = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
+
         stats[u.id] = {
           totalBookings: customerBookings.length,
           completedRides: completed.length,
-          totalSpend
+          cancelledRides: cancelled.length,
+          reviewedCount: reviewed.length,
+          unreviewedCount: unreviewed.length,
+          totalSpend,
+          favoriteService: favoriteService.charAt(0).toUpperCase() + favoriteService.slice(1)
         };
       }
     });
@@ -755,13 +834,19 @@ export default function AppDashboard() {
     return eachDayOfInterval({ start: startDate, end: endDate });
   }, [currentMonth]);
 
-  const getBookingsForDate = (date: Date) => {
+  const getBookingsForDate = useCallback((date: Date) => {
     return bookings.filter(b => {
-      if (!b.date) return false;
-      const bDate = parseISO(b.date);
-      return isSameDay(bDate, date);
+      let bDate;
+      if (calendarDateType === 'pickup') {
+        if (!b.date) return false;
+        bDate = parseISO(b.date);
+      } else {
+        // Fallback for createdAt
+        bDate = b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : (b.createdAt || b.date ? parseISO(b.createdAt || b.date) : null);
+      }
+      return bDate && isSameDay(bDate, date);
     });
-  };
+  }, [bookings, calendarDateType]);
 
   useEffect(() => {
     if (!user || !userProfile) return;
@@ -775,6 +860,9 @@ export default function AppDashboard() {
     let unsubscribeSettings: (() => void) | undefined;
     let unsubscribePages: (() => void) | undefined;
     let unsubscribeBlogs: (() => void) | undefined;
+    let unsubscribeOffers: (() => void) | undefined;
+    let unsubscribeTours: (() => void) | undefined;
+    let unsubscribeMedia: (() => void) | undefined;
 
     if (isAdmin) {
       q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
@@ -883,6 +971,38 @@ export default function AppDashboard() {
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'blogs');
       });
+
+      // Fetch offers
+      const offersQ = query(collection(db, 'offers'), orderBy('createdAt', 'desc'));
+      unsubscribeOffers = onSnapshot(offersQ, (snapshot) => {
+        setOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'offers');
+      });
+
+      // Fetch tours
+      const toursQ = query(collection(db, 'tours'), orderBy('createdAt', 'desc'));
+      unsubscribeTours = onSnapshot(toursQ, (snapshot) => {
+        setTours(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'tours');
+      });
+
+      // Fetch Media
+      const mediaQ = query(collection(db, 'media'), orderBy('createdAt', 'desc'));
+      unsubscribeMedia = onSnapshot(mediaQ, (snapshot) => {
+        const mediaData = snapshot.docs.map(doc => {
+          const data = doc.data();
+          // Use a composite ID for the internal state to prevent any key collisions
+          return { ...data, id: doc.id, _key: `${doc.id}_${data.createdAt?.seconds || Date.now()}` };
+        });
+        setMediaList(mediaData);
+        // Calculate storage usage
+        const totalSize = mediaData.reduce((sum, item: any) => sum + (Number(item.size) || 0), 0);
+        setStorageUsageBytes(totalSize);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'media');
+      });
     }
 
     // Auto-cancel past bookings
@@ -931,7 +1051,7 @@ export default function AppDashboard() {
     });
 
     return () => {
-      unsubscribeBookings();
+      if (unsubscribeBookings) unsubscribeBookings();
       if (unsubscribeUsers) unsubscribeUsers();
       if (unsubscribeFleet) unsubscribeFleet();
       if (unsubscribeExtras) unsubscribeExtras();
@@ -939,6 +1059,9 @@ export default function AppDashboard() {
       if (unsubscribeSettings) unsubscribeSettings();
       if (unsubscribePages) unsubscribePages();
       if (unsubscribeBlogs) unsubscribeBlogs();
+      if (unsubscribeOffers) unsubscribeOffers();
+      if (unsubscribeTours) unsubscribeTours();
+      if (unsubscribeMedia) unsubscribeMedia();
     };
   }, [user, userProfile, isAdmin, isDriver]);
 
@@ -1038,6 +1161,13 @@ export default function AppDashboard() {
   const filteredAndSortedBookings = useMemo(() => {
     let result = [...bookings];
 
+    // Filter by category (Standard vs Offers) - ONLY for Admin/Driver dashboard views
+    if (bookingCategory === 'offer') {
+      result = result.filter(b => b.type === 'offer');
+    } else {
+      result = result.filter(b => b.type !== 'offer');
+    }
+
     // Filter by time period
     if (bookingTimeFilter !== 'all') {
       const now = new Date();
@@ -1124,7 +1254,7 @@ export default function AppDashboard() {
     );
 
     return uniqueBookings;
-  }, [bookings, searchQuery, typeFilter, serviceFilter, statusFilter, priceSort, dateSort, bookingTimeFilter, bookingDateTypeFilter, bookingMonthRange, bookingYearRange]);
+  }, [bookings, bookingCategory, searchQuery, typeFilter, serviceFilter, statusFilter, priceSort, dateSort, bookingTimeFilter, bookingDateTypeFilter, bookingMonthRange, bookingYearRange]);
 
   const handleDeleteUser = async (userId: string) => {
     setConfirmDelete({ type: 'user', id: userId });
@@ -1310,6 +1440,79 @@ export default function AppDashboard() {
     setConfirmDelete({ type: 'extra', id: id });
   };
 
+  const uploadMedia = async (file: File, metadata: any, folder: string) => {
+    if (!file) {
+      alert('Please select a file to upload');
+      return;
+    }
+    setUploadingMedia(true);
+    console.log('Starting upload to folder:', folder, 'File:', file.name);
+    try {
+      // Use a truly unique path for storage
+      const timestamp = Date.now();
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+      const fileName = `${timestamp}_${sanitizedName}`;
+      const storageRef = ref(storage, `media/${folder}/${fileName}`);
+      
+      console.log('Uploading bytes to storage...');
+      const uploadResult = await uploadBytes(storageRef, file);
+      console.log('Upload successful, getting download URL...');
+      const url = await getDownloadURL(uploadResult.ref);
+
+      const mediaData = {
+        name: file.name,
+        url,
+        size: file.size,
+        type: file.type,
+        folder: folder,
+        alt: metadata.alt || '',
+        title: metadata.title || '',
+        description: metadata.description || '',
+        caption: metadata.caption || '',
+        createdAt: serverTimestamp(),
+        usedIn: [], 
+      };
+
+      console.log('Recording media metadata in Firestore...');
+      const docRef = await addDoc(collection(db, 'media'), mediaData);
+      console.log('Media metadata recorded with ID:', docRef.id);
+
+      setShowMediaModal(false);
+      setMediaFile(null);
+      setEditingMedia({ alt: '', title: '', description: '', caption: '' });
+      // Using a slightly delayed alert to ensure UI has updated
+      setTimeout(() => alert('Media uploaded successfully!'), 100);
+    } catch (err) {
+      console.error('CRITICAL: Error uploading media:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      alert(`Failed to upload media: ${errorMsg}`);
+    } finally {
+      setUploadingMedia(false);
+      console.log('Upload process lifecycle complete.');
+    }
+  };
+
+  const handleDeleteMedia = async (id: string, url: string) => {
+    if (!window.confirm('Are you sure you want to delete this media?')) return;
+    try {
+      // 1. Delete from storage if it exists
+      if (url) {
+        try {
+          const storageRef = ref(storage, url);
+          await deleteObject(storageRef);
+        } catch (storageErr) {
+          console.error('Error deleting from storage (might not exist or invalid url):', storageErr);
+        }
+      }
+
+      // 2. Delete from db
+      await deleteDoc(doc(db, 'media', id));
+    } catch (err) {
+      console.error('Error deleting media:', err);
+      handleFirestoreError(err, OperationType.DELETE, `media/${id}`);
+    }
+  };
+
   const executeDeleteExtra = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'extras', id));
@@ -1319,14 +1522,48 @@ export default function AppDashboard() {
     }
   };
 
+  const handleDuplicateOffer = async (offer: any) => {
+    try {
+      const duplicatedData = {
+        ...offer,
+        title: `${offer.title} (Copy)`,
+        slug: `${offer.slug}-copy-${Math.floor(Math.random() * 1000)}`,
+      };
+      // Clean up metadata
+      delete duplicatedData.id;
+      delete duplicatedData.createdAt;
+      delete duplicatedData.updatedAt;
+
+      await handleUpdateOffer('new', duplicatedData);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'offers');
+    }
+  };
+
+  const handleDuplicateTour = async (tour: any) => {
+    try {
+      const { id, createdAt, updatedAt, ...rest } = tour;
+      await handleUpdateTour('new', {
+        ...rest,
+        title: `${rest.title} (Copy)`,
+        slug: `${rest.slug}-copy`
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'tours');
+    }
+  };
+
   const handleUpdatePage = async (id: string | null, data: any) => {
     try {
+      // Clean up data before saving
+      const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = data;
+
       // Convert keywords string to array if it's a string
       const processedData = {
-        ...data,
+        ...rest,
         keywords: typeof data.keywords === 'string'
           ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
-          : data.keywords
+          : (data.keywords || [])
       };
 
       if (!id || id === 'new') {
@@ -1341,18 +1578,22 @@ export default function AppDashboard() {
       setShowPageModal(false);
       setEditingPage(null);
     } catch (err) {
+      console.error('Error saving page:', err);
       handleFirestoreError(err, OperationType.WRITE, 'pages');
     }
   };
 
   const handleUpdateBlog = async (id: string | null, data: any) => {
     try {
+      // Clean up data
+      const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = data;
+
       // Convert keywords string to array if it's a string
       const processedData = {
-        ...data,
+        ...rest,
         keywords: typeof data.keywords === 'string'
           ? data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k !== '')
-          : data.keywords
+          : (data.keywords || [])
       };
 
       if (!id || id === 'new') {
@@ -1367,8 +1608,191 @@ export default function AppDashboard() {
       setShowBlogModal(false);
       setEditingBlog(null);
     } catch (err) {
+      console.error('Error saving blog:', err);
       handleFirestoreError(err, OperationType.WRITE, 'blogs');
     }
+  };
+
+  const handleUpdateOffer = async (id: string | null, data: any) => {
+    try {
+      const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = data;
+
+      const processedFleets = (rest.fleets || []).map((f: any) => ({
+        ...f,
+        basePrice: Number(f.basePrice),
+        salePrice: Number(f.salePrice)
+      }));
+
+      const processedData = {
+        ...rest,
+        discountValue: Number(rest.discountValue),
+        fleets: processedFleets,
+        active: rest.active === undefined ? true : Boolean(rest.active),
+        slug: rest.slug || rest.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `offer-${Date.now()}`
+      };
+
+      if (!id || id === 'new') {
+        const newRef = doc(collection(db, 'offers'));
+        await setDoc(newRef, { ...processedData, id: newRef.id, createdAt: serverTimestamp() });
+      } else {
+        await updateDoc(doc(db, 'offers', id), {
+          ...processedData,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setShowOfferModal(false);
+      setEditingOffer(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'offers');
+    }
+  };
+
+  const handleDeleteOffer = (id: string) => {
+    setConfirmDelete({ id, type: 'offer' as any });
+  };
+
+  const executeDeleteOffer = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'offers', id));
+      setConfirmDelete(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `offers/${id}`);
+    }
+  };
+
+  const handleUpdateTour = async (id: string | null, data: any) => {
+    try {
+      const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = data;
+      const processedData = {
+        ...rest,
+        price: Number(rest.price),
+        capacity: Number(rest.capacity),
+        active: rest.active === undefined ? true : Boolean(rest.active),
+        slug: rest.slug || rest.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `tour-${Date.now()}`,
+        locations: typeof rest.locations === 'string'
+          ? rest.locations.split(',').map((l: string) => l.trim()).filter((l: string) => l !== '')
+          : (rest.locations || [])
+      };
+
+      if (!id || id === 'new') {
+        const newRef = doc(collection(db, 'tours'));
+        await setDoc(newRef, { ...processedData, id: newRef.id, createdAt: serverTimestamp() });
+      } else {
+        await updateDoc(doc(db, 'tours', id), {
+          ...processedData,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setShowTourModal(false);
+      setEditingTour(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'tours');
+    }
+  };
+
+  const handleDeleteTour = (id: string) => {
+    setConfirmDelete({ id, type: 'tour' as any });
+  };
+
+  const executeDeleteTour = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'tours', id));
+      setConfirmDelete(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `tours/${id}`);
+    }
+  };
+
+  const handleCsvUpload = async (type: 'offers' | 'tours', file: File) => {
+    if (!file) return;
+
+    setIsUploadingCsv(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const rows = text.split('\n').filter(row => row.trim() !== '');
+        if (rows.length < 2) {
+          alert('CSV file must contain at least a header row and one data row.');
+          return;
+        }
+
+        const headers = rows[0].split(',').map(h => h.trim().toLowerCase());
+
+        let successCount = 0;
+        for (let i = 1; i < rows.length; i++) {
+          const values = rows[i].split(',').map(v => v.trim());
+          if (values.length < headers.length) continue;
+
+          const item: any = {};
+          headers.forEach((header, index) => {
+            item[header] = values[index];
+          });
+
+          // Metadata & conversions
+          item.active = item.active === 'false' ? false : true;
+          item.createdAt = serverTimestamp();
+
+          if (type === 'offers') {
+            const fleetsData = item.fleets_data || "";
+            delete item.fleets_data;
+
+            // Process tags
+            if (item.tags && typeof item.tags === 'string') {
+              item.tags = item.tags.split('|').map((t: string) => t.trim());
+            }
+
+            // Process nested fleets
+            item.fleets = (fleetsData as string).split(';').filter(f => f.trim() !== '').map((fleetStr: string) => {
+              const [type, image, description, capacity, luggage, basePrice] = fleetStr.split('|').map(v => v.trim());
+              const bPrice = Number(basePrice) || 0;
+              const dValue = Number(item.discountvalue || item.discval) || 15;
+              const dType = item.discounttype || item.disctype || 'percentage';
+              item.discountType = dType;
+              item.discountValue = dValue;
+
+              const salePrice = dType === 'percentage'
+                ? Math.round(bPrice * (1 - dValue / 100))
+                : Math.max(0, bPrice - dValue);
+
+              return {
+                type: type || 'Standard',
+                image: image || '',
+                description: description || '',
+                capacity: capacity || '3 Passengers',
+                luggage: luggage || '2 Suitcases',
+                basePrice: bPrice,
+                salePrice,
+                additionalInfo: ''
+              };
+            });
+
+            // delete unwanted CSV headers if they exist
+            delete item.discountvalue;
+            delete item.discval;
+            delete item.discounttype;
+            delete item.disctype;
+
+            await handleUpdateOffer('new', item);
+          } else {
+            // Process tour locations if present
+            if (item.locations && typeof item.locations === 'string') {
+              item.locations = item.locations.split('|').map((l: string) => l.trim());
+            }
+            await handleUpdateTour('new', item);
+          }
+          successCount++;
+        }
+        alert(`${successCount} ${type} imported successfully!`);
+        setShowCsvImportModal(false);
+      } catch (err) {
+        console.error(`Error importing ${type}:`, err);
+        alert(`Failed to import ${type}. Please check your CSV format.`);
+      } finally {
+        setIsUploadingCsv(false);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleDuplicatePage = async (page: any) => {
@@ -1457,48 +1881,45 @@ export default function AppDashboard() {
       case 'bookings':
         return (
           <div className="space-y-6">
-            {/* Booking Stats Section */}
+            {/* Booking Stats Section ... (original content continued) */}
             {isAdmin && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
                 {/* Total Bookings */}
                 <div className="glass p-4 rounded-2xl border border-white/5">
-                  <div className="flex justify-between items-center mb-1 w-full">
+                  <div className="flex justify-between items-center mb-2 w-full">
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       Total Bookings
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-2xl font-bold text-gold font-display">{bookings.length}</h3>
-                    <span className="text-[10px] font-bold text-green-400">+5%</span>
                   </div>
                   <p className="text-[10px] text-white/60">All Time</p>
                 </div>
 
                 {/* Revenue */}
                 <div className="glass p-4 rounded-2xl border border-white/5">
-                  <div className="flex justify-between items-center mb-1 w-full">
+                  <div className="flex justify-between items-center mb-2 w-full">
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       Total Revenue
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-2xl font-bold text-green-500 font-display">${Math.round(analytics.totalRevenue)}</h3>
-                    <span className="text-[10px] font-bold text-green-400">+12%</span>
                   </div>
                   <p className="text-[10px] text-white/60">From Completed Bookings</p>
                 </div>
 
                 {/* Monthly */}
                 <div className="glass p-4 rounded-2xl border border-white/5">
-                  <div className="flex justify-between items-center mb-1 w-full">
+                  <div className="flex justify-between items-center mb-2 w-full">
                     <p className="text-[9px] uppercase tracking-widest font-bold text-white/40">
                       This Month
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-2xl font-bold text-blue-500 font-display">{analytics.currentMonthCount}</h3>
-                    <span className="text-[10px] font-bold text-green-400">+8%</span>
                   </div>
                   <p className="text-[10px] text-white/60">${Math.round(analytics.currentMonthRevenue || 0)} revenue</p>
                 </div>
@@ -1549,108 +1970,194 @@ export default function AppDashboard() {
                 </div>
               </div>
             )}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-display text-gold">Bookings</h2>
-                <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Manage and track all rides</p>
+            <div className="flex flex-col gap-6">
+              {/* Heading Row */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-display text-gold">Bookings</h2>
+                  <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">
+                    Manage and track all rides
+                  </p>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
-                  {[
-                    { label: 'All', value: 'all' },
-                    { label: '3D', value: '3d' },
-                    { label: '7D', value: '7d' },
-                    { label: '30D', value: '30d' },
-                    { label: 'Month', value: 'month' },
-                    { label: 'Year', value: 'year' }
-                  ].map((opt) => (
+              {/* Filters Row */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                {/* Left side: Standard + Grid/List */}
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* Standard / Offers */}
+                  <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
                     <button
-                      key={opt.value}
-                      onClick={() => setBookingTimeFilter(opt.value as any)}
+                      onClick={() => setBookingCategory('standard')}
                       className={cn(
-                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
-                        bookingTimeFilter === opt.value
+                        "px-4 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
+                        bookingCategory === 'standard'
                           ? "bg-gold text-black shadow-lg"
                           : "text-white/40 hover:text-white"
                       )}
                     >
-                      {opt.label}
+                      Standard
                     </button>
-                  ))}
+                    <button
+                      onClick={() => setBookingCategory('offer')}
+                      className={cn(
+                        "px-4 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
+                        bookingCategory === 'offer'
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                    >
+                      Offers
+                    </button>
+                  </div>
+
+                  {/* Grid / List */}
+                  <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                    <button
+                      onClick={() => setBookingViewMode('grid')}
+                      className={cn(
+                        "px-3 py-1 rounded-lg transition-all",
+                        bookingViewMode === 'grid'
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                      title="Grid View"
+                    >
+                      <LayoutGrid size={14} />
+                    </button>
+                    <button
+                      onClick={() => setBookingViewMode('table')}
+                      className={cn(
+                        "px-3 py-1 rounded-lg transition-all",
+                        bookingViewMode === 'table'
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                      title="Table View"
+                    >
+                      <List size={14} />
+                    </button>
+                  </div>
                 </div>
 
-                {bookingTimeFilter === 'year' && (
-                  <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9 relative z-10">
-                    <select
-                      value={bookingYearRange.start}
-                      onChange={(e) => setBookingYearRange(prev => ({ ...prev, start: parseInt(e.target.value) }))}
-                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
-                    >
-                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
-                        <option key={y} value={y} className="bg-black">{y}</option>
-                      ))}
-                    </select>
-                    <span className="text-white/20 text-[10px]">-</span>
-                    <select
-                      value={bookingYearRange.end}
-                      onChange={(e) => setBookingYearRange(prev => ({ ...prev, end: parseInt(e.target.value) }))}
-                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
-                    >
-                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
-                        <option key={y} value={y} className="bg-black">{y}</option>
-                      ))}
-                    </select>
+                {/* Right side: Day/Time filters */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Time range buttons */}
+                  <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                    {[
+                      { label: 'All', value: 'all' },
+                      { label: '3D', value: '3d' },
+                      { label: '7D', value: '7d' },
+                      { label: '30D', value: '30d' },
+                      { label: 'Month', value: 'month' },
+                      { label: 'Year', value: 'year' }
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setBookingTimeFilter(opt.value as any)}
+                        className={cn(
+                          "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
+                          bookingTimeFilter === opt.value
+                            ? "bg-gold text-black shadow-lg"
+                            : "text-white/40 hover:text-white"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
-                )}
 
-                {bookingTimeFilter === 'month' && (
-                  <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9 relative z-10">
-                    <input
-                      type="month"
-                      value={bookingMonthRange.start}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val) setBookingMonthRange(prev => ({ ...prev, start: val }));
-                      }}
-                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
-                    />
-                    <span className="text-white/20 text-[10px]">-</span>
-                    <input
-                      type="month"
-                      value={bookingMonthRange.end}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val) setBookingMonthRange(prev => ({ ...prev, end: val }));
-                      }}
-                      className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
-                    />
+                  {/* Year range select */}
+                  {bookingTimeFilter === 'year' && (
+                    <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9">
+                      {/* start year */}
+                      <select
+                        value={bookingYearRange.start}
+                        onChange={(e) =>
+                          setBookingYearRange((prev) => ({
+                            ...prev,
+                            start: parseInt(e.target.value),
+                          }))
+                        }
+                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
+                      >
+                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                          <option key={y} value={y} className="bg-black">
+                            {y}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-white/20 text-[10px]">-</span>
+                      {/* end year */}
+                      <select
+                        value={bookingYearRange.end}
+                        onChange={(e) =>
+                          setBookingYearRange((prev) => ({
+                            ...prev,
+                            end: parseInt(e.target.value),
+                          }))
+                        }
+                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
+                      >
+                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                          <option key={y} value={y} className="bg-black">
+                            {y}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Month range inputs */}
+                  {bookingTimeFilter === 'month' && (
+                    <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9">
+                      <input
+                        type="month"
+                        value={bookingMonthRange.start}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val) setBookingMonthRange((prev) => ({ ...prev, start: val }));
+                        }}
+                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
+                      />
+                      <span className="text-white/20 text-[10px]">-</span>
+                      <input
+                        type="month"
+                        value={bookingMonthRange.end}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val) setBookingMonthRange((prev) => ({ ...prev, end: val }));
+                        }}
+                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
+                      />
+                    </div>
+                  )}
+
+                  {/* Pickup / Booking toggle */}
+                  <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                    <button
+                      onClick={() => setBookingDateTypeFilter('pickup')}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                        bookingDateTypeFilter === 'pickup'
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                    >
+                      Pickup
+                    </button>
+                    <button
+                      onClick={() => setBookingDateTypeFilter('booking')}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                        bookingDateTypeFilter === 'booking'
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                    >
+                      Booking
+                    </button>
                   </div>
-                )}
-
-                <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
-                  <button
-                    onClick={() => setBookingDateTypeFilter('pickup')}
-                    className={cn(
-                      "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
-                      bookingDateTypeFilter === 'pickup'
-                        ? "bg-gold text-black shadow-lg"
-                        : "text-white/40 hover:text-white"
-                    )}
-                  >
-                    Pickup
-                  </button>
-                  <button
-                    onClick={() => setBookingDateTypeFilter('booking')}
-                    className={cn(
-                      "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
-                      bookingDateTypeFilter === 'booking'
-                        ? "bg-gold text-black shadow-lg"
-                        : "text-white/40 hover:text-white"
-                    )}
-                  >
-                    Booking
-                  </button>
                 </div>
               </div>
             </div>
@@ -1814,10 +2321,10 @@ export default function AppDashboard() {
                   Reset Filters
                 </button>
               </div>
-            ) : (
+            ) : bookingViewMode === 'grid' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAndSortedBookings.map((booking) => (
-                  <div key={`booking-card-${booking.id}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
+                {filteredAndSortedBookings.map((booking, idx) => (
+                  <div key={`booking-card-${booking.id}-${idx}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
@@ -1826,7 +2333,9 @@ export default function AppDashboard() {
                             : 'N/A'}
                         </p>
                         <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors">
-                          {booking.customerName || 'Customer'}
+                          {bookingCategory === 'offer'
+                            ? booking.packageTitle || 'Package'
+                            : booking.customerName || 'Customer'}
                         </h3>
                       </div>
 
@@ -1875,7 +2384,7 @@ export default function AppDashboard() {
                       </span>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <div className="flex items-start gap-3">
                         <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
                         <p className="text-xs text-white/70 truncate">{booking.pickup}</p>
@@ -1923,18 +2432,31 @@ export default function AppDashboard() {
                           )}
 
                           <div className="flex items-center gap-1.5">
-                            <Clock size={12} className="text-gold" />
-                            <span className="text-[10px] text-white/60 font-bold uppercase">
-                              {booking.serviceType === 'hourly' ? `${booking.hours} Hours` : (() => {
-                                if (!booking.duration) return 'N/A';
-                                if (!booking.isReturn) return booking.duration;
-                                const match = booking.duration.match(/(\d+)\s*min/);
-                                if (match) {
-                                  return `${parseInt(match[1]) * 2} mins`;
-                                }
-                                return booking.duration;
-                              })()}
-                            </span>
+                            {bookingCategory === 'offer' ? (
+                              <>
+                                <Blocks size={12} className="text-gold" />
+                                <span className="text-[10px] text-white/60 font-bold uppercase truncate">
+                                  {booking.serviceType || 'Standard'}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock size={12} className="text-gold" />
+                                <span className="text-[10px] text-white/60 font-bold uppercase">
+                                  {booking.serviceType === 'hourly'
+                                    ? `${booking.hours} Hours`
+                                    : (() => {
+                                      if (!booking.duration) return 'N/A';
+                                      if (!booking.isReturn) return booking.duration;
+                                      const match = booking.duration.match(/(\d+)\s*min/);
+                                      if (match) {
+                                        return `${parseInt(match[1]) * 2} mins`;
+                                      }
+                                      return booking.duration;
+                                    })()}
+                                </span>
+                              </>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-1.5">
@@ -1947,98 +2469,129 @@ export default function AppDashboard() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 py-3 border-y border-white/5">
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Service</span>
-                        <span className="text-[10px] text-gold font-bold truncate uppercase">{booking.serviceType || 'Standard'}</span>
-                      </div>
-                      <div className="flex flex-col relative">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Waypoints</span>
-                          {booking.waypoints?.length > 0 && (
-                            <button
-                              onMouseEnter={() => setShowWaypointsPopup(booking.id)}
-                              onMouseLeave={() => setShowWaypointsPopup(null)}
-                              className="text-gold/50 hover:text-gold transition-colors"
-                            >
-                              <Eye size={10} />
-                            </button>
-                          )}
+                    {bookingCategory !== 'offer' && (
+                      <div className="grid grid-cols-3 gap-2 py-3 border-y border-white/5">
+                        {/* Service */}
+                        <div className="flex flex-col">
+                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Service</span>
+                          <span className="text-[10px] text-gold font-bold truncate uppercase">
+                            {booking.serviceType || 'Standard'}
+                          </span>
                         </div>
-                        <span className="text-[10px] text-white/70 truncate">{booking.waypoints?.length || 0} Stops</span>
 
-                        <AnimatePresence>
-                          {showWaypointsPopup === booking.id && booking.waypoints?.length > 0 && (
-                            <motion.div
-                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                              className="absolute bottom-full left-0 mb-2 w-48 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
-                            >
-                              <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Stop Details</p>
-                              <div className="space-y-2">
-                                {booking.waypoints.map((wp: string, i: number) => (
-                                  <div key={`wp-pop-${i}`} className="flex gap-2 items-start">
-                                    <div className="w-1 h-1 rounded-full bg-gold mt-1.5 shrink-0" />
-                                    <p className="text-[9px] text-white/70 leading-tight">{wp}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                      <div className="flex flex-col relative">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Extras</span>
-                          {booking.selectedExtras?.length > 0 && (
-                            <button
-                              onMouseEnter={() => setShowExtrasPopup(booking.id)}
-                              onMouseLeave={() => setShowExtrasPopup(null)}
-                              className="text-gold/50 hover:text-gold transition-colors"
-                            >
-                              <Eye size={10} />
-                            </button>
-                          )}
+                        {/* Waypoints */}
+                        <div className="flex flex-col relative">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Waypoints</span>
+                            {booking.waypoints?.length > 0 && (
+                              <button
+                                onMouseEnter={() => setShowWaypointsPopup(booking.id)}
+                                onMouseLeave={() => setShowWaypointsPopup(null)}
+                                className="text-gold/50 hover:text-gold transition-colors"
+                              >
+                                <Eye size={10} />
+                              </button>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-white/70 truncate">
+                            {booking.waypoints?.length || 0} Stops
+                          </span>
 
+                          <AnimatePresence>
+                            {showWaypointsPopup === booking.id && booking.waypoints?.length > 0 && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                className="absolute bottom-full left-0 mb-2 w-48 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
+                              >
+                                <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Stop Details</p>
+                                <div className="space-y-2">
+                                  {(booking.waypoints || []).map((wp: string, i: number) => (
+                                    <div key={`wp-pop-${i}`} className="flex gap-2 items-start">
+                                      <div className="w-1 h-1 rounded-full bg-gold mt-1.5 shrink-0" />
+                                      <p className="text-[9px] text-white/70 leading-tight">{wp}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
-                        <span className="text-[10px] text-white/70 truncate">{booking.selectedExtras?.length || 0} Added</span>
 
-                        <AnimatePresence>
-                          {showExtrasPopup === booking.id && booking.selectedExtras?.length > 0 && (
-                            <motion.div
-                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                              className="absolute bottom-full right-0 mb-2 w-40 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
-                            >
-                              <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Selected Extras</p>
-                              <div className="space-y-1">
-                                {booking.selectedExtras.map((id: string, index: number) => {
-                                  const extra = extras.find(e => e.id === id);
-                                  return (
-                                    <p key={`${id}-${index}`} className="text-[9px] text-white/70 font-bold uppercase tracking-tighter">
-                                      • {extra?.name || 'Extra'}
-                                    </p>
-                                  );
-                                })}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                        {/* Extras */}
+                        <div className="flex flex-col relative">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Extras</span>
+                            {booking.selectedExtras?.length > 0 && (
+                              <button
+                                onMouseEnter={() => setShowExtrasPopup(booking.id)}
+                                onMouseLeave={() => setShowExtrasPopup(null)}
+                                className="text-gold/50 hover:text-gold transition-colors"
+                              >
+                                <Eye size={10} />
+                              </button>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-white/70 truncate">
+                            {booking.selectedExtras?.length || 0} Added
+                          </span>
+
+                          <AnimatePresence>
+                            {showExtrasPopup === booking.id && booking.selectedExtras?.length > 0 && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                className="absolute bottom-full right-0 mb-2 w-40 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
+                              >
+                                <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Selected Extras</p>
+                                <div className="space-y-1">
+                                  {(booking.selectedExtras || []).map((id: string, index: number) => {
+                                    const extra = extras.find((e) => e.id === id);
+                                    return (
+                                      <p
+                                        key={`${id}-${index}`}
+                                        className="text-[9px] text-white/70 font-bold uppercase tracking-tighter"
+                                      >
+                                        • {extra?.name || 'Extra'}
+                                      </p>
+                                    );
+                                  })}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    <div className="py-3 border-b border-white/5 mb-3 space-y-2">
+                    <div className="py-3 border-y border-white/10 mb-3 space-y-2">
+                      {/* Always show customer name if offer */}
+                      {bookingCategory === 'offer' && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">
+                            Name:
+                          </span>
+                          <span className="text-[10px] text-white/70 whitespace-nowrap">
+                            {booking.customerName || 'N/A'}
+                          </span>
+                        </div>
+                      )}
+
                       {/* Row 1: Email & Phone */}
                       <div className="flex flex-wrap gap-x-6 gap-y-2">
                         <div className="flex items-center gap-2 min-w-fit">
                           <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Email:</span>
-                          <span className="text-[10px] text-white/70 whitespace-nowrap">{booking.customerEmail || 'N/A'}</span>
+                          <span className="text-[10px] text-white/70 whitespace-nowrap">
+                            {booking.customerEmail || 'N/A'}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2 min-w-fit">
                           <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Phone:</span>
-                          <span className="text-[10px] text-white/70 whitespace-nowrap">{booking.customerPhone || 'N/A'}</span>
+                          <span className="text-[10px] text-white/70 whitespace-nowrap">
+                            {booking.customerPhone || 'N/A'}
+                          </span>
                         </div>
                       </div>
 
@@ -2172,9 +2725,17 @@ export default function AppDashboard() {
                                   </p>
 
                                   <div className="flex gap-2 items-center">
-                                    <p className="text-[10px] text-white font-bold">
-                                      {booking.driverId ? (allUsers.find(u => u.id === booking.driverId)?.name || "Unknown Driver") : "No Driver Assigned"}
-                                    </p>
+                                    {booking.driverId ? (
+                                      <p className="text-[10px] text-white font-bold flex items-center gap-1">
+                                        {allUsers.find(u => u.id === booking.driverId)?.name || "Unknown Driver"}
+                                        <span className="text-white/30 font-normal">|</span>
+                                        <span className="text-[9px] text-gold font-medium">
+                                          {allUsers.find(u => u.id === booking.driverId)?.phone || "No Phone"}
+                                        </span>
+                                      </p>
+                                    ) : (
+                                      <p className="text-[10px] text-white font-bold">No Driver Assigned</p>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -2278,7 +2839,7 @@ export default function AppDashboard() {
 
                       <div className="flex items-center gap-1.5 w-full mt-2">
                         {isAdmin ? (
-                          booking.status === 'completed' ? (
+                          booking.status === 'completed' || booking.status === 'cancelled' ? (
                             <>
                               <button
                                 onClick={() => {
@@ -2432,25 +2993,26 @@ export default function AppDashboard() {
                         ) : null}
 
                         {isDriver && booking.driverId === user.uid && (
-                          <div className="space-y-2">
+                          <div className="space-y-2 w-full">
                             {booking.status === 'assigned' && (
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="flex gap-2 w-full">
                                 <button
                                   onClick={() => updateBookingStatus(booking.id, 'accepted')}
-                                  className="bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
+                                  className="flex-1 bg-green-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-green-600 transition-all"
                                 >
                                   Accept Ride
                                 </button>
                                 <button
                                   onClick={() => updateBookingStatus(booking.id, 'rejected')}
-                                  className="bg-red-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
+                                  className="flex-1 bg-red-500 text-white py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
                                 >
                                   Reject Ride
                                 </button>
                               </div>
                             )}
+
                             {booking.status === 'accepted' && (
-                              <div className="flex gap-2">
+                              <div className="flex gap-2 w-full">
                                 <button
                                   onClick={() => updateBookingStatus(booking.id, 'completed')}
                                   className="flex-1 bg-gold text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-white transition-all"
@@ -2465,6 +3027,7 @@ export default function AppDashboard() {
                                 </button>
                               </div>
                             )}
+
                             {booking.status === 'rejected' && (
                               <button
                                 onClick={() => updateBookingStatus(booking.id, 'assigned')}
@@ -2482,8 +3045,183 @@ export default function AppDashboard() {
                       </div>
                     </div>
                   </div>
-                ))
-                }
+                ))}
+              </div>
+            ) : (
+              <div className="glass rounded-[0.5rem] border border-white/5 overflow-hidden">
+                <div className="overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-left border-collapse min-w-[1240px]">
+                    <thead>
+                      <tr className="bg-white/5 border-b border-white/10">
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Date & Time</th>
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Customer</th>
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Route (Pickup/Dropoff)</th>
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Services</th>
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Fare</th>
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Driver / Status</th>
+                        <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {filteredAndSortedBookings.map((booking, idx) => (
+                        <tr key={`booking-row-${booking.id}-${idx}`} className="hover:bg-white/[0.02] transition-colors group">
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col">
+                              <span className="text-white text-xs font-bold uppercase">{booking.date}</span>
+                              <span className="text-white/40 text-[10px] uppercase tracking-widest">{formatTimeToAMPM(booking.time)}</span>
+                              {booking.isReturn && (
+                                <div className="mt-1 flex items-center gap-1 text-blue-400">
+                                  <RotateCcw size={10} />
+                                  <span className="text-[8px] uppercase tracking-widest font-bold">{booking.returnDate}</span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col">
+                              <span className="text-white text-xs font-bold uppercase truncate max-w-[150px]">{booking.customerName || 'Guest'}</span>
+                              <span className="text-white/40 text-[10px] truncate max-w-[150px]">{booking.customerEmail}</span>
+                              <span className="text-white/40 text-[10px]">{booking.customerPhone}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="space-y-1.5 max-w-[200px]">
+                              <div className="flex items-start gap-2">
+                                <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
+                                <span className="text-xs text-white/70 line-clamp-1">{booking.pickup}</span>
+                              </div>
+                              <div className="flex items-start gap-2">
+                                <MapPin size={12} className="text-gold shrink-0 mt-0.5" />
+                                <span className="text-xs text-white/40 line-clamp-1">{booking.dropoff || (booking.serviceType === 'hourly' ? 'Optional' : 'N/A')}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="flex flex-wrap gap-2">
+                              <span className="px-2 py-0.5 bg-gold/10 text-gold rounded text-[8px] font-bold uppercase tracking-widest border border-gold/20 whitespace-nowrap">
+                                {booking.serviceType}
+                              </span>
+                              <span className="px-2 py-0.5 bg-white/5 text-white/60 rounded text-[8px] font-bold uppercase tracking-widest border border-white/10 whitespace-nowrap">
+                                {booking.vehicleType || 'Sedan'}
+                              </span>
+                              {booking.type === 'offer' && (
+                                <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded text-[8px] font-bold uppercase tracking-widest border border-purple-500/20 whitespace-nowrap transition-all group-hover:bg-purple-500 group-hover:text-white">
+                                  OFFER RIDE
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col">
+                              <span className="text-gold text-sm font-bold font-display">${booking.price}</span>
+                              <span className={cn(
+                                "text-[9px] uppercase tracking-widest font-bold",
+                                booking.paymentStatus === 'paid' ? "text-green-400" : "text-white/40"
+                              )}>{booking.paymentStatus}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col gap-2">
+                              <div className="flex items-center gap-2">
+                                <div className={cn(
+                                  "w-2 h-2 rounded-full",
+                                  booking.status === 'completed' ? "bg-green-500" :
+                                    booking.status === 'confirmed' ? "bg-blue-400" :
+                                      booking.status === 'cancelled' ? "bg-red-500" :
+                                        !booking.driverId ? "bg-red-400 animate-pulse" : "bg-purple-500"
+                                )} />
+                                <div className="flex flex-col">
+                                  <span className="text-xs text-white font-bold uppercase tracking-tighter">
+                                    {booking.status}
+                                  </span>
+                                  <span className="text-[9px] text-white/40 font-bold uppercase tracking-widest">
+                                    {booking.driverId ? (allUsers.find(u => u.id === booking.driverId)?.name || 'Unknown Driver') : 'Unassigned'}
+                                  </span>
+                                </div>
+                              </div>
+                              {isAdmin && !['completed', 'cancelled'].includes(booking.status) && (
+                                <div className="relative">
+                                  <select
+                                    value={booking.driverId || ''}
+                                    onChange={(e) => updateBookingStatus(booking.id, 'assigned', e.target.value)}
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg pl-2 pr-8 py-1.5 text-[10px] text-white/60 outline-none focus:border-gold transition-all appearance-none cursor-pointer hover:bg-white/5"
+                                  >
+                                    <option value="" className="bg-black">Assign Driver...</option>
+                                    {drivers.map(driver => {
+                                      const stats = userDetailStats[driver.id] || { completedRides: 0, avgRating: 0 };
+                                      return (
+                                        <option key={`opt-${booking.id}-${driver.id}`} value={driver.id} className="bg-black">
+                                          {driver.name} ({stats.avgRating?.toFixed(1)}★)
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                  <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-5 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  setViewingBooking(booking);
+                                  setShowViewModal(true);
+                                }}
+                                className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                                title="View Details"
+                              >
+                                <Eye size={14} />
+                              </button>
+
+                              {isAdmin ? (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setEditingBooking(booking);
+                                      setShowBookingModal(true);
+                                    }}
+                                    className="p-2 bg-white/5 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all shadow-lg shadow-blue-500/5"
+                                    title="Edit"
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteBooking(booking.id)}
+                                    className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-lg shadow-red-500/5"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </>
+                              ) : isDriver && booking.driverId === user?.uid ? (
+                                <div className="flex gap-1">
+                                  {booking.status === 'assigned' && (
+                                    <>
+                                      <button onClick={() => updateBookingStatus(booking.id, 'accepted')} className="p-2 bg-green-500/10 text-green-500 rounded-lg h-9 w-9 flex items-center justify-center hover:bg-green-500 hover:text-white transition-all"><CheckCircle size={14} /></button>
+                                      <button onClick={() => updateBookingStatus(booking.id, 'rejected')} className="p-2 bg-red-500/10 text-red-500 rounded-lg h-9 w-9 flex items-center justify-center hover:bg-red-500 hover:text-white transition-all"><X size={14} /></button>
+                                    </>
+                                  )}
+                                  {booking.status === 'accepted' && (
+                                    <button onClick={() => updateBookingStatus(booking.id, 'completed')} className="px-3 py-1.5 h-9 bg-gold text-black rounded-lg text-[9px] font-black uppercase tracking-[0.2em] hover:bg-white transition-all">Complete</button>
+                                  )}
+                                </div>
+                              ) : !isDriver && booking.userId === user?.uid && booking.status !== 'cancelled' && booking.status !== 'completed' && (
+                                <button
+                                  onClick={() => updateBookingStatus(booking.id, 'cancelled')}
+                                  className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                  title="Cancel"
+                                >
+                                  <XCircle size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
@@ -2643,27 +3381,21 @@ export default function AppDashboard() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
-                  { label: 'Total Revenue', value: `$${Math.round(analytics.totalRevenue)}`, icon: DollarSign, color: 'text-green-500', trend: '+13%' },
-                  { label: 'Completed', value: analytics.completedBookings, icon: CheckCircle, color: 'text-blue-500', trend: '+5%' },
+                  { label: 'Total Revenue', value: `$${Math.round(analytics.totalRevenue)}`, icon: DollarSign, color: 'text-green-500' },
+                  { label: 'Completed', value: analytics.completedBookings, icon: CheckCircle, color: 'text-blue-500' },
                   { label: 'Pending Requests', value: analytics.pendingBookings, icon: Clock, color: 'text-gold' },
                   { label: 'Total Volume', value: analytics.totalBookings, icon: LayoutGrid, color: 'text-purple-500' },
                 ].map((stat, i) => (
-                  <div key={`stat-${i}`} className="glass p-6 rounded-2xl border border-white/5 relative overflow-hidden group">
+                  <div key={`stat-${i}`} className="glass p-4 rounded-xl border border-white/5 relative overflow-hidden group">
                     <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-30 transition-opacity">
                       <stat.icon size={20} className={stat.color} />
                     </div>
                     <div className="relative z-10">
-                      <div className="flex justify-between items-start mb-4">
+                      <div className="flex justify-between items-start mb-2">
                         <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/40">{stat.label}</p>
                       </div>
                       <div className="flex items-baseline gap-2">
-                        <h3 className={cn("text-3xl font-display", stat.color)}>{stat.value}</h3>
-                        {stat.trend && (
-                          <span className="text-[10px] font-bold text-green-400">
-                            {stat.trend}
-                          </span>
-                        )}
-                        <div className={cn("w-1 h-1 rounded-full animate-pulse", stat.color.replace('text-', 'bg-'))} />
+                        <h3 className={cn("text-2xl font-display", stat.color)}>{stat.value}</h3>
                       </div>
                     </div>
                   </div>
@@ -2765,7 +3497,7 @@ export default function AppDashboard() {
                         </ResponsiveContainer>
                       </div>
                       {chart.type === 'pie' && (
-                        <div className="mt-6 flex flex-wrap gap-x-4 gap-y-2 justify-center">
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2 justify-center">
                           {(chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData).map((status: any, i: number) => (
                             <div key={i} className="flex items-center gap-2">
                               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: status.color }} />
@@ -2781,7 +3513,7 @@ export default function AppDashboard() {
                   {/* Add Chart Placeholder */}
                   <button
                     onClick={() => setShowAddChartModal(true)}
-                    className="lg:col-span-12 h-[300px] rounded-3xl border-2 border-dashed border-white/5 hover:border-gold/30 hover:bg-gold/5 flex flex-col items-center justify-center gap-4 group transition-all"
+                    className="lg:col-span-8 h-[300px] rounded-3xl border-2 border-dashed border-white/50 hover:border-gold/30 hover:bg-gold/5 flex flex-col items-center justify-center gap-4 group transition-all"
                   >
                     <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
                       <Plus className="text-white/40 group-hover:text-gold" size={24} />
@@ -2860,44 +3592,87 @@ export default function AppDashboard() {
       case 'calendar':
         return (
           <div className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
-              {/* Row 1: Title */}
-              <h3 className="text-2xl font-display text-gold">Booking Calendar</h3>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 w-full">
+              {/* Row 1: Title & Toggle */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <h3 className="text-2xl font-display text-gold">Booking Calendar</h3>
+
+                <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10 w-fit">
+                  <button
+                    onClick={() => setCalendarDateType('pickup')}
+                    className={cn(
+                      "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                      calendarDateType === 'pickup' ? "bg-gold text-black shadow-lg" : "text-white/40 hover:text-white"
+                    )}
+                  >
+                    Pickup Date
+                  </button>
+                  <button
+                    onClick={() => setCalendarDateType('booking')}
+                    className={cn(
+                      "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                      calendarDateType === 'booking' ? "bg-gold text-black shadow-lg" : "text-white/40 hover:text-white"
+                    )}
+                  >
+                    Booking Date
+                  </button>
+                </div>
+              </div>
 
               {/* Row 2: Month navigation */}
-              <div className="flex flex-row items-center justify-center md:justify-start gap-4">
+              <div className="flex flex-row items-center justify-between sm:justify-start gap-4 bg-white/5 p-2 rounded-2xl border border-white/10 w-full sm:w-auto">
                 <button
                   onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-                  className="p-2 hover:bg-white/5 rounded-full"
+                  className="p-2 hover:bg-gold hover:text-black rounded-xl transition-all"
                 >
                   <ChevronLeft size={20} />
                 </button>
 
-                <span className="text-sm font-bold uppercase tracking-widest min-w-[140px] text-center">
+                <span className="text-xs font-bold uppercase tracking-[0.2em] min-w-[140px] text-center text-white/80">
                   {format(currentMonth, 'MMMM yyyy')}
                 </span>
 
                 <button
                   onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-                  className="p-2 hover:bg-white/5 rounded-full"
+                  className="p-2 hover:bg-gold hover:text-black rounded-xl transition-all"
                 >
                   <ChevronRight size={20} />
                 </button>
               </div>
             </div>
 
-            <div className="glass p-8 rounded-3xl border border-white/5">
-              <div className="grid grid-cols-7 gap-4 mb-4">
+            <div className="glass p-4 sm:p-8 rounded-3xl border border-white/5">
+              <div className="grid grid-cols-7 gap-2 sm:gap-4 mb-4">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
                   <div key={day} className="text-center text-[10px] font-bold uppercase tracking-widest text-white/20">
                     {day}
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 gap-4">
+              <div className="grid grid-cols-7 gap-2 sm:gap-4">
                 {calendarDays.map((day) => {
                   const dayStr = day.toISOString();
                   const dayBookings = getBookingsForDate(day);
+
+                  // Group bookings by status
+                  const statusGroups = dayBookings.reduce((acc: Record<string, number>, b) => {
+                    const status = b.status || 'pending';
+                    acc[status] = (acc[status] || 0) + 1;
+                    return acc;
+                  }, {});
+
+                  const getStatusColor = (status: string) => {
+                    switch (status.toLowerCase()) {
+                      case 'pending': return 'bg-[#D4AF37]';
+                      case 'confirmed': return 'bg-[#60A5FA]';
+                      case 'assigned': return 'bg-[#C084FC]';
+                      case 'accepted': return 'bg-[#22D3EE]';
+                      case 'completed': return 'bg-[#4ADE80]';
+                      case 'cancelled': return 'bg-[#F87171]';
+                      default: return 'bg-white/40';
+                    }
+                  };
+
                   return (
                     <div
                       key={dayStr}
@@ -2906,22 +3681,52 @@ export default function AppDashboard() {
                         if (dayBookings.length > 0) setShowDayBookings(true);
                       }}
                       className={cn(
-                        "aspect-square rounded-2xl border p-2 transition-all cursor-pointer relative group",
-                        !isSameMonth(day, currentMonth) ? "opacity-10 border-transparent" :
-                          isToday(day) ? "border-gold bg-gold/5" : "border-white/5 hover:border-white/20",
+                        "aspect-square rounded-xl sm:rounded-2xl border p-1 sm:p-3 transition-all cursor-pointer relative group",
+                        !isSameMonth(day, currentMonth) ? "opacity-10 border-transparent pointer-events-none" :
+                          isToday(day) ? "border-gold bg-gold/5" : "border-white/5 hover:border-white/20 shadow-xl",
                         dayBookings.length > 0 && "bg-white/5"
                       )}
                     >
                       <span className={cn(
-                        "text-xs font-bold",
+                        "text-[10px] sm:text-xs font-bold font-mono",
                         isToday(day) ? "text-gold" : "text-white/40"
                       )}>
                         {format(day, 'd')}
                       </span>
+
                       {dayBookings.length > 0 && (
-                        <div className="absolute bottom-2 right-2 flex flex-col items-end">
-                          <div className="w-1.5 h-1.5 bg-gold rounded-full mb-1" />
-                          <span className="text-[8px] font-bold text-gold">{dayBookings.length} Rides</span>
+                        <div className="absolute bottom-1 sm:bottom-2 left-1 sm:left-3 right-1 sm:right-3">
+                          {/* Dot Matrix for bookings */}
+                          <div className="flex flex-wrap gap-0.5 sm:gap-1 max-w-full">
+                            {Object.entries(statusGroups).map(([status, countValue]) => {
+                              const count = countValue as number;
+                              return (
+                                <div
+                                  key={status}
+                                  className={cn(
+                                    "w-1 h-1 sm:w-2 sm:h-2 rounded-full relative group/dot",
+                                    getStatusColor(status)
+                                  )}
+                                >
+                                  <div className="invisible group-hover/dot:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-black text-white text-[8px] px-1 py-0.5 rounded whitespace-nowrap z-10">
+                                    {status}: {count}
+                                  </div>
+                                  {count > 1 && (
+                                    <span className="absolute -top-1 -right-1 text-[6px] font-bold text-white leading-none scale-75 lg:scale-100">
+                                      {count}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Total Count - Desktop Only */}
+                          <div className="hidden lg:block mt-1 pt-1 border-t border-white/5">
+                            <p className="text-[7px] font-bold uppercase tracking-tight text-white/30 truncate">
+                              {dayBookings.length} {dayBookings.length === 1 ? 'Ride' : 'Rides'}
+                            </p>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -3097,39 +3902,46 @@ export default function AppDashboard() {
                     )}
                   </div>
                   {/* User Activity Stats container with fixed min height for consistency */}
-                  <div className="pt-4 border-t border-white/5 pb-4 flex-1 flex flex-col justify-center min-h-[140px]">
+                  <div className="pt-4 border-t border-white/5 pb-4 flex-1 flex flex-col justify-center min-h-[160px]">
                     {u.role === 'admin' ? (
-                      <div className="grid grid-cols-2 gap-4 h-full">
-                        <div className="flex flex-col">
-                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">System Load</p>
-                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20 shrink-0">
-                              <Calendar size={14} className="text-purple-400" />
-                            </div>
-                            <div className="flex flex-col truncate">
-                              <span className="text-xs font-bold text-white truncate">{userDetailStats[u.id]?.unassignedCount || 0}</span>
-                              <span className="text-[7px] text-white/40 font-bold uppercase tracking-tight truncate">Unassigned</span>
-                            </div>
+                      <div className="space-y-4 h-full flex flex-col">
+                        <div className="flex justify-between items-center">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold">System Overview</p>
+                          <div className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                            <span className="text-[7px] text-blue-500/80 font-bold uppercase tracking-widest">Master Feed</span>
                           </div>
                         </div>
-                        <div className="flex flex-col">
-                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">Cancellations</p>
-                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center border border-red-500/20 shrink-0">
-                              <XCircle size={14} className="text-red-400" />
+                        <div className="bg-white/5 p-3 rounded-2xl border border-white/5 flex-1 flex items-center">
+                          <div className="grid grid-cols-4 gap-1 w-full text-center">
+                            <div className="flex flex-col items-center justify-center">
+                              <DollarSign size={14} className="text-green-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">${Math.round(userDetailStats[u.id]?.totalRevenue || 0).toLocaleString()}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Revenue</p>
                             </div>
-                            <div className="flex flex-col truncate">
-                              <span className="text-xs font-bold text-white truncate">{userDetailStats[u.id]?.cancelledCount || 0}</span>
-                              <span className="text-[7px] text-white/40 font-bold uppercase tracking-tight truncate">Cancelled</span>
+                            <div className="flex flex-col items-center justify-center">
+                              <XCircle size={14} className="text-red-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">${Math.round(userDetailStats[u.id]?.lostRevenue || 0).toLocaleString()}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Lost</p>
+                            </div>
+                            <div className="flex flex-col items-center justify-center">
+                              <CalendarCog size={14} className="text-purple-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">{userDetailStats[u.id]?.unassignedCount || 0}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Pending</p>
+                            </div>
+                            <div className="flex flex-col items-center justify-center">
+                              <Users size={14} className="text-blue-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">{userDetailStats[u.id]?.totalSystemUsers || 0}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Users</p>
                             </div>
                           </div>
                         </div>
                       </div>
                     ) : u.role === 'driver' ? (
                       <div className="flex flex-col justify-center h-full">
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center justify-between mb-3">
                           <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold">
-                            Driver Performance
+                            Operational Health
                           </p>
 
                           {userDetailStats[u.id]?.feedbacks?.length > 0 && (
@@ -3149,45 +3961,34 @@ export default function AppDashboard() {
                                     {userDetailStats[u.id]?.feedbacks?.length}
                                   </span>
                                 </div>
-
-                                {userDetailStats[u.id]?.feedbacks?.map((f: any, i: number) => (
-                                  <div
-                                    key={i}
-                                    className="group/item relative bg-white/5 p-2.5 rounded-xl border border-white/5 hover:border-white/10 transition-colors mb-1.5"
-                                  >
-                                    <div className="flex justify-between items-start mb-1">
-
-                                      {/* NAME + STARS */}
-                                      <div className="min-w-0 flex-1">
-                                        <span className="text-[10px] font-bold text-white block truncate">
-                                          {f.customerName}
-                                        </span>
-
-                                        <div className="flex gap-0.5 mt-0.5">
-                                          {[...Array(5)].map((_, j) => (
-                                            <Star
-                                              key={j}
-                                              size={8}
-                                              className={
-                                                j < (f.rating || 0)
-                                                  ? "text-gold fill-gold"
-                                                  : "text-white/10"
-                                              }
-                                            />
-                                          ))}
+                                <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+                                  {userDetailStats[u.id]?.feedbacks?.map((f: any, i: number) => (
+                                    <div
+                                      key={i}
+                                      className="group/item relative bg-white/5 p-2.5 rounded-xl border border-white/5 hover:border-white/10 transition-colors"
+                                    >
+                                      <div className="flex justify-between items-start mb-1">
+                                        <div className="min-w-0 flex-1">
+                                          <span className="text-[10px] font-bold text-white block truncate">
+                                            {f.customerName}
+                                          </span>
+                                          <div className="flex gap-0.5 mt-0.5">
+                                            {[...Array(5)].map((_, j) => (
+                                              <Star
+                                                key={j}
+                                                size={8}
+                                                className={j < (f.rating || 0) ? "text-gold fill-gold" : "text-white/10"}
+                                              />
+                                            ))}
+                                          </div>
                                         </div>
                                       </div>
+                                      <p className="text-[10px] text-white/70 italic leading-relaxed line-clamp-3">
+                                        {f.comment?.trim() ? `"${f.comment}"` : "No comment provided"}
+                                      </p>
                                     </div>
-
-                                    {/* COMMENT (SAFE FALLBACK) */}
-                                    <p className="text-[10px] text-white/70 italic leading-relaxed line-clamp-4">
-                                      {f.comment?.trim()
-                                        ? `"${f.comment}"`
-                                        : "No comment provided"}
-                                    </p>
-                                  </div>
-                                ))}
-
+                                  ))}
+                                </div>
                                 {/* Pointer arrow */}
                                 <div className="absolute right-2 top-full w-3 h-3 bg-black/95 border-r border-b border-white/10 transform rotate-45 -translate-y-1.5"></div>
                               </div>
@@ -3196,86 +3997,72 @@ export default function AppDashboard() {
                         </div>
 
                         <div className="bg-white/5 p-2 rounded-2xl border border-white/5 flex-1 flex items-center">
-
-                          <div className="grid grid-cols-5 gap-2 w-full text-center">
-
+                          <div className="grid grid-cols-5 gap-1 w-full text-center">
                             <div className="flex flex-col items-center justify-center">
-                              <CheckCircle size={14} className="text-gold mb-1" />
-                              <span className="text-[11px] text-white font-bold">
-                                {userDetailStats[u.id]?.completedRides || 0}
-                              </span>
-                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
-                                Done
-                              </span>
+                              <CheckCircle size={14} className="text-green-400 mb-1.5" />
+                              <span className="text-[11px] text-white font-bold leading-none mb-1">{userDetailStats[u.id]?.completedRides || 0}</span>
+                              <span className="text-[7px] text-white/40 uppercase font-black tracking-tight">Done</span>
                             </div>
-
                             <div className="flex flex-col items-center justify-center">
-                              <MessageSquare size={14} className="text-gold mb-1" />
-                              <span className="text-[11px] text-white font-bold">
-                                {userDetailStats[u.id]?.ratingCount || 0}
-                              </span>
-                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
-                                Reviews
-                              </span>
+                              <Star size={14} className="text-gold mb-1.5" />
+                              <span className="text-[11px] text-white font-bold leading-none mb-1">{userDetailStats[u.id]?.ratingCount || 0}</span>
+                              <span className="text-[7px] text-white/40 uppercase font-black tracking-tight">Rating</span>
                             </div>
-
                             <div className="flex flex-col items-center justify-center">
-                              <AlertCircle size={14} className="text-gold mb-1" />
-                              <span className="text-[11px] text-white font-bold">
-                                {userDetailStats[u.id]?.unreviewedCount || 0}
-                              </span>
-                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
-                                Pending
-                              </span>
+                              <AlertCircle size={14} className="text-orange-400 mb-1.5" />
+                              <span className="text-[11px] text-white font-bold leading-none mb-1">{userDetailStats[u.id]?.unreviewedCount || 0}</span>
+                              <span className="text-[7px] text-white/40 uppercase font-black tracking-tight">Wait</span>
                             </div>
-
                             <div className="flex flex-col items-center justify-center">
-                              <Star size={14} className="text-gold fill-gold mb-1" />
-                              <span className="text-[11px] text-gold font-bold">
-                                {userDetailStats[u.id]?.totalRatingValue || 0}
-                              </span>
-                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
-                                Stars
-                              </span>
+                              <Award size={14} className="text-cyan-400 mb-1.5" />
+                              <span className="text-[11px] text-cyan-400 font-bold leading-none mb-1">{userDetailStats[u.id]?.totalRatingValue || 0}</span>
+                              <span className="text-[7px] text-white/40 uppercase font-black tracking-tight">Score</span>
                             </div>
-
-                            <div className="flex flex-col items-center justify-center">
-                              <PiggyBank size={14} className="text-green-400 mb-1" />
-                              <span className="text-[11px] text-green-400 font-bold">
-                                ${Math.round(userDetailStats[u.id]?.totalEarnings || 0).toLocaleString()}
-                              </span>
-                              <span className="text-[7px] text-white/40 uppercase font-bold tracking-tight">
-                                Revenue
-                              </span>
+                            <div className="flex flex-col items-center justify-center border-l border-white/10 pl-1">
+                              <PiggyBank size={14} className="text-lime-400 mb-1.5" />
+                              <span className="text-[11px] text-lime-400 font-bold leading-none mb-1">${Math.round(userDetailStats[u.id]?.totalEarnings || 0).toLocaleString()}</span>
+                              <span className="text-[7px] text-white/40 uppercase font-black tracking-tight">Rev</span>
                             </div>
-
                           </div>
-
                         </div>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 gap-4 h-full">
-                        <div className="flex flex-col">
-                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">Booking Activity</p>
-                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
-                              <Calendar size={14} className="text-blue-400" />
-                            </div>
-                            <div className="flex flex-col truncate">
-                              <span className="text-xs font-bold text-white truncate">{userDetailStats[u.id]?.totalBookings || 0} Total</span>
-                              <span className="text-[7px] text-green-400 font-bold uppercase tracking-tighter truncate">{userDetailStats[u.id]?.completedRides || 0} Done</span>
-                            </div>
-                          </div>
+                      <div className="space-y-4 h-full flex flex-col">
+                        <div className="flex justify-between items-center">
+                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold">Engagement History</p>
+                          <span className="text-[9px] bg-gold/10 text-gold px-2 py-0.5 rounded-lg border border-gold/20 font-bold uppercase tracking-widest">
+                            Fav: {userDetailStats[u.id]?.favoriteService}
+                          </span>
                         </div>
-                        <div className="flex flex-col">
-                          <p className="text-[8px] uppercase tracking-widest text-white/30 font-extrabold pb-1">Total Spend</p>
-                          <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20 shrink-0">
-                              <DollarSign size={14} className="text-green-400" />
+                        <div className="bg-white/5 p-3 rounded-2xl border border-white/5 flex-1 flex items-center">
+                          <div className="grid grid-cols-5 gap-1.5 w-full text-center">
+                            <div className="flex flex-col items-center justify-center">
+                              <Activity size={14} className="text-blue-400 mb-1.5" />
+                              <div className="flex items-end justify-center gap-0.5 leading-none mb-1">
+                                <span className="text-[11px] font-bold text-white">{userDetailStats[u.id]?.completedRides || 0}</span>
+                                <span className="text-[7px] text-white/40 font-bold">/{userDetailStats[u.id]?.totalBookings || 0}</span>
+                              </div>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Activity</p>
                             </div>
-                            <div className="flex flex-col truncate">
-                              <span className="text-xs font-bold text-white truncate">${Math.round(userDetailStats[u.id]?.totalSpend || 0)}</span>
-                              <span className="text-[7px] text-white/40 font-bold uppercase tracking-tight truncate">Invested</span>
+                            <div className="flex flex-col items-center justify-center">
+                              <DollarSign size={14} className="text-green-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">${Math.round(userDetailStats[u.id]?.totalSpend || 0).toLocaleString()}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Spend</p>
+                            </div>
+                            <div className="flex flex-col items-center justify-center">
+                              <XCircle size={14} className="text-red-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">{userDetailStats[u.id]?.cancelledRides || 0}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Cancel</p>
+                            </div>
+                            <div className="flex flex-col items-center justify-center">
+                              <MessageSquare size={14} className="text-cyan-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">{userDetailStats[u.id]?.reviewedCount || 0}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Reviews</p>
+                            </div>
+                            <div className="flex flex-col items-center justify-center">
+                              <Clock size={14} className="text-orange-400 mb-1.5" />
+                              <p className="text-[11px] font-bold text-white leading-none mb-1">{userDetailStats[u.id]?.unreviewedCount || 0}</p>
+                              <p className="text-[7px] text-white/40 uppercase font-black tracking-tighter">Pending</p>
                             </div>
                           </div>
                         </div>
@@ -3310,26 +4097,26 @@ export default function AppDashboard() {
         if (!isAdmin) return null;
         return (
           <div className="space-y-4">
-            <div className="flex w-full justify-between items-center border-b border-white/5 p-1 bg-white/5 rounded-lg mb-6">
+            <div className="flex w-full justify-between items-center border-b border-white/5 p-1 bg-white/5 rounded-lg mb-6 overflow-x-auto scrollbar-hide">
               {[
-                { id: 'fleet', label: 'Fleet', icon: Truck },
-                { id: 'extras', label: 'Extras', icon: Plus },
-                { id: 'coupons', label: 'Coupons', icon: Percent },
                 { id: 'seo', label: 'SEO', icon: Globe },
-                { id: 'booking-mgmt', label: 'Booking', icon: CalendarCog },
+                { id: 'config', label: 'Config', icon: Cog },
+                { id: 'offers-tours', label: 'Offers & Tours', icon: Tag },
+
+                { id: 'media', label: 'Media', icon: Upload }
               ].map((sub) => (
                 <button
                   key={sub.id}
                   onClick={() => setActiveSubTab(sub.id)}
                   className={cn(
-                    "flex-1 flex items-center justify-center gap-2 px-2 py-3 lg:px-4 lg:py-2 rounded-lg transition-all",
+                    "flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-all",
                     activeSubTab === sub.id
                       ? "bg-gold text-black shadow-lg shadow-gold/20"
                       : "text-white/40 hover:text-white hover:bg-white/5"
                   )}
                   title={sub.label}
                 >
-                  <sub.icon size={18} className="lg:size-[14px]" />
+                  <sub.icon size={14} />
                   <span className="hidden lg:inline text-xs font-bold uppercase tracking-widest whitespace-nowrap">
                     {sub.label}
                   </span>
@@ -3337,380 +4124,70 @@ export default function AppDashboard() {
               ))}
             </div>
 
-            {activeSubTab === 'fleet' && (
+
+            {activeSubTab === 'media' && (
               <div className="space-y-8">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
-                  {/* Heading */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                   <div>
-                    <h3 className="text-2xl font-display text-gold">Fleet Management</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
-                      Manage your luxury vehicles
+                    <h3 className="text-2xl font-display text-gold">Media Library</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest mt-1">
+                      Manage images and files ({((storageUsageBytes / storageLimitBytes) * 100).toFixed(1)}% of free tier used)
+                    </p>
+                    <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+                      <div
+                        className="h-full bg-gold"
+                        style={{ width: `${Math.min((storageUsageBytes / storageLimitBytes) * 100, 100)}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-[10px] text-white/30 mt-1 mt-1">
+                      {(storageUsageBytes / (1024 * 1024)).toFixed(2)} MB / {(storageLimitBytes / (1024 * 1024 * 1024)).toFixed(0)} GB
                     </p>
                   </div>
-
-                  {/* Search + Add Vehicle */}
-                  <div className="flex flex-row items-center gap-2 w-full md:w-auto">
-                    {/* Search input */}
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
-                      <input
-                        type="text"
-                        placeholder="Search fleet..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
-                      />
-                      {searchQuery && (
-                        <button
-                          onClick={() => setSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Add Vehicle button */}
-                    <button
-                      onClick={() => {
-                        setEditingVehicle({ name: '', model: '', type: 'sedan', pax: 3, bags: 2, price: 95, img: '', kmRanges: [] });
-                        setShowVehicleModal(true);
-                      }}
-                      className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
-                    >
-                      <Plus size={18} />
-                      {/* Hide text on mobile, show on md+ */}
-                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
-                        Add Vehicle
-                      </span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingMedia({ alt: '', title: '', description: '', caption: '' });
+                      setMediaFile(null);
+                      setShowMediaModal(true);
+                    }}
+                    className="btn-primary px-6 py-2 flex items-center gap-2"
+                  >
+                    <Plus size={18} />
+                    <span className="text-xs font-bold uppercase tracking-widest">Upload Media</span>
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {fleet.filter(v =>
-                    v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    v.model?.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).map((v) => (
-                    <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
-                      <div className="h-48 relative overflow-hidden">
-                        <img src={v.img || 'https://picsum.photos/seed/car/800/400'} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
-                        <div className="absolute bottom-4 left-4">
-                          <p className="text-xl font-display">{v.name}</p>
-                          <p className="text-xs text-white/60">{v.model}</p>
-                        </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {mediaList.map((media) => (
+                    <div key={media._key || media.id} className="glass rounded-xl overflow-hidden group relative">
+                      <div className="aspect-square bg-black border border-white/10 flex items-center justify-center overflow-hidden">
+                        {media.type?.startsWith('image/') ? (
+                          <img src={media.url} alt={media.alt || media.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                        ) : (
+                          <Image className="text-white/20" size={32} />
+                        )}
                       </div>
-                      <div className="p-6">
-                        <div className="flex justify-between items-center mb-6">
-                          <div className="flex gap-4">
-                            <div className="flex items-center gap-2 text-white/40">
-                              <Users size={14} />
-                              <span className="text-xs font-bold">{v.pax}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-white/40">
-                              <Luggage size={14} />
-                              <span className="text-xs font-bold">{v.bags}</span>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Price</p>
-                            <p className="text-lg font-display text-gold">${v.basePrice}</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              setEditingVehicle({ ...v, id: 'new' });
-                              setShowVehicleModal(true);
-                            }}
-                            className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
-                            title="Duplicate"
-                          >
-                            <Copy size={18} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingVehicle(v);
-                              setShowVehicleModal(true);
-                            }}
-                            className="flex-1 bg-white/5 hover:bg-gold hover:text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
-                          >
-                            Edit Vehicle
-                          </button>
-                          <button
-                            onClick={() => handleDeleteVehicle(v.id)}
-                            className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                          >
-                            <Trash2 size={18} />
+
+                      <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black via-black/80 to-transparent translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+                        <p className="text-xs text-white truncate font-bold">{media.name}</p>
+                        <p className="text-[10px] text-white/50 uppercase tracking-widest mt-1">{(media.size / 1024).toFixed(1)} KB</p>
+
+                        <div className="flex gap-2 mt-3">
+                          <a href={media.url} target="_blank" rel="noopener noreferrer" className="flex-1 text-center py-1.5 bg-white/10 hover:bg-gold hover:text-black rounded text-[10px] uppercase font-bold tracking-widest transition-colors">
+                            View
+                          </a>
+                          <button onClick={() => handleDeleteMedia(media.id, media.url)} className="flex-1 py-1.5 bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded text-[10px] uppercase font-bold tracking-widest transition-colors">
+                            Del
                           </button>
                         </div>
                       </div>
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {activeSubTab === 'extras' && (
-              <div className="space-y-8">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
-                  {/* Row 1: Heading */}
-                  <div>
-                    <h3 className="text-2xl font-display text-gold">Extras Management</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
-                      Manage additional ride options
-                    </p>
-                  </div>
-
-                  {/* Row 2: Search + Add Extra */}
-                  <div className="flex flex-row items-center gap-2 w-full md:w-auto">
-                    {/* Search input */}
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
-                      <input
-                        type="text"
-                        placeholder="Search extras..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
-                      />
-                      {searchQuery && (
-                        <button
-                          onClick={() => setSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
+                  {mediaList.length === 0 && (
+                    <div className="col-span-full py-20 text-center glass rounded-2xl border border-white/5 border-dashed">
+                      <Image size={48} className="mx-auto mb-4 text-white/20" />
+                      <p className="text-white/50 text-sm uppercase tracking-widest">No Media Found</p>
                     </div>
-
-                    {/* Add Extra button */}
-                    <button
-                      onClick={() => {
-                        setEditingExtra({ name: '', description: '', price: 0, active: true });
-                        setShowExtraModal(true);
-                      }}
-                      className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
-                    >
-                      <Plus size={18} />
-                      {/* Hide text on mobile, show on md+ */}
-                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
-                        Add Extra
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {extras.filter(e =>
-                    e.name?.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).map((e) => (
-                    <div key={e.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
-                      {e.active ? (
-                        <div className="absolute top-0 right-0 bg-green-600 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
-                          Active
-                        </div>
-                      ) : (
-                        <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
-                          Inactive
-                        </div>
-                      )}
-                      <div className="flex justify-between items-start mb-2 mt-2">
-                        <div>
-                          <h4 className="text-xl font-display font-bold text-gold mb-1">{e.name}</h4>
-                        </div>
-                        <div className="bg-gold/10 p-1.5 rounded-lg">
-                          <p className="text-[10px] text-gold uppercase tracking-widest font-bold">
-                            ${e.price}
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-white/60 mb-6 line-clamp-2">{e.description}</p>
-
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setEditingExtra({ ...e, id: 'new' });
-                            setShowExtraModal(true);
-                          }}
-                          className="p-2 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
-                          title="Duplicate"
-                        >
-                          <Copy size={14} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditingExtra(e);
-                            setShowExtraModal(true);
-                          }}
-                          className="flex-1 py-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
-                        >
-                          <Edit2 size={14} />
-                          Edit
-                        </button>
-
-                        <button
-                          onClick={() => handleDeleteExtra(e.id)}
-                          className="flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
-                        >
-                          <Trash2 size={14} />
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeSubTab === 'coupons' && (
-              <div className="space-y-8">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
-                  {/* Row 1: Heading */}
-                  <div>
-                    <h3 className="text-2xl font-display text-gold">Coupon Management</h3>
-                    <p className="text-white/40 text-[10px] uppercase tracking-widest">
-                      Manage discount codes
-                    </p>
-                  </div>
-
-                  {/* Row 2: Search + Add Coupon */}
-                  <div className="flex flex-row items-center gap-2 w-full md:w-auto">
-                    {/* Search input */}
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
-                      <input
-                        type="text"
-                        placeholder="Search coupons..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
-                      />
-                      {searchQuery && (
-                        <button
-                          onClick={() => setSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Add Coupon button */}
-                    <button
-                      onClick={() => {
-                        setEditingCoupon({
-                          code: '',
-                          type: 'percentage',
-                          value: 0,
-                          startDate: '',
-                          endDate: '',
-                          usageLimit: 0,
-                          usedCount: 0,
-                          active: true,
-                          serviceIds: [],
-                        });
-                        setShowCouponModal(true);
-                      }}
-                      className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
-                    >
-                      <Plus size={18} />
-                      {/* Hide text on mobile, show on md+ */}
-                      <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
-                        Add Coupon
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {coupons.filter(c =>
-                    c.code?.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).map((c) => (
-                    <div key={c.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
-                      {c.active ? (
-                        <div className="absolute top-0 right-0 bg-green-600 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
-                          Active
-                        </div>
-                      ) : (
-                        <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
-                          Inactive
-                        </div>
-                      )}
-                      <div className="flex justify-between items-start mb-4 mt-2">
-                        <div>
-                          <h4 className="text-xl font-bold font-display text-gold mb-1">{c.code}</h4>
-                        </div>
-                        <div className="bg-gold/10 p-1.5 rounded-lg">
-                          <p className="text-[10px] uppercase font-bold text-gold">
-                            {c.type === 'percentage' ? `${c.value}% OFF` : `$${c.value} OFF`}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3 mb-6">
-                        <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold">
-                          <span className="text-white/30">Validity</span>
-                          <span className="text-white/60">{c.startDate} - {c.endDate}</span>
-                        </div>
-                        <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold">
-                          <span className="text-white/30">Usage</span>
-                          <span className="text-white/60">{c.usedCount || 0} / {c.usageLimit || '∞'}</span>
-                        </div>
-                        <div className="flex justify-between text-[10px] tracking-widest font-bold">
-                          <span className="text-white/30 uppercase">Aplc. Services</span>
-
-                          {(!c.serviceIds || c.serviceIds.length === 0) ? (
-                            <span className="text-[9px] bg-white/10 text-white/80 px-2 py-1 rounded-lg">All Services</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1 justify-end">
-                              {c.serviceIds.map((service) => (
-                                <span
-                                  key={service}
-                                  className="text-[9px] bg-white/10 text-white/80 px-1.5 py-1 rounded-lg"
-                                >
-                                  {service.charAt(0).toUpperCase() + service.slice(1).toLowerCase()}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            const { id, ...couponData } = c;
-                            setEditingCoupon({ ...couponData, code: c.code + '-COPY' });
-                            setShowCouponModal(true);
-                          }}
-                          className="p-2 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
-                          title="Duplicate"
-                        >
-                          <Copy size={14} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditingCoupon(c);
-                            setShowCouponModal(true);
-                          }}
-                          className="flex-1 py-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
-                        >
-                          <Edit2 size={14} />
-                          Edit
-                        </button>
-
-                        <button
-                          onClick={() => handleDeleteCoupon(c.id)}
-                          className="flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/50 hover:text-white transition-all font-bold flex items-center justify-center gap-1"
-                        >
-                          <Trash2 size={14} />
-                          <span className="text-[12px] font-bold uppercase tracking-widest">Delete</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
@@ -3918,7 +4395,7 @@ export default function AppDashboard() {
                 </div>
 
                 {/* 2nd: Blogs Section */}
-                <div className="space-y-6 border-t border-white/5 pt-12">
+                <div className="space-y-6 border-t border-white/5 pt-12 custom-scrollbar">
                   <div className="flex justify-between items-center">
                     <div>
                       <h3 className="text-2xl font-display text-gold">Blog Posts</h3>
@@ -3942,7 +4419,20 @@ export default function AppDashboard() {
                       </button>
                       <button
                         onClick={() => {
-                          setEditingBlog({ title: '', slug: '', content: '', excerpt: '', category: 'Travel Tips', featuredImage: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                          setEditingBlog({
+                            title: '',
+                            slug: '',
+                            content: '',
+                            excerpt: '',
+                            category: 'Travel Tips',
+                            featuredImage: '',
+                            featuredImageAlt: '',
+                            metaTitle: '',
+                            metaDescription: '',
+                            keywords: '',
+                            includeInSitemap: true,
+                            noindex: false
+                          });
                           setShowBlogModal(true);
                         }}
                         className="btn-primary px-6 py-2 flex items-center gap-2"
@@ -3961,7 +4451,13 @@ export default function AppDashboard() {
                           <div className="absolute inset-0 bg-black/40" />
                           <div className="absolute bottom-3 left-4">
                             <p className="text-sm font-bold text-white line-clamp-1">{blog.title}</p>
-                            <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-[10px] text-gold uppercase tracking-widest">{blog.category}</p>
+                              <span className="w-1 h-1 bg-white/20 rounded-full"></span>
+                              <p className="text-[9px] text-white/40 uppercase font-medium">
+                                {blog.date || (blog.createdAt?.seconds ? new Date(blog.createdAt.seconds * 1000).toLocaleDateString() : 'Draft')}
+                              </p>
+                            </div>
                           </div>
                         </div>
                         <div className="p-4 flex items-center justify-between">
@@ -3985,7 +4481,10 @@ export default function AppDashboard() {
                                   id: blog.id,
                                   content: blog.customCss || '',
                                   isActive: blog.isCustomCssActive !== false,
-                                  title: `CSS: ${blog.title}`
+                                  title: `CSS: ${blog.title}`,
+                                  itemContent: blog.content,
+                                  slug: blog.slug,
+                                  featuredImage: blog.featuredImage || blog.image
                                 });
                                 setShowCssModal(true);
                               }}
@@ -4003,7 +4502,11 @@ export default function AppDashboard() {
                             </button>
                             <button
                               onClick={() => {
-                                setEditingBlog(blog);
+                                const blogWithKeywordString = {
+                                  ...blog,
+                                  keywords: Array.isArray(blog.keywords) ? blog.keywords.join(', ') : (blog.keywords || '')
+                                };
+                                setEditingBlog(blogWithKeywordString);
                                 setShowBlogModal(true);
                               }}
                               className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
@@ -4054,7 +4557,18 @@ export default function AppDashboard() {
                       </button>
                       <button
                         onClick={() => {
-                          setEditingPage({ title: '', slug: '', content: '', metaTitle: '', metaDescription: '', keywords: '', includeInSitemap: true, noindex: false });
+                          setEditingPage({
+                            title: '',
+                            slug: '',
+                            content: '',
+                            featuredImage: '',
+                            featuredImageAlt: '',
+                            metaTitle: '',
+                            metaDescription: '',
+                            keywords: '',
+                            includeInSitemap: true,
+                            noindex: false
+                          });
                           setShowPageModal(true);
                         }}
                         className="btn-primary px-6 py-2 flex items-center gap-2"
@@ -4072,14 +4586,19 @@ export default function AppDashboard() {
                         .map(page => (
                           <div
                             key={page.id || page.slug}
-                            className="glass p-6 rounded-2xl border border-white/5 group hover:border-gold/30 transition-all flex flex-col justify-between"
+                            className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all flex flex-col"
                           >
-                            {/* Top row: title left, badges right */}
-                            <div className="flex justify-between items-center mb-4">
-                              <div>
-                                <h4 className="text-lg font-bold text-white">{page.title}</h4>
-                                <p className="text-xs text-gold">/{page.slug}</p>
+                            <div className="h-32 relative overflow-hidden">
+                              <img src={page.featuredImage || 'https://picsum.photos/seed/page/800/400'} alt={page.featuredImageAlt || page.title} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/40" />
+                              <div className="absolute bottom-3 left-4">
+                                <h4 className="text-sm font-bold text-white line-clamp-1">{page.title}</h4>
+                                <p className="text-[10px] text-gold uppercase tracking-widest font-bold">/{page.slug}</p>
                               </div>
+                            </div>
+
+                            <div className="p-4 space-y-4">
+                              {/* Top row: badges */}
                               <div className="flex gap-2">
                                 <span className={cn("text-[8px] uppercase font-bold px-2 py-0.5 rounded", page.noindex ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400")}>
                                   {page.noindex ? 'No Index' : 'Index'}
@@ -4088,55 +4607,62 @@ export default function AppDashboard() {
                                   {page.includeInSitemap ? 'In Sitemap' : 'Hidden'}
                                 </span>
                               </div>
-                            </div>
 
-                            {/* Bottom row: action buttons pinned */}
-                            <div className="flex gap-2 justify-end">
-                              <button
-                                onClick={() => window.open(`/${page.slug}`, '_blank')}
-                                className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
-                                title="View Page"
-                              >
-                                <Eye size={18} />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setCssConfig({
-                                    type: 'page',
-                                    id: page.id,
-                                    content: page.customCss || '',
-                                    isActive: page.isCustomCssActive !== false,
-                                    title: `CSS: ${page.title}`
-                                  });
-                                  setShowCssModal(true);
-                                }}
-                                className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
-                                title="Custom CSS"
-                              >
-                                <Code2 size={18} />
-                              </button>
-                              <button
-                                onClick={() => handleDuplicatePage(page)}
-                                className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
-                                title="Duplicate Page"
-                              >
-                                <Copy size={18} />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingPage(page);
-                                  setShowPageModal(true);
-                                }}
-                                className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
-                              >
-                                <Edit2 size={18} />
-                              </button>
-                              <button
-                                onClick={() => handleDeletePage(page.id)}
-                                className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-                              >
-                                <Trash2 size={18} />
-                              </button>
+                              {/* Bottom row: action buttons pinned */}
+                              <div className="flex gap-2 justify-end">
+                                <button
+                                  onClick={() => window.open(`/${page.slug}`, '_blank')}
+                                  className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
+                                  title="View Page"
+                                >
+                                  <Eye size={18} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setCssConfig({
+                                      type: 'page',
+                                      id: page.id,
+                                      content: page.customCss || '',
+                                      isActive: page.isCustomCssActive !== false,
+                                      title: `CSS: ${page.title}`,
+                                      itemContent: page.content,
+                                      slug: page.slug,
+                                      featuredImage: page.featuredImage
+                                    });
+                                    setShowCssModal(true);
+                                  }}
+                                  className="p-3 bg-white/5 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all"
+                                  title="Custom CSS"
+                                >
+                                  <Code2 size={18} />
+                                </button>
+                                <button
+                                  onClick={() => handleDuplicatePage(page)}
+                                  className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                                  title="Duplicate Page"
+                                >
+                                  <Copy size={18} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const pageWithKeywordString = {
+                                      ...page,
+                                      keywords: Array.isArray(page.keywords) ? page.keywords.join(', ') : (page.keywords || '')
+                                    };
+                                    setEditingPage(pageWithKeywordString);
+                                    setShowPageModal(true);
+                                  }}
+                                  className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                                >
+                                  <Edit2 size={18} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeletePage(page.id)}
+                                  className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))
@@ -4150,8 +4676,735 @@ export default function AppDashboard() {
               </div>
             )}
 
-            {activeSubTab === 'booking-mgmt' && (
+            {activeSubTab === 'offers-tours' && (
+              <div className="space-y-12">
+                {/* Offers Section */}
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Offers Management</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage special fixed-rate deals</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          setCsvImportType('offers');
+                          setShowCsvImportModal(true);
+                        }}
+                        className="bg-white/5 border border-white/10 hover:border-gold/50 text-white/60 hover:text-white px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+                      >
+                        <Upload size={16} />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Import CSV</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingOffer({
+                            title: '',
+                            description: '',
+                            discountType: 'percentage',
+                            discountValue: 15,
+                            image: '',
+                            active: true,
+                            slug: '',
+                            tags: [],
+                            fleets: []
+                          });
+                          setShowOfferModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                      >
+                        <Plus size={18} />
+                        <span className="text-xs font-bold uppercase tracking-widest">Add Offer</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
+                    <div className="relative flex-1 w-full sm:max-w-sm">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
+                      <input
+                        type="text"
+                        placeholder="Search standard and special offers..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-gold/50 transition-all font-mono"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors"
+                        >
+                          <XCircle size={16} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 bg-black/40 p-1.5 rounded-xl border border-white/10 shrink-0">
+                      <button
+                        onClick={() => setOfferViewMode('grid')}
+                        className={cn(
+                          "p-2 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
+                          offerViewMode === 'grid'
+                            ? "bg-gold text-black shadow-lg"
+                            : "text-white/40 hover:text-white hover:bg-white/5"
+                        )}
+                        title="Grid View"
+                      >
+                        <LayoutGrid size={18} />
+                      </button>
+                      <button
+                        onClick={() => setOfferViewMode('list')}
+                        className={cn(
+                          "p-2 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
+                          offerViewMode === 'list'
+                            ? "bg-gold text-black shadow-lg"
+                            : "text-white/40 hover:text-white hover:bg-white/5"
+                        )}
+                        title="List View"
+                      >
+                        <List size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {offerViewMode === 'grid' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {filteredOffers.length > 0 ? (
+                        filteredOffers.map((offer) => (
+                          <div key={offer.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all flex flex-col">
+                            <div className="h-40 relative">
+                              <img src={offer.image || 'https://picsum.photos/seed/offer/600/300'} alt={offer.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
+                              <div className="absolute top-4 right-4 flex flex-wrap gap-2 justify-end">
+                                {offer.tags?.map((tag: string, tIdx: number) => (
+                                  <span key={`${offer.id}-tag-${tag}-${tIdx}`} className="px-2 py-1 rounded bg-gold text-black text-[7px] font-black uppercase tracking-tighter shadow-lg">
+                                    {tag}
+                                  </span>
+                                ))}
+                                <span className={cn(
+                                  "px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest",
+                                  offer.active ? "bg-green-500 text-white" : "bg-red-500 text-white"
+                                )}>
+                                  {offer.active ? 'Active' : 'Inactive'}
+                                </span>
+                              </div>
+                              <div className="absolute bottom-4 left-4">
+                                <p className="text-xl font-display">{offer.title}</p>
+                                {(() => {
+                                  const prices = (offer.fleets || []).map((f: any) => Number(f.salePrice)).filter((p: number) => !isNaN(p));
+                                  const min = prices.length ? Math.min(...prices) : 0;
+                                  const max = prices.length ? Math.max(...prices) : 0;
+                                  return (
+                                    <p className="text-gold font-bold text-sm">
+                                      {min === max ? `$${min}` : `$${min} - $${max}`}
+                                    </p>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                            <div className="p-4 flex-1 flex flex-col">
+                              <p className="text-white/60 text-[10px] line-clamp-2 mb-4 italic">"{offer.description}"</p>
+                              <div className="mt-auto flex items-center gap-2">
+                                <button
+                                  onClick={() => handleDuplicateOffer(offer)}
+                                  className="flex-1 p-2 bg-white/5 text-white/40 hover:text-gold rounded-lg transition-all"
+                                  title="Duplicate"
+                                >
+                                  <Copy size={16} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingOffer(offer);
+                                    setShowOfferModal(true);
+                                  }}
+                                  className="flex-1 p-2 bg-white/5 text-white/40 hover:text-white rounded-lg transition-all"
+                                  title="Edit"
+                                >
+                                  <Edit2 size={16} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteOffer(offer.id)}
+                                  className="flex-1 p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-full py-12 text-center bg-white/5 rounded-2xl border border-dashed border-white/10">
+                          <p className="text-white/40 italic">No offers found.</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="glass rounded-[0.5rem] border border-white/5 overflow-hidden">
+                      <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-left border-collapse min-w-[800px]">
+                          <thead>
+                            <tr className="bg-white/5 border-b border-white/5">
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold w-16">Status</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold min-w-[250px]">Offer Details</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold">Discount</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold">Price Range</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                            {filteredOffers.length > 0 ? (
+                              filteredOffers.map((offer) => {
+                                const prices = (offer.fleets || []).map((f: any) => Number(f.salePrice)).filter((p: number) => !isNaN(p));
+                                const min = prices.length ? Math.min(...prices) : 0;
+                                const max = prices.length ? Math.max(...prices) : 0;
+                                return (
+                                  <tr key={`list-offer-${offer.id}`} className="hover:bg-white/5 transition-colors group">
+                                    <td className="px-6 py-4">
+                                      <span className={cn(
+                                        "px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest",
+                                        offer.active ? "bg-green-500 text-white" : "bg-red-500 text-white"
+                                      )}>
+                                        {offer.active ? 'Active' : 'Inactive'}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-3">
+                                        <img src={offer.image || 'https://picsum.photos/seed/offer/60/60'} alt={offer.title} className="w-12 h-12 rounded-lg object-cover" />
+                                        <div>
+                                          <p className="text-sm font-bold text-white mb-0.5">{offer.title}</p>
+                                          <p className="text-[10px] text-white/50 line-clamp-1">"{offer.description}"</p>
+                                          <div className="flex gap-1 mt-1">
+                                            {offer.tags?.slice(0, 3).map((tag: string, tIdx: number) => (
+                                              <span key={`${offer.id}-list-tag-${tag}-${tIdx}`} className="text-[8px] bg-gold/10 text-gold px-1 rounded uppercase tracking-widest">
+                                                {tag}
+                                              </span>
+                                            ))}
+                                            {(offer.tags?.length || 0) > 3 && <span className="text-[8px] text-white/40">...</span>}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      {offer.discountType === 'percentage'
+                                        ? <span className="px-2 py-1 bg-blue-500/10 text-blue-400 rounded text-xs font-bold">{offer.discountValue}% OFF</span>
+                                        : <span className="px-2 py-1 bg-green-500/10 text-green-400 rounded text-xs font-bold">${offer.discountValue} OFF</span>}
+                                    </td>
+                                    <td className="px-6 py-4 font-mono text-sm">
+                                      {min === max ? `$${min}` : `$${min} - $${max}`}
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                          onClick={() => handleDuplicateOffer(offer)}
+                                          className="p-2 bg-white/5 text-white/40 hover:text-gold rounded-lg transition-all"
+                                          title="Duplicate"
+                                        >
+                                          <Copy size={14} />
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setEditingOffer(offer);
+                                            setShowOfferModal(true);
+                                          }}
+                                          className="p-2 bg-white/5 text-white/40 hover:text-white rounded-lg transition-all"
+                                          title="Edit"
+                                        >
+                                          <Edit2 size={14} />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteOffer(offer.id)}
+                                          className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                          title="Delete"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={5} className="py-12 text-center text-white/40 italic">
+                                  No offers found.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tours Section */}
+                <div className="space-y-6 pt-12 border-t border-white/5">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Tours Management</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage luxury private tours</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          setCsvImportType('tours');
+                          setShowCsvImportModal(true);
+                        }}
+                        className="bg-white/5 border border-white/10 hover:border-gold/50 text-white/60 hover:text-white px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+                      >
+                        <Upload size={16} />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Import CSV</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingTour({ title: '', description: '', price: 0, image: '', active: true, slug: '', duration: '', capacity: 0, locations: [] });
+                          setShowTourModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                      >
+                        <Plus size={18} />
+                        <span className="text-xs font-bold uppercase tracking-widest">Add Tour</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {tours.length > 0 ? (
+                      tours.map((tour) => (
+                        <div key={tour.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all flex flex-col">
+                          <div className="h-40 relative">
+                            <img src={tour.image || 'https://picsum.photos/seed/tour/600/300'} alt={tour.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
+                            <div className="absolute top-4 right-4 flex gap-2">
+                              {tour.active ? (
+                                <span className="bg-green-500 text-white px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest">Active</span>
+                              ) : (
+                                <span className="bg-red-500 text-white px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest">Inactive</span>
+                              )}
+                            </div>
+                            <div className="absolute bottom-4 left-4">
+                              <p className="text-xl font-display">{tour.title}</p>
+                              <div className="flex items-center gap-3 text-[10px] text-white/60 uppercase tracking-widest font-bold">
+                                <span className="flex items-center gap-1"><Clock size={10} /> {tour.duration}</span>
+                                <span className="flex items-center gap-1 font-display text-gold font-normal">From ${tour.price}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-4 flex-1 flex flex-col">
+                            <p className="text-white/60 text-[10px] line-clamp-2 mb-4 italic">"{tour.description}"</p>
+                            <div className="mt-auto flex items-center gap-2">
+                              <button
+                                onClick={() => handleDuplicateTour(tour)}
+                                className="flex-1 p-2 bg-white/5 text-white/40 hover:text-gold rounded-lg transition-all"
+                                title="Duplicate"
+                              >
+                                <Copy size={16} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingTour(tour);
+                                  setShowTourModal(true);
+                                }}
+                                className="flex-1 p-2 bg-white/5 text-white/40 hover:text-white rounded-lg transition-all"
+                                title="Edit"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTour(tour.id)}
+                                className="flex-1 p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                title="Delete"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="col-span-full py-12 text-center bg-white/5 rounded-2xl border border-dashed border-white/10">
+                        <p className="text-white/40 italic">No tours found.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'config' && (
               <div className="space-y-8">
+                <div className="space-y-8">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                    {/* Heading */}
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Fleet Management</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                        Manage your luxury vehicles
+                      </p>
+                    </div>
+
+                    {/* Search + Add Vehicle */}
+                    <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                      {/* Search input */}
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                        <input
+                          type="text"
+                          placeholder="Search fleet..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                        />
+                        {searchQuery && (
+                          <button
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Add Vehicle button */}
+                      <button
+                        onClick={() => {
+                          setEditingVehicle({ name: '', model: '', type: 'sedan', pax: 3, bags: 2, price: 95, img: '', kmRanges: [] });
+                          setShowVehicleModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                      >
+                        <Plus size={18} />
+                        {/* Hide text on mobile, show on md+ */}
+                        <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                          Add Vehicle
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {fleet.filter(v =>
+                      v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      v.model?.toLowerCase().includes(searchQuery.toLowerCase())
+                    ).map((v) => (
+                      <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+                        <div className="h-48 relative overflow-hidden">
+                          <img src={v.img || 'https://picsum.photos/seed/car/800/400'} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
+                          <div className="absolute bottom-4 left-4">
+                            <p className="text-xl font-display">{v.name}</p>
+                            <p className="text-xs text-white/60">{v.model}</p>
+                          </div>
+                        </div>
+                        <div className="p-6">
+                          <div className="flex justify-between items-center mb-6">
+                            <div className="flex gap-4">
+                              <div className="flex items-center gap-2 text-white/40">
+                                <Users size={14} />
+                                <span className="text-xs font-bold">{v.pax}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-white/40">
+                                <Luggage size={14} />
+                                <span className="text-xs font-bold">{v.bags}</span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] uppercase tracking-widest text-white/30 font-bold">Price</p>
+                              <p className="text-lg font-display text-gold">${v.basePrice}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                setEditingVehicle({ ...v, id: 'new' });
+                                setShowVehicleModal(true);
+                              }}
+                              className="p-3 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                              title="Duplicate"
+                            >
+                              <Copy size={18} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingVehicle(v);
+                                setShowVehicleModal(true);
+                              }}
+                              className="flex-1 bg-white/5 hover:bg-gold hover:text-black py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
+                            >
+                              Edit Vehicle
+                            </button>
+                            <button
+                              onClick={() => handleDeleteVehicle(v.id)}
+                              className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <hr className="border-white/10 my-6" />
+                <div className="space-y-8">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                    {/* Row 1: Heading */}
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Extras Management</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                        Manage additional ride options
+                      </p>
+                    </div>
+
+                    {/* Row 2: Search + Add Extra */}
+                    <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                      {/* Search input */}
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                        <input
+                          type="text"
+                          placeholder="Search extras..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                        />
+                        {searchQuery && (
+                          <button
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Add Extra button */}
+                      <button
+                        onClick={() => {
+                          setEditingExtra({ name: '', description: '', price: 0, active: true });
+                          setShowExtraModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                      >
+                        <Plus size={18} />
+                        {/* Hide text on mobile, show on md+ */}
+                        <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                          Add Extra
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {extras.filter(e =>
+                      e.name?.toLowerCase().includes(searchQuery.toLowerCase())
+                    ).map((e) => (
+                      <div key={e.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
+                        {e.active ? (
+                          <div className="absolute top-0 right-0 bg-green-600 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                            Active
+                          </div>
+                        ) : (
+                          <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                            Inactive
+                          </div>
+                        )}
+                        <div className="flex justify-between items-start mb-2 mt-2">
+                          <div>
+                            <h4 className="text-xl font-display font-bold text-gold mb-1">{e.name}</h4>
+                          </div>
+                          <div className="bg-gold/10 p-1.5 rounded-lg">
+                            <p className="text-[10px] text-gold uppercase tracking-widest font-bold">
+                              ${e.price}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-white/60 mb-6 line-clamp-2">{e.description}</p>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingExtra({ ...e, id: 'new' });
+                              setShowExtraModal(true);
+                            }}
+                            className="p-2 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                            title="Duplicate"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingExtra(e);
+                              setShowExtraModal(true);
+                            }}
+                            className="flex-1 py-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
+                          >
+                            <Edit2 size={14} />
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteExtra(e.id)}
+                            className="flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <hr className="border-white/10 my-6" />
+                <div className="space-y-8">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+                    {/* Row 1: Heading */}
+                    <div>
+                      <h3 className="text-2xl font-display text-gold">Coupon Management</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                        Manage discount codes
+                      </p>
+                    </div>
+
+                    {/* Row 2: Search + Add Coupon */}
+                    <div className="flex flex-row items-center gap-2 w-full md:w-auto">
+                      {/* Search input */}
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" size={14} />
+                        <input
+                          type="text"
+                          placeholder="Search coupons..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-10 py-2 text-xs text-white outline-none focus:border-gold transition-all"
+                        />
+                        {searchQuery && (
+                          <button
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Add Coupon button */}
+                      <button
+                        onClick={() => {
+                          setEditingCoupon({
+                            code: '',
+                            type: 'percentage',
+                            value: 0,
+                            startDate: '',
+                            endDate: '',
+                            usageLimit: 0,
+                            usedCount: 0,
+                            active: true,
+                            serviceIds: [],
+                          });
+                          setShowCouponModal(true);
+                        }}
+                        className="btn-primary px-6 py-2 flex items-center justify-center gap-2 shrink-0"
+                      >
+                        <Plus size={18} />
+                        {/* Hide text on mobile, show on md+ */}
+                        <span className="hidden md:inline text-xs font-bold uppercase tracking-widest">
+                          Add Coupon
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {coupons.filter(c =>
+                      c.code?.toLowerCase().includes(searchQuery.toLowerCase())
+                    ).map((c) => (
+                      <div key={c.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
+                        {c.active ? (
+                          <div className="absolute top-0 right-0 bg-green-600 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                            Active
+                          </div>
+                        ) : (
+                          <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-bold uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                            Inactive
+                          </div>
+                        )}
+                        <div className="flex justify-between items-start mb-4 mt-2">
+                          <div>
+                            <h4 className="text-xl font-bold font-display text-gold mb-1">{c.code}</h4>
+                          </div>
+                          <div className="bg-gold/10 p-1.5 rounded-lg">
+                            <p className="text-[10px] uppercase font-bold text-gold">
+                              {c.type === 'percentage' ? `${c.value}% OFF` : `$${c.value} OFF`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 mb-6">
+                          <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold">
+                            <span className="text-white/30">Validity</span>
+                            <span className="text-white/60">{c.startDate} - {c.endDate}</span>
+                          </div>
+                          <div className="flex justify-between text-[10px] uppercase tracking-widest font-bold">
+                            <span className="text-white/30">Usage</span>
+                            <span className="text-white/60">{c.usedCount || 0} / {c.usageLimit || '∞'}</span>
+                          </div>
+                          <div className="flex justify-between text-[10px] tracking-widest font-bold">
+                            <span className="text-white/30 uppercase">Aplc. Services</span>
+
+                            {(!c.serviceIds || c.serviceIds.length === 0) ? (
+                              <span className="text-[9px] bg-white/10 text-white/80 px-2 py-1 rounded-lg">All Services</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1 justify-end">
+                                {c.serviceIds.map((service) => (
+                                  <span
+                                    key={`${c.id}-${service}`}
+                                    className="text-[9px] bg-white/10 text-white/80 px-1.5 py-1 rounded-lg"
+                                  >
+                                    {service.charAt(0).toUpperCase() + service.slice(1).toLowerCase()}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              const { id, ...couponData } = c;
+                              setEditingCoupon({ ...couponData, code: c.code + '-COPY' });
+                              setShowCouponModal(true);
+                            }}
+                            className="p-2 bg-white/5 text-gold rounded-xl hover:bg-gold hover:text-black transition-all"
+                            title="Duplicate"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingCoupon(c);
+                              setShowCouponModal(true);
+                            }}
+                            className="flex-1 py-2 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500/50 hover:text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1"
+                          >
+                            <Edit2 size={14} />
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteCoupon(c.id)}
+                            className="flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/50 hover:text-white transition-all font-bold flex items-center justify-center gap-1"
+                          >
+                            <Trash2 size={14} />
+                            <span className="text-[12px] font-bold uppercase tracking-widest">Delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <hr className="border-white/10 my-6" />
                 <div className="glass p-6 md:p-8 rounded-3xl border border-white/5 w-full">
                   {/* Booking Configuration header row with Save button */}
                   <div className="flex items-center justify-between mb-6">
@@ -4700,6 +5953,16 @@ export default function AppDashboard() {
     );
   }
 
+  const filteredOffers = (offers || []).filter((o: any) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      o.title?.toLowerCase().includes(q) ||
+      o.description?.toLowerCase().includes(q) ||
+      o.slug?.toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="flex flex-col min-h-screen bg-black text-white overflow-hidden">
       {/* Top Navigation Bar */}
@@ -4796,6 +6059,129 @@ export default function AppDashboard() {
 
       {/* Rating Modal */}
       <AnimatePresence>
+        {showMediaModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4 md:p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-md glass p-6 md:p-8 rounded-sm text-center border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">Upload Media</h3>
+                <button onClick={() => {
+                  setShowMediaModal(false);
+                  setMediaFile(null);
+                }} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-left">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Folder (Required)</label>
+                  <select
+                    value={mediaFolder}
+                    onChange={(e) => setMediaFolder(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all text-white/70 custom-select"
+                  >
+                    <option value="general">General</option>
+                    <option value="blog">Blog</option>
+                    <option value="offers">Offers</option>
+                    <option value="tours">Tours</option>
+                    <option value="pages">Pages</option>
+                    <option value="new">-- Add New Folder --</option>
+                  </select>
+                </div>
+                {mediaFolder === 'new' && (
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">New Folder Name (Required)</label>
+                    <input
+                      type="text"
+                      value={newFolder}
+                      onChange={(e) => setNewFolder(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Folder Name"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">File (Required)</label>
+                  <input
+                    type="file"
+                    onChange={(e) => setMediaFile(e.target.files?.[0] || null)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all text-white/70"
+                  />
+                  {mediaFile && (
+                    <div className="mt-2 text-[10px] text-white/50 flex items-center gap-2 bg-white/5 p-2 rounded-lg">
+                      <Image size={12} className="text-gold" />
+                      <span className="truncate flex-1">{mediaFile.name}</span>
+                      <span>({(mediaFile.size / 1024).toFixed(1)} KB)</span>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Title (Optional)</label>
+                  <input
+                    type="text"
+                    value={editingMedia.title}
+                    onChange={(e) => setEditingMedia({ ...editingMedia, title: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="Image Title"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Alt Text (Optional)</label>
+                  <input
+                    type="text"
+                    value={editingMedia.alt}
+                    onChange={(e) => setEditingMedia({ ...editingMedia, alt: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="Alt attribute for SEO"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Caption (Optional)</label>
+                  <input
+                    type="text"
+                    value={editingMedia.caption}
+                    onChange={(e) => setEditingMedia({ ...editingMedia, caption: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="Visible caption"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Description (Optional)</label>
+                  <textarea
+                    value={editingMedia.description}
+                    onChange={(e) => setEditingMedia({ ...editingMedia, description: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-gold transition-all resize-none h-24"
+                    placeholder="Internal description"
+                  />
+                </div>
+
+                <button
+                  onClick={() => {
+                    const finalFolder = mediaFolder === 'new' ? newFolder : mediaFolder;
+                    if (mediaFile && finalFolder) uploadMedia(mediaFile, editingMedia, finalFolder);
+                    else alert('Please enter a folder name');
+                  }}
+                  disabled={!mediaFile || uploadingMedia || (mediaFolder === 'new' && !newFolder)}
+                  className="w-full btn-primary py-4 uppercase tracking-widest font-bold text-xs mt-4 flex items-center justify-center gap-2"
+                >
+                  {uploadingMedia ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  {uploadingMedia ? 'Uploading...' : 'Upload File'}
+                </button>
+              </div>
+
+            </motion.div>
+          </motion.div>
+        )}
+
         {ratingBooking && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -5225,7 +6611,7 @@ export default function AppDashboard() {
                     <div>
                       <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Waypoints</h4>
                       <div className="space-y-2">
-                        {viewingBooking.waypoints.map((wp: string, idx: number) => (
+                        {(viewingBooking.waypoints || []).map((wp: string, idx: number) => (
                           <div key={`view-wp-${idx}`} className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-start gap-3">
                             <MapPin size={12} className="text-gold mt-0.5 shrink-0" />
                             <p className="text-[10px] text-white/70">{wp}</p>
@@ -5239,7 +6625,7 @@ export default function AppDashboard() {
                     <div>
                       <h4 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Selected Extras</h4>
                       <div className="flex flex-wrap gap-2">
-                        {viewingBooking.selectedExtras.map((extraId: string, index: number) => {
+                        {(viewingBooking.selectedExtras || []).map((extraId: string, index: number) => {
                           const extra = extras.find(e => e.id === extraId);
                           return (
                             <span key={`${extraId}-${index}`} className="px-3 py-1 bg-gold/10 border border-gold/20 rounded-full text-[10px] text-gold font-bold uppercase">
@@ -5536,6 +6922,10 @@ export default function AppDashboard() {
                       else if (confirmDelete.type === 'vehicle') executeDeleteVehicle(confirmDelete.id);
                       else if (confirmDelete.type === 'coupon') executeDeleteCoupon(confirmDelete.id);
                       else if (confirmDelete.type === 'extra') executeDeleteExtra(confirmDelete.id);
+                      else if (confirmDelete.type === 'page') executeDeletePage(confirmDelete.id);
+                      else if (confirmDelete.type === 'blog') executeDeleteBlog(confirmDelete.id);
+                      else if ((confirmDelete.type as string) === 'offer') executeDeleteOffer(confirmDelete.id);
+                      else if ((confirmDelete.type as string) === 'tour') executeDeleteTour(confirmDelete.id);
                     }}
                     className="flex-1 bg-red-500 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
                   >
@@ -5562,7 +6952,7 @@ export default function AppDashboard() {
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="relative w-full max-w-5xl glass p-8 rounded-3xl border border-white/10 shadow-2xl overflow-hidden"
+                className="relative w-full max-w-5xl glass p-8 rounded-xl border border-white/10 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar"
                 onClick={e => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between mb-6">
@@ -5604,7 +6994,7 @@ export default function AppDashboard() {
                     </div>
 
                     {/* Editor */}
-                    <div className="space-y-2">
+                    <div className="space-y-2 custom-scrollbar">
                       <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">CSS Content</label>
                       <div className="relative group">
                         <textarea
@@ -5633,44 +7023,179 @@ export default function AppDashboard() {
                   </div>
 
                   {/* Preview Section */}
-                  <div className="space-y-4">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">Live Style Preview</label>
-                    <div className="h-full min-h-[400px] bg-white/5 border border-white/10 rounded-2xl overflow-hidden relative">
-                      {/* Injecting CSS into Preview */}
-                      <style>
-                        {cssConfig.isActive ? cssConfig.content : ''}
-                      </style>
+                  <div className="space-y-4 flex flex-col h-full">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] uppercase tracking-widest font-bold text-white/40">SEO Live Style Preview</label>
+                      <button
+                        onClick={() => {
+                          const slug = cssConfig.slug || cssConfig.title?.replace('CSS: ', '').toLowerCase().replace(/\s+/g, '-');
+                          const prefix = cssConfig.type === 'blog' ? '/blog/' : '/';
+                          window.open(`${prefix}${slug}`, '_blank');
+                        }}
+                        className="text-[10px] text-gold hover:text-white transition-colors flex items-center gap-1 uppercase tracking-widest font-bold"
+                      >
+                        <Eye size={12} />
+                        View Live Site
+                      </button>
+                    </div>
+                    <div className="flex-1 min-h-[500px] bg-[#0a0a0a] border border-white/10 rounded-2xl overflow-hidden relative shadow-2xl">
+                      <iframe
+                        title="SEO Preview"
+                        className="w-full h-full min-h-[500px] border-none"
+                        srcDoc={`
+                          <!DOCTYPE html>
+                          <html>
+                            <head>
+                              <script src="https://cdn.tailwindcss.com"></script>
+                              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+                              <script>
+                                tailwind.config = {
+                                  theme: {
+                                    extend: {
+                                      colors: {
+                                        gold: '#D4AF37',
+                                      },
+                                      fontFamily: {
+                                        display: ['Playfair Display', 'serif'],
+                                        sans: ['Inter', 'sans-serif'],
+                                      }
+                                    }
+                                  }
+                                }
+                              </script>
+                              <style type="text/css">
+                                body { 
+                                  margin: 0; 
+                                  padding: 0; 
+                                  background: #0a0a0a; 
+                                  color: white; 
+                                  font-family: 'Inter', sans-serif;
+                                  min-height: 100vh;
+                                  overflow-x: hidden;
+                                }
+                                .glass { backdrop-filter: blur(12px); background: rgba(255,255,255,0.03); }
+                                
+                                /* Site Branding Overlays (Simplified Merlux Look) */
+                                .nav-shadow { background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); }
+                                .footer-shadow { background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); }
+                                
+                                .content-area h1, .content-area h2, .content-area h3 { font-family: 'Playfair Display', serif; color: #D4AF37; margin-top: 1.5rem; margin-bottom: 1rem; }
+                                .content-area p { margin-bottom: 1rem; line-height: 1.8; color: rgba(255,255,255,0.8); }
+                                .content-area ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 1rem; color: rgba(255,255,255,0.7); }
+                                .content-area strong { color: white; }
 
-                      <div className="p-8 space-y-6">
-                        <div className="preview-container space-y-4">
-                          <h1 className="preview-title text-2xl font-display text-white">Sample Heading (H1)</h1>
-                          <p className="preview-text text-sm text-white/60 leading-relaxed">
-                            This is a preview of how your custom CSS affects common elements.
-                            Target classes like <span className="text-gold">.preview-title</span>,
-                            <span className="text-gold">.preview-text</span>, or
-                            <span className="text-gold">.preview-button</span> to style them.
-                          </p>
-                          <div className="flex gap-4">
-                            <button className="preview-button px-6 py-2 bg-gold text-black rounded-lg font-bold text-xs uppercase tracking-widest">
-                              Sample Button
-                            </button>
-                            <div className="preview-card glass p-4 rounded-xl border border-white/10 w-full max-w-[200px]">
-                              <p className="text-[10px] uppercase font-bold text-white/30 mb-1">Card Component</p>
-                              <p className="text-xs text-white">Dynamic Content</p>
-                            </div>
-                          </div>
-                        </div>
+                                /* Scrollbar */
+                                ::-webkit-scrollbar { width: 4px; }
+                                ::-webkit-scrollbar-track { background: transparent; }
+                                ::-webkit-scrollbar-thumb { background: #D4AF37; border-radius: 10px; }
 
-                        <div className="mt-8 pt-8 border-t border-white/5">
-                          <p className="text-[8px] uppercase tracking-widest font-bold text-white/20 mb-4">HTML Structure Reference</p>
-                          <div className="bg-black/40 p-4 rounded-xl font-mono text-[10px] text-white/40">
-                            &lt;h1 class="preview-title"&gt;...&lt;/h1&gt;<br />
-                            &lt;p class="preview-text"&gt;...&lt;/p&gt;<br />
-                            &lt;button class="preview-button"&gt;...&lt;/button&gt;<br />
-                            &lt;div class="preview-card"&gt;...&lt;/div&gt;
-                          </div>
-                        </div>
-                      </div>
+                                /* Global SEO CSS */
+                                ${systemSettings?.seo?.isGlobalCssActive ? systemSettings?.seo?.globalCmsCss.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, (m) => m.split(',').map(s => s.trim() ? `.cms-rendered-content ${s.trim()}` : s).join(', ')) : ''}
+                                
+                                /* Current Active CSS (Scoped to this Preview) */
+                                ${cssConfig.isActive ? cssConfig.content.replace(/([^\r\n,{}]+)(?=[^{}]*{)/g, (m) => m.split(',').map(s => s.trim() ? `.cms-rendered-content ${s.trim()}` : s).join(', ')) : ''}
+                              </style>
+                            </head>
+                            <body>
+                              {/* Fake Site Header */}
+                              <div class="nav-shadow w-full p-6 flex justify-between items-center sticky top-0 z-50">
+                                <div class="text-gold font-display text-xl tracking-widest uppercase">MERLUX</div>
+                                <div class="flex gap-6 text-[10px] uppercase tracking-widest font-bold text-white/60">
+                                  <span>SERVICES</span>
+                                  <span>FLEET</span>
+                                  <span>BOOKING</span>
+                                </div>
+                              </div>
+
+                              <div class="max-w-4xl mx-auto p-8 sm:p-12 space-y-12 animate-fade-in">
+                                ${cssConfig.type === 'global' ? `
+                                  <div class="cms-rendered-content preview-container space-y-8">
+                                    <div class="space-y-4">
+                                      <h1 class="preview-title text-5xl font-display text-gold leading-tight">Elite Travel Refined</h1>
+                                      <p class="preview-text text-xl text-white/40 font-light max-w-2xl">
+                                        This Global CSS preview showcases how your styles affect the entire Merlux CMS ecosystem. 
+                                        Target classes like <span class="text-gold font-bold">.preview-title</span> or 
+                                        <span class="text-gold font-bold">.preview-card</span> below.
+                                      </p>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                      <div class="preview-card glass p-8 rounded-3xl border border-white/10 hover:border-gold/30 transition-all">
+                                        <div class="w-12 h-12 bg-gold/10 rounded-2xl flex items-center justify-center mb-6">
+                                          <div class="w-6 h-6 border-2 border-gold rounded-lg"></div>
+                                        </div>
+                                        <h3 class="text-xl text-white font-bold mb-3">Service Mastery</h3>
+                                        <p class="text-sm text-white/50 leading-relaxed">Experience a new standard in luxury transportation across Melbourne and beyond.</p>
+                                      </div>
+                                      <div class="preview-card glass p-8 rounded-3xl border border-white/10">
+                                        <div class="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-6">
+                                          <div class="w-2 h-6 bg-white/20"></div>
+                                        </div>
+                                        <h3 class="text-xl text-white font-bold mb-3">Bespoke Design</h3>
+                                        <p class="text-sm text-white/50 leading-relaxed">Every detail of your journey is crafted to ensure comfort, privacy, and punctuality.</p>
+                                      </div>
+                                    </div>
+
+                                    <button class="preview-button w-full sm:w-auto px-12 py-5 bg-gold text-black rounded-2xl font-bold uppercase tracking-[0.2em] text-xs hover:bg-white transition-all shadow-2xl shadow-gold/20">
+                                      Reserve Your Route
+                                    </button>
+                                  </div>
+                                ` : `
+                                  <div class="cms-rendered-content actual-content-preview">
+                                    <div class="mb-12">
+                                      <div class="flex items-center gap-3 text-[10px] text-gold uppercase tracking-[0.3em] font-bold mb-4">
+                                        <span class="w-8 h-[1px] bg-gold"></span>
+                                        ${cssConfig.type.toUpperCase()} PREVIEW
+                                      </div>
+                                      <h1 class="text-4xl sm:text-6xl font-display text-white leading-tight mb-6">
+                                        ${cssConfig.title?.replace('CSS: ', '')}
+                                      </h1>
+                                      <div class="flex items-center gap-4 text-white/30 text-xs py-6 border-y border-white/5 uppercase tracking-widest">
+                                        <span>BY Merlux Editorial</span>
+                                        <span class="w-1 h-1 bg-white/10 rounded-full"></span>
+                                        <span>${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                                      </div>
+                                    </div>
+
+                                    ${(cssConfig.type === 'page' || cssConfig.type === 'blog') ? `
+                                      <div class="rounded-[2rem] overflow-hidden aspect-[21/9] mb-12 border border-white/10">
+                                        <img src="\${cssConfig.featuredImage || (cssConfig.type === 'page' ? 'https://picsum.photos/seed/page/1200/600' : 'https://picsum.photos/seed/blog/1200/600')}" class="w-full h-full object-cover opacity-80" />
+                                      </div>
+                                    ` : ''}
+
+                                    <div class="content-area text-lg text-white/80 leading-relaxed font-light">
+                                      ${cssConfig.itemContent || '<p class="italic opacity-20 text-center py-20 border border-dashed border-white/10 rounded-3xl">No content available to preview. Add text in the main blog/page editor to see it here.</p>'}
+                                    </div>
+
+                                    <div class="mt-20 p-8 glass rounded-3xl border border-white/10 text-center">
+                                      <h4 class="text-gold font-display text-2xl mb-4 italic">Experience the Merlux standard.</h4>
+                                      <p class="text-white/40 text-[10px] uppercase tracking-widest font-bold">Professional Chauffeur Services Melbourne</p>
+                                    </div>
+                                  </div>
+                                `}
+
+                                <div class="mt-20 pt-8 border-t border-white/5">
+                                  <p class="text-[8px] uppercase tracking-widest font-black text-gold/30 mb-2">Technical Meta Information</p>
+                                  <div class="grid grid-cols-2 gap-4 text-[9px] text-white/20 font-bold uppercase tracking-widest">
+                                    <div class="bg-white/5 p-3 rounded-xl border border-white/5">
+                                      TYPE: ${cssConfig.type}
+                                    </div>
+                                    <div class="bg-white/5 p-3 rounded-xl border border-white/5">
+                                      REF: ${cssConfig.id || 'GLOBAL_ROOT'}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Fake Site Footer */}
+                              <div class="footer-shadow w-full p-12 mt-20 border-t border-white/5 text-center">
+                                <div class="text-gold/40 font-display text-sm tracking-widest uppercase mb-4">MERLUX LUXURY</div>
+                                <p class="text-[8px] text-white/20 uppercase tracking-widest font-medium">Copyright &copy; 2026. All rights reserved.</p>
+                              </div>
+                            </body>
+                          </html>
+                        `}
+                      />
 
                       {!cssConfig.isActive && (
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center">
@@ -5952,7 +7477,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-2xl glass p-8 rounded-xl border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -5996,6 +7521,19 @@ export default function AppDashboard() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Featured Image URL</label>
+                    <input
+                      type="text"
+                      value={editingBlog?.featuredImage || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, featuredImage: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="https://images.unsplash.com/..."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Category</label>
                     <select
                       value={editingBlog?.category || 'Travel Tips'}
@@ -6008,13 +7546,13 @@ export default function AppDashboard() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Featured Image URL</label>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Image Alt Text</label>
                     <input
                       type="text"
-                      value={editingBlog?.featuredImage || ''}
-                      onChange={(e) => setEditingBlog({ ...editingBlog, featuredImage: e.target.value })}
+                      value={editingBlog?.featuredImageAlt || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, featuredImageAlt: e.target.value })}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                      placeholder="https://images.unsplash.com/..."
+                      placeholder="Chauffeur service melbourne airport"
                     />
                   </div>
                 </div>
@@ -6060,6 +7598,17 @@ export default function AppDashboard() {
                       onChange={(e) => setEditingBlog({ ...editingBlog, metaDescription: e.target.value })}
                       className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
                       placeholder="SEO description for search results..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Keywords (comma separated)</label>
+                    <input
+                      type="text"
+                      value={editingBlog?.keywords || ''}
+                      onChange={(e) => setEditingBlog({ ...editingBlog, keywords: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="chauffeur, airport, melbourne"
                     />
                   </div>
 
@@ -6122,7 +7671,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-2xl glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-2xl glass p-8 rounded-xl border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -6164,7 +7713,30 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
-                <div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Featured Image URL</label>
+                    <input
+                      type="text"
+                      value={editingPage?.featuredImage || ''}
+                      onChange={(e) => setEditingPage({ ...editingPage, featuredImage: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="https://images.unsplash.com/..."
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Image Alt Text</label>
+                    <input
+                      type="text"
+                      value={editingPage?.featuredImageAlt || ''}
+                      onChange={(e) => setEditingPage({ ...editingPage, featuredImageAlt: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Luxury car at Melbourne airport"
+                    />
+                  </div>
+                </div>
+
+                <div className='custom-scrollbar'>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Page Content (HTML)</label>
                   <textarea
                     value={editingPage?.content || ''}
@@ -6257,6 +7829,449 @@ export default function AppDashboard() {
           </motion.div>
         )}
 
+        {/* Offer Modal */}
+        {showOfferModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl glass p-8 rounded-xl border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-display text-gold">
+                    {editingOffer?.id ? 'Edit Offer' : 'Add Special Offer'}
+                  </h3>
+                  <p className="text-[9px] uppercase tracking-widest text-white/40">Manage package details and fleet rates</p>
+                </div>
+                <button onClick={() => setShowOfferModal(false)} className="text-white/40 hover:text-white transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-8">
+                {/* Basic Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Offer Header Name</label>
+                    <input
+                      type="text"
+                      value={editingOffer?.title || ''}
+                      onChange={(e) => {
+                        const title = e.target.value;
+                        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        setEditingOffer({ ...editingOffer, title, slug: editingOffer.id ? editingOffer.slug : slug });
+                      }}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="e.g. Melbourne Airport to CBD Exclusive"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Image URL</label>
+                    <input
+                      type="text"
+                      value={editingOffer?.image || ''}
+                      onChange={(e) => setEditingOffer({ ...editingOffer, image: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Price Tags / Categories (Comma separated)</label>
+                    <input
+                      type="text"
+                      value={editingOffer?.tags?.join(', ') || ''}
+                      onChange={(e) => setEditingOffer({ ...editingOffer, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t !== '') })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Featured, Most Picked, Family Favorite"
+                    />
+                  </div>
+                </div>
+
+                {/* Discount Strategy */}
+                <div className="bg-white/5 border border-white/5 p-6 rounded-2xl space-y-4">
+                  <h4 className="text-[10px] uppercase tracking-[0.2em] font-bold text-gold">Discount Logic</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Reduction Type</label>
+                      <select
+                        value={editingOffer?.discountType || 'percentage'}
+                        onChange={(e) => setEditingOffer({ ...editingOffer, discountType: e.target.value })}
+                        className="custom-select w-full"
+                      >
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed Amount ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Value ({editingOffer?.discountType === 'percentage' ? '%' : '$'})</label>
+                      <input
+                        type="number"
+                        value={editingOffer?.discountValue || ''}
+                        onChange={(e) => setEditingOffer({ ...editingOffer, discountValue: Number(e.target.value) })}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                        placeholder={editingOffer?.discountType === 'percentage' ? '15' : '20'}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fleet Options Section */}
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                    <h4 className="text-[10px] uppercase tracking-[0.2em] font-bold text-gold flex items-center gap-2">
+                      <Car size={14} /> Fleet Options
+                    </h4>
+                    <button
+                      onClick={() => {
+                        const newFleets = [...(editingOffer?.fleets || [])];
+                        newFleets.push({
+                          type: '', image: '', description: '', capacity: '3 Passengers', luggage: '2 Suitcases', basePrice: 0, salePrice: 0, additionalInfo: ''
+                        });
+                        setEditingOffer({ ...editingOffer, fleets: newFleets });
+                      }}
+                      className="text-[9px] uppercase tracking-widest font-bold text-gold hover:text-white transition-colors flex items-center gap-1"
+                    >
+                      <Plus size={12} /> Add Fleet
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {(editingOffer?.fleets || []).map((fleet: any, fIdx: number) => (
+                      <div key={fIdx} className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group/fleet">
+                        <div className="absolute top-4 right-4 flex items-center gap-3">
+                          <button
+                            onClick={() => {
+                              const newFleets = [...editingOffer.fleets];
+                              const duplicatedFleet = { ...fleet };
+                              newFleets.splice(fIdx + 1, 0, duplicatedFleet);
+                              setEditingOffer({ ...editingOffer, fleets: newFleets });
+                            }}
+                            className="bg-gold/10 text-gold hover:bg-gold hover:text-black px-3 py-1.5 rounded-lg border border-gold/20 transition-all flex items-center gap-1.5"
+                            title="Duplicate Fleet"
+                          >
+                            <Copy size={12} />
+                            <span className="text-[8px] font-bold uppercase tracking-widest">Duplicate</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              const newFleets = editingOffer.fleets.filter((_: any, i: number) => i !== fIdx);
+                              setEditingOffer({ ...editingOffer, fleets: newFleets });
+                            }}
+                            className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white px-3 py-1.5 rounded-lg border border-red-500/20 transition-all flex items-center gap-1.5"
+                            title="Delete Fleet"
+                          >
+                            <Trash2 size={12} />
+                            <span className="text-[8px] font-bold uppercase tracking-widest">Delete</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="md:col-span-2">
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Fleet Name</label>
+                            <input
+                              type="text"
+                              value={fleet.type}
+                              onChange={(e) => {
+                                const newFleets = [...editingOffer.fleets];
+                                newFleets[fIdx].type = e.target.value;
+                                setEditingOffer({ ...editingOffer, fleets: newFleets });
+                              }}
+                              className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="e.g. Executive Sedan"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Fleet Image URL</label>
+                            <input
+                              type="text"
+                              value={fleet.image}
+                              onChange={(e) => {
+                                const newFleets = [...editingOffer.fleets];
+                                newFleets[fIdx].image = e.target.value;
+                                setEditingOffer({ ...editingOffer, fleets: newFleets });
+                              }}
+                              className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="https://..."
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Passengers</label>
+                            <input
+                              type="text"
+                              value={fleet.capacity}
+                              onChange={(e) => {
+                                const newFleets = [...editingOffer.fleets];
+                                newFleets[fIdx].capacity = e.target.value;
+                                setEditingOffer({ ...editingOffer, fleets: newFleets });
+                              }}
+                              className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="3 Passengers"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Luggage</label>
+                            <input
+                              type="text"
+                              value={fleet.luggage}
+                              onChange={(e) => {
+                                const newFleets = [...editingOffer.fleets];
+                                newFleets[fIdx].luggage = e.target.value;
+                                setEditingOffer({ ...editingOffer, fleets: newFleets });
+                              }}
+                              className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="2 Suitcases"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Standard Price ($)</label>
+                            <input
+                              type="number"
+                              value={fleet.basePrice || ''}
+                              onChange={(e) => {
+                                const newFleets = [...editingOffer.fleets];
+                                const base = Number(e.target.value);
+                                newFleets[fIdx].basePrice = base;
+                                // Auto calculate salePrice
+                                if (editingOffer.discountType === 'percentage') {
+                                  newFleets[fIdx].salePrice = Math.round(base * (1 - (editingOffer.discountValue || 0) / 100));
+                                } else {
+                                  newFleets[fIdx].salePrice = Math.max(0, base - (editingOffer.discountValue || 0));
+                                }
+                                setEditingOffer({ ...editingOffer, fleets: newFleets });
+                              }}
+                              className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="120"
+                            />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Auto-Calculated Offer Price</label>
+                            <div className="flex items-center gap-4">
+                              <input
+                                type="number"
+                                value={fleet.salePrice || ''}
+                                readOnly
+                                className="flex-1 bg-white/5 border border-gold/20 rounded-lg px-4 py-2 text-sm outline-none text-gold font-bold transition-all"
+                              />
+                              <p className="text-[8px] text-white/20 uppercase tracking-widest max-w-[100px] leading-tight">
+                                Reduced from ${fleet.basePrice} via {editingOffer.discountValue}{editingOffer.discountType === 'percentage' ? '%' : '$'} discount
+                              </p>
+                            </div>
+                          </div>
+                          <div className="md:col-span-3">
+                            <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Additional Info</label>
+                            <input
+                              type="text"
+                              value={fleet.additionalInfo}
+                              onChange={(e) => {
+                                const newFleets = [...editingOffer.fleets];
+                                newFleets[fIdx].additionalInfo = e.target.value;
+                                setEditingOffer({ ...editingOffer, fleets: newFleets });
+                              }}
+                              className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
+                              placeholder="Free cancellation, bottled water provided"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {(!editingOffer?.fleets || editingOffer.fleets.length === 0) && (
+                      <div className="py-8 text-center bg-white/5 border border-dashed border-white/5 rounded-2xl">
+                        <p className="text-white/20 text-[10px] italic">No fleets added yet. click "Add Fleet" to define vehicle specific rates.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Overall Description</label>
+                  <textarea
+                    value={editingOffer?.description || ''}
+                    onChange={(e) => setEditingOffer({ ...editingOffer, description: e.target.value })}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24 custom-scrollbar"
+                    placeholder="Exclusive fixed rate transfer between Melbourne Airport and the CBD."
+                  />
+                </div>
+
+                <div className="flex items-center gap-4 py-4 border-t border-white/5">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingOffer?.active ? "bg-gold border-gold" : "border-white/20 group-hover:border-gold")}>
+                      <input
+                        type="checkbox"
+                        className="hidden"
+                        checked={editingOffer?.active || false}
+                        onChange={(e) => setEditingOffer({ ...editingOffer, active: e.target.checked })}
+                      />
+                      {editingOffer?.active && <CheckCircle size={14} className="text-black" />}
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Active Deal</span>
+                  </label>
+                </div>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setShowOfferModal(false)}
+                    className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest border border-white/10 rounded-2xl text-white/40 hover:text-white hover:border-white/20 transition-all"
+                  >
+                    Discard Changes
+                  </button>
+                  <button
+                    onClick={() => handleUpdateOffer(editingOffer.id || 'new', editingOffer)}
+                    className="flex-1 bg-gold text-black py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all shadow-xl shadow-gold/10"
+                  >
+                    {editingOffer?.id ? 'Update Package' : 'Publish Offer'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Tour Modal */}
+        {showTourModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-xl glass p-8 rounded-xl border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-display text-gold">
+                  {editingTour?.id ? 'Edit Tour' : 'Add Luxury Tour'}
+                </h3>
+                <button onClick={() => setShowTourModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Tour Title</label>
+                    <input
+                      type="text"
+                      value={editingTour?.title || ''}
+                      onChange={(e) => {
+                        const title = e.target.value;
+                        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        setEditingTour({ ...editingTour, title, slug: editingTour.id ? editingTour.slug : slug });
+                      }}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="Great Ocean Road"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Duration</label>
+                    <input
+                      type="text"
+                      value={editingTour?.duration || ''}
+                      onChange={(e) => setEditingTour({ ...editingTour, duration: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="10-12 Hours"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Starting Price ($)</label>
+                    <input
+                      type="number"
+                      value={editingTour?.price || ''}
+                      onChange={(e) => setEditingTour({ ...editingTour, price: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="1048"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Max Capacity</label>
+                    <input
+                      type="number"
+                      value={editingTour?.capacity || ''}
+                      onChange={(e) => setEditingTour({ ...editingTour, capacity: e.target.value })}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                      placeholder="7"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Locations (comma separated)</label>
+                  <input
+                    type="text"
+                    value={Array.isArray(editingTour?.locations) ? editingTour.locations.join(', ') : editingTour?.locations || ''}
+                    onChange={(e) => setEditingTour({ ...editingTour, locations: e.target.value })}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="12 Apostles, Apollo Bay, Lorne"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Tour Image URL</label>
+                  <input
+                    type="text"
+                    value={editingTour?.image || ''}
+                    onChange={(e) => setEditingTour({ ...editingTour, image: e.target.value })}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Description</label>
+                  <textarea
+                    value={editingTour?.description || ''}
+                    onChange={(e) => setEditingTour({ ...editingTour, description: e.target.value })}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
+                    placeholder="Experience one of the world's most scenic coastal drives..."
+                  />
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingTour?.active ? "bg-gold border-gold" : "border-white/20 group-hover:border-gold")}>
+                      <input
+                        type="checkbox"
+                        className="hidden"
+                        checked={editingTour?.active || false}
+                        onChange={(e) => setEditingTour({ ...editingTour, active: e.target.checked })}
+                      />
+                      {editingTour?.active && <CheckCircle size={14} className="text-black" />}
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Active Tour</span>
+                  </label>
+                </div>
+
+                <div className="pt-4 flex gap-4">
+                  <button
+                    onClick={() => setShowTourModal(false)}
+                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleUpdateTour(editingTour.id || 'new', editingTour)}
+                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
+                  >
+                    {editingTour?.id ? 'Save Changes' : 'Create Tour'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {/* Vehicle Modal */}
         {showVehicleModal && (
           <motion.div
@@ -6268,7 +8283,7 @@ export default function AppDashboard() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-md glass p-8 rounded-3xl border border-gold/20 max-h-[90vh] overflow-y-auto"
+              className="w-full max-w-md glass p-8 rounded-xl border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-display text-gold">
@@ -6617,6 +8632,7 @@ export default function AppDashboard() {
                     </label>
                     <input
                       type="date"
+                      min={new Date().toISOString().split('T')[0]}
                       value={editingCoupon?.startDate || ""}
                       onChange={(e) =>
                         setEditingCoupon({ ...editingCoupon, startDate: e.target.value })
@@ -6630,6 +8646,7 @@ export default function AppDashboard() {
                     </label>
                     <input
                       type="date"
+                      min={new Date().toISOString().split('T')[0]}
                       value={editingCoupon?.endDate || ""}
                       onChange={(e) =>
                         setEditingCoupon({ ...editingCoupon, endDate: e.target.value })
@@ -6705,16 +8722,16 @@ export default function AppDashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            className="fixed inset-0 bg-black/95 backdrop-blur-sm z-[100] flex items-center justify-center p-4 sm:p-6"
           >
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-lg glass p-8 rounded-3xl border border-gold/20 max-h-[80vh] overflow-y-auto"
+              className="w-full max-w-lg glass p-5 sm:p-8 rounded-xl sm:rounded-3xl border border-gold/20 max-h-[90vh] sm:max-h-[80vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h3 className="text-xl font-display text-gold">Bookings for {format(selectedDate, 'MMM dd, yyyy')}</h3>
+                  <h3 className="text-lg sm:text-xl font-display text-gold">Bookings for {format(selectedDate, 'MMM dd, yyyy')}</h3>
                   <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">{getBookingsForDate(selectedDate).length} Rides Scheduled</p>
                 </div>
                 <button onClick={() => setShowDayBookings(false)} className="text-white/40 hover:text-white">
@@ -6751,8 +8768,8 @@ export default function AppDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-[1fr_auto] gap-4 pt-2 border-t border-white/5">
-                      <div className="flex flex-col gap-1 relative">
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 pt-2 border-t border-white/5">
+                      <div className="flex flex-col gap-1 relative order-2 sm:order-1">
                         <div className="flex items-center gap-2">
                           <p className="text-[8px] text-white/40 uppercase font-bold shrink-0">Phone:</p>
                           <p className="text-[10px] text-white/80 whitespace-nowrap">{booking.customerPhone || 'No phone'}</p>
@@ -6789,13 +8806,17 @@ export default function AppDashboard() {
                           )}
                         </AnimatePresence>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[8px] text-white/40 uppercase font-bold">Vehicle</p>
-                        <p className="text-[10px] text-white/80">{booking.vehicleId}</p>
-                        {booking.serviceType === 'hourly' && (
-                          <p className="text-[9px] text-gold font-bold uppercase tracking-widest">{booking.hours} Hours</p>
-                        )}
-                        <p className="text-[10px] text-gold font-bold">${booking.price}</p>
+                      <div className="flex sm:flex-col justify-between items-center sm:items-end sm:text-right order-1 sm:order-2">
+                        <div className="flex flex-col sm:items-end">
+                          <p className="text-[8px] text-white/40 uppercase font-bold">Vehicle</p>
+                          <p className="text-[10px] text-white/80">{booking.vehicleId}</p>
+                        </div>
+                        <div className="text-right sm:mt-1">
+                          {booking.serviceType === 'hourly' && (
+                            <p className="text-[9px] text-gold font-bold uppercase tracking-widest">{booking.hours} Hours</p>
+                          )}
+                          <p className="text-[10px] text-gold font-bold">${booking.price}</p>
+                        </div>
                       </div>
                     </div>
                     <div className="pt-2 flex justify-end">
@@ -6820,6 +8841,126 @@ export default function AppDashboard() {
 
       {/* Add Chart Modal */}
       <AnimatePresence>
+        {/* CSV Import Modal */}
+        {showCsvImportModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-xl glass p-8 rounded-3xl border border-gold/20"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-gold/10 rounded-lg">
+                    <Upload size={20} className="text-gold" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-display text-gold">Import {csvImportType === 'offers' ? 'Offers' : 'Tours'}</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">Bulk upload via CSV</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowCsvImportModal(false)} className="text-white/40 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Drag & Drop Area */}
+                <div
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragActive(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleCsvUpload(csvImportType, e.dataTransfer.files[0]);
+                    }
+                  }}
+                  className={cn(
+                    "relative py-12 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all duration-300",
+                    dragActive
+                      ? "border-gold bg-gold/5 scale-[1.02]"
+                      : "border-white/10 bg-white/5 hover:border-gold/30"
+                  )}
+                >
+                  <input
+                    type="file"
+                    accept=".csv"
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleCsvUpload(csvImportType, e.target.files[0]);
+                      }
+                    }}
+                  />
+                  <div className={cn(
+                    "w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-transform duration-500",
+                    dragActive ? "bg-gold text-black scale-110 rotate-12" : "bg-white/10 text-gold"
+                  )}>
+                    {isUploadingCsv ? (
+                      <RefreshCw size={32} className="animate-spin" />
+                    ) : (
+                      <Upload size={32} />
+                    )}
+                  </div>
+                  <p className="text-sm font-bold text-white mb-1">
+                    {isUploadingCsv ? 'Uploading...' : 'Drop your CSV here'}
+                  </p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                    or click to browse files
+                  </p>
+                </div>
+
+                {/* Format Sample */}
+                <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Info size={14} className="text-gold" />
+                    <span className="text-[10px] uppercase tracking-widest font-black text-white/60">Required CSV Format</span>
+                  </div>
+                  <div className="overflow-x-auto custom-scrollbar border border-white/10 rounded-xl bg-black/40">
+                    <table className="w-full border-collapse text-[9px] text-left">
+                      <thead>
+                        <tr className="bg-gold/10 border-b border-gold/20">
+                          {(csvImportType === 'offers'
+                            ? ['title', 'description', 'discountType', 'discountValue', 'image', 'tags', 'fleets_data']
+                            : ['title', 'description', 'price', 'duration', 'cap', 'image', 'locations']
+                          ).map((h) => (
+                            <th key={h} className="px-3 py-2 text-gold font-black uppercase tracking-widest border-r border-gold/10 last:border-0 whitespace-nowrap">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="bg-white/[0.02]">
+                          {(csvImportType === 'offers'
+                            ? ['"Airport Special"', '"Direct to CBD"', 'percentage', '15', 'https://...', '"Featured|Picked"', '"Sedan|img1|..."']
+                            : ['"Philly Tour"', '"Historic walk"', '149', '3 Hours', '12', 'https://...', '"Hall|Bell|Park"']
+                          ).map((v, i) => (
+                            <td key={i} className="px-3 py-2 text-white/50 font-mono border-r border-white/5 last:border-0 whitespace-nowrap italic">
+                              {v}
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[9px] text-white/30 mt-3 italic text-left">
+                    * For {csvImportType === 'offers' ? "fleets_data, use ';' between fleets and '|' between fleet details (Type|Img|Desc|Pass|Lug|Price)." : "locations, use '|' to separate multiple stops."}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {showAddChartModal && (
           <motion.div
             initial={{ opacity: 0 }}

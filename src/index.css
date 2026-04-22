@@ -36,6 +36,18 @@
     @apply border border-gold text-gold px-8 py-3 rounded-lg font-semibold uppercase tracking-widest transition-all hover:bg-gold hover:text-black active:scale-95;
   }
 
+    /* Date & Time picker icons */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(67%) sepia(92%) saturate(500%) hue-rotate(10deg);
+    cursor: pointer;
+  }
+
+  /* Optional: Firefox support (though limited) */
+  input[type="date"],
+  input[type="time"] {
+    color-scheme: dark; /* ensures icons adapt to dark backgrounds */
+  }
   .custom-select {
     @apply bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-white outline-none focus:border-gold transition-all cursor-pointer appearance-none font-bold tracking-widest;
     border-radius: 0.75rem;
@@ -56,6 +68,7 @@
 
   .custom-select option {
     @apply bg-black text-white py-4;
+    border-radius: 0.75rem; /* adds rounded corners to each option */
   }
 
   /* Hover state */

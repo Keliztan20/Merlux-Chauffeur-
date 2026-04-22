@@ -1,0 +1,103 @@
+138:          return;
+362:        return;
+415:        return;
+436:    return () => unsubscribeAuth();
+495:    if (!user) return;
+537:    if (!timeStr) return '';
+540:      if (timeStr.toLowerCase().includes('am') || timeStr.toLowerCase().includes('pm')) return timeStr;
+543:      if (hours === undefined || minutes === undefined) return timeStr;
+550:      return `${h}:${m} ${ampm}`;
+552:      return timeStr;
+566:      if (!bDate) return false;
+569:      if (analyticsRoleFilter === 'driver' && !b.driverId) return false;
+570:      if (analyticsRoleFilter === 'customer' && !b.userId) return false;
+577:        return bDate >= s && bDate <= e;
+583:        return bDate >= s && bDate <= e;
+585:        return bDate >= subDays(now, 6);
+587:        return bDate >= subDays(now, 29);
+589:      return true;
+649:        if (!bDate) return false;
+652:          return format(bDate, 'yyyy-MM') === format(date, 'yyyy-MM');
+654:          return format(bDate, 'yyyy') === format(date, 'yyyy');
+656:          return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd');
+660:      return {
+676:      if (!b.date) return false;
+678:      return bDate >= currentMonthStart && bDate <= currentMonthEnd;
+693:    return {
+713:        return { name, count: dBookings.length, revenue: dBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0) };
+718:        return { name, count: cBookings.length, revenue: cBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0) };
+738:          return {
+802:    return stats;
+811:    return eachDayOfInterval({ start: startDate, end: endDate });
+815:    return bookings.filter(b => {
+818:        if (!b.date) return false;
+824:      return bDate && isSameDay(bDate, date);
+829:    if (!user || !userProfile) return;
+972:        if (!b.date || b.status === 'completed' || b.status === 'cancelled') return false;
+975:        return bDate < now && !isToday(bDate);
+1013:    return () => {
+1073:      return;
+1158:        if (!dateToCompare) return false;
+1159:        return dateToCompare >= startDate && dateToCompare <= endDate;
+1195:        return priceSort === 'asc' ? priceA - priceB : priceB - priceA;
+1201:        return dateSort === 'asc' ? dateA - dateB : dateB - dateA;
+1207:      return createdB - createdA;
+1215:    return uniqueBookings;
+1298:    if (!file) return;
+1316:    if (!file) return;
+1334:    if (!file) return;
+1593:    if (!file) return;
+1603:          return;
+1644:              return {
+1768:        return (
+2266:                                {booking.returnDate} at {formatTimeToAMPM(booking.returnTime)}
+2278:                                  if (!booking.isReturn) return booking.distance;
+2280:                                  return isNaN(num) ? booking.distance : `${(num * 2).toFixed(1)} km`;
+2290:                                if (!booking.duration) return 'N/A';
+2291:                                if (!booking.isReturn) return booking.duration;
+2294:                                  return `${parseInt(match[1]) * 2} mins`;
+2296:                                return booking.duration;
+2380:                                  return (
+2713:                                      return (
+2883:                                  <span className="text-[8px] uppercase tracking-widest font-bold">{booking.returnDate}</span>
+2960:                                      return (
+3038:        return (
+3126:                              return (
+3159:                              return (
+3401:        return (
+3469:                    return acc;
+3474:                      case 'pending': return 'bg-[#D4AF37]';
+3475:                      case 'confirmed': return 'bg-[#60A5FA]';
+3476:                      case 'assigned': return 'bg-[#C084FC]';
+3477:                      case 'accepted': return 'bg-[#22D3EE]';
+3478:                      case 'completed': return 'bg-[#4ADE80]';
+3479:                      case 'cancelled': return 'bg-[#F87171]';
+3480:                      default: return 'bg-white/40';
+3484:                  return (
+3511:                              return (
+3548:        if (!isAdmin) return null;
+3556:          return matchesSearch && matchesRole;
+3558:        return (
+3905:        if (!isAdmin) return null;
+3906:        return (
+4867:                                return (
+5331:        return (
+5474:        return (
+5494:        return (
+5541:        return null;
+5546:    return (
+5558:  return (
+5901:                          {viewingBooking.isReturn && viewingBooking.priceBreakdown.returnPrice > 0 && (
+5904:                              <span className="text-sm text-white font-bold">${(viewingBooking.priceBreakdown.returnPrice || 0).toFixed(2)}</span>
+5980:                          if (!vehicle) return null;
+6049:                            return <p className="text-[10px] text-white/30 uppercase tracking-widest">No range-based pricing applied</p>;
+6052:                          return (
+6099:                          return (
+6302:                        if (!routeBooking.distance) return 'N/A';
+6303:                        if (!routeBooking.isReturn) return routeBooking.distance;
+6305:                        return `${(num * 2).toFixed(1)} km`;
+6320:                        if (!routeBooking.duration) return 'N/A';
+6321:                        if (!routeBooking.isReturn) return routeBooking.duration;
+6324:                          return `${parseInt(match[1]) * 2} mins`;
+6326:                        return routeBooking.duration;
+8548:                    if (!newChartConfig.title) return;

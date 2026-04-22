@@ -22,7 +22,7 @@
       "properties": {
         "id": { "type": "string", "description": "Auto-generated document ID." },
         "userId": { "type": "string", "description": "Reference to the user who booked." },
-        "serviceType": { "type": "string", "enum": ["airport", "corporate", "wedding", "tour", "hourly"], "description": "Type of service." },
+        "serviceType": { "type": "string", "enum": ["airport", "corporate", "wedding", "tour", "hourly", "offer"], "description": "Type of service." },
         "pickup": { "type": "string", "description": "Pickup address." },
         "dropoff": { "type": "string", "description": "Dropoff address (optional for hourly)." },
         "date": { "type": "string", "format": "date", "description": "Booking date." },
@@ -34,6 +34,10 @@
         "hourlyHours": { "type": "integer", "description": "Number of hours for hourly service." },
         "purpose": { "type": "string", "description": "Purpose of the trip." },
         "vehicleId": { "type": "string", "description": "ID of the selected vehicle." },
+        "vehicleType": { "type": "string", "description": "Human readable vehicle type." },
+        "packageId": { "type": "string", "description": "ID of the package (if offer)." },
+        "packageTitle": { "type": "string", "description": "Title of the package (if offer)." },
+        "type": { "type": "string", "description": "Secondary booking type classification." },
         "passengers": { "type": "integer", "description": "Number of passengers." },
         "bags": { "type": "integer", "description": "Number of bags." },
         "distance": { "type": "string", "description": "Distance of the trip." },
@@ -168,6 +172,8 @@
         "keywords": { "type": "array", "items": { "type": "string" } },
         "canonicalUrl": { "type": "string" },
         "ogImage": { "type": "string" },
+        "featuredImage": { "type": "string" },
+        "featuredImageAlt": { "type": "string" },
         "schema": { "type": "object" },
         "noindex": { "type": "boolean" },
         "includeInSitemap": { "type": "boolean" },
@@ -187,6 +193,7 @@
         "slug": { "type": "string" },
         "content": { "type": "string" },
         "featuredImage": { "type": "string" },
+        "featuredImageAlt": { "type": "string" },
         "metaTitle": { "type": "string" },
         "metaDescription": { "type": "string" },
         "keywords": { "type": "array", "items": { "type": "string" } },
@@ -195,6 +202,61 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "slug", "content"]
+    },
+    "Offer": {
+      "title": "Offer",
+      "description": "A special deal or promotional offer.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "active": { "type": "boolean" },
+        "slug": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "price", "active"]
+    },
+    "Tour": {
+      "title": "Tour",
+      "description": "A curated sightseeing tour or excursion.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "price": { "type": "number" },
+        "duration": { "type": "string" },
+        "capacity": { "type": "integer" },
+        "locations": { "type": "array", "items": { "type": "string" } },
+        "active": { "type": "boolean" },
+        "slug": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "price", "active"]
+    },
+    "Media": {
+      "title": "Media",
+      "description": "Information about a file uploaded to Firebase Storage.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "size": { "type": "integer" },
+        "type": { "type": "string" },
+        "alt": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "caption": { "type": "string" },
+        "usedIn": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "url", "size", "type"]
     }
   },
   "firestore": {
@@ -229,6 +291,18 @@
     "/blogs/{blogId}": {
       "schema": "Blog",
       "description": "Blog posts."
+    },
+    "/offers/{offerId}": {
+      "schema": "Offer",
+      "description": "Special offers."
+    },
+    "/tours/{tourId}": {
+      "schema": "Tour",
+      "description": "Sightseeing tours."
+    },
+    "/media/{mediaId}": {
+      "schema": "Media",
+      "description": "Media uploaded to Firebase Storage."
     }
   }
 }

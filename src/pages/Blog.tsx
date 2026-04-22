@@ -108,7 +108,7 @@ export default function Blog() {
               >
                 <Link to={`/blog/${post.slug}`} className="block overflow-hidden rounded-3xl mb-6 aspect-[16/10] relative">
                   <img
-                    src={post.featuredImage || post.image}
+                    src={post.featuredImage || post.image || null}
                     alt={post.title}
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                     referrerPolicy="no-referrer"
