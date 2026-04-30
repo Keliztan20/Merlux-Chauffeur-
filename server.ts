@@ -21,6 +21,11 @@ if (!admin.apps.length) {
 
   console.log(`Initializing Firebase Admin for project: ${projectId}, database: ${databaseId}`);
   
+  // CRITICAL: Explicitly clear environment-level Firebase configuration to force SDK 
+  // to use the provided project ID instead of environment-detected one.
+  delete process.env.FIREBASE_CONFIG;
+  delete process.env.GOOGLE_CLOUD_PROJECT;
+  
   admin.initializeApp({
     projectId: projectId,
   });
