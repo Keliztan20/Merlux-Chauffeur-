@@ -1,20 +1,94 @@
 import { useState, FormEvent, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plane, Car, ArrowRight, Tag, MapPin, Star, User, Mail, Phone, Calendar, Clock, CreditCard, ChevronRight, Info, AlertCircle, Search, XCircle } from 'lucide-react';
+import { Plane, Car, ArrowRight, Tag, MapPin, Star, User, Mail, Phone, Calendar, Clock, CreditCard, Banknote, ChevronRight, FileText, LayoutGrid, Info, AlertCircle, Search, XCircle, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { collection, onSnapshot, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { useJsApiLoader, Autocomplete } from '@react-google-maps/api';
 import { db, auth } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import Logo from '../components/layout/Logo';
-
-const LIBRARIES: ("places" | "drawing" | "geometry" | "visualization")[] = ["places", "geometry"];
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_ID } from '../lib/google-maps';
+import LoginInline from '../components/LoginInline';
 
 export default function Offers() {
   const navigate = useNavigate();
   const [offers, setOffers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [systemSettings, setSystemSettings] = useState<any>(null);
   const [step, setStep] = useState(1);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('stripe');
+
+  useEffect(() => {
+    const savedData = localStorage.getItem('offer_booking_draft');
+    const isCancelled = new URLSearchParams(window.location.search).get('cancelled');
+
+    if (savedData && isCancelled === 'true') {
+      try {
+        const data = JSON.parse(savedData);
+        if (data.details) setDetails(data.details);
+        if (data.step) setStep(data.step);
+        if (data.selectedPackage) setSelectedPackage(data.selectedPackage);
+        if (data.selectedFleet) setSelectedFleet(data.selectedFleet);
+        if (data.paymentMethod) setPaymentMethod(data.paymentMethod);
+        // Clean up
+        localStorage.removeItem('offer_booking_draft');
+      } catch (err) {
+        console.error('Failed to restore offer booking draft:', err);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem('offer_booking_draft');
+    const isCancelled = new URLSearchParams(window.location.search).get('cancelled');
+
+    if (savedData && isCancelled === 'true') {
+      try {
+        const data = JSON.parse(savedData);
+        if (data.details) setDetails(data.details);
+        if (data.step) setStep(data.step);
+        if (data.selectedPackage) setSelectedPackage(data.selectedPackage);
+        if (data.selectedFleet) setSelectedFleet(data.selectedFleet);
+        if (data.paymentMethod) setPaymentMethod(data.paymentMethod);
+        // Clean up
+        localStorage.removeItem('offer_booking_draft');
+      } catch (err) {
+        console.error('Failed to restore offer booking draft:', err);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        // Fetch profile data
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          setDetails(prev => ({
+            ...prev,
+            name: userData.name || prev.name,
+            email: userData.email || prev.email,
+            phone: userData.phone || prev.phone
+          }));
+        } else {
+          // Basic data from auth
+          setDetails(prev => ({
+            ...prev,
+            name: user.displayName || prev.name,
+            email: user.email || prev.email
+          }));
+        }
+      } else {
+        setCurrentUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,18 +109,35 @@ export default function Offers() {
     dropoff: '',
     date: '',
     time: '',
-    notes: ''
+    notes: '',
+    returnRide: false,
+    returnDate: '',
+    returnTime: ''
   });
 
   // Google Maps
   const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
+    id: GOOGLE_MAPS_ID,
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
-    libraries: LIBRARIES
+    libraries: GOOGLE_MAPS_LIBRARIES
   });
 
   const pickupAutocompleteRef = useRef<any>(null);
   const dropoffAutocompleteRef = useRef<any>(null);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'settings', 'system'));
+        if (docSnap.exists()) {
+          setSystemSettings(docSnap.data());
+        }
+      } catch (err) {
+        console.error("Error fetching settings:", err);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'offers'), where('active', '==', true));
@@ -57,6 +148,16 @@ export default function Offers() {
     });
     return () => unsubscribe();
   }, []);
+
+  const autocompleteOptions = useMemo(() => {
+    const options: any = {
+      types: ['address']
+    };
+    if (systemSettings?.limitCountry) {
+      options.componentRestrictions = { country: systemSettings.limitCountry.split(',').map((c: string) => c.trim().toLowerCase()) };
+    }
+    return options;
+  }, [systemSettings]);
 
   const handlePackageSelect = (pkg: any) => {
     setSelectedPackage(pkg);
@@ -73,6 +174,44 @@ export default function Offers() {
 
   const handleDetailsSubmit = (e: FormEvent) => {
     e.preventDefault();
+
+    // Validate date and time
+    const selectedDate = new Date(details.date + 'T00:00:00');
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (selectedDate < today) {
+      alert("Please select a future date.");
+      return;
+    }
+
+    if (details.returnRide) {
+      if (!details.returnDate || !details.returnTime) {
+        alert("Please select a return date and time.");
+        return;
+      }
+      const returnDateObj = new Date(details.returnDate + 'T' + details.returnTime + ':00');
+      let pickupTime = details.time;
+      const pickupDateObj = new Date(details.date + 'T' + (pickupTime || '00:00') + ':00');
+      if (returnDateObj <= pickupDateObj) {
+        alert("Return time must be after the pickup time.");
+        return;
+      }
+    }
+
+    if (selectedDate.getTime() === today.getTime()) {
+      const [hours, minutes] = details.time.split(':').map(Number);
+      const selectedTime = new Date(today);
+      selectedTime.setHours(hours, minutes, 0, 0);
+
+      const minTime = new Date(now.getTime() + 6 * 60 * 60 * 1000); // 6 hours from now
+
+      if (selectedTime < minTime) {
+        alert("For same-day bookings, please select a time at least 6 hours in the future to allow for arrangements.");
+        return;
+      }
+    }
+
     setStep(4);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -92,7 +231,7 @@ export default function Offers() {
     setSelectedPackage(null);
     setSelectedFleet(null);
     setDetails({
-      name: '', email: '', phone: '', pickup: '', dropoff: '', date: '', time: '', notes: ''
+      name: '', email: '', phone: '', pickup: '', dropoff: '', date: '', time: '', notes: '', returnRide: false, returnDate: '', returnTime: ''
     });
   };
 
@@ -169,31 +308,68 @@ export default function Offers() {
           </motion.div>
 
           {/* Stepper */}
-          <div className="flex items-center justify-center gap-4 mt-12 mb-16 overflow-x-auto pb-4 scrollbar-hide">
+          <div className="flex flex-wrap items-center justify-between sm:justify-center gap-2 sm:gap-3 mt-12 mb-16 w-full max-w-full">
             {[
-              { id: 1, label: 'Packages' },
-              { id: 2, label: 'Fleet' },
-              { id: 3, label: 'Details' },
-              { id: 4, label: 'Summary' }
+              { id: 1, label: 'Packages', icon: LayoutGrid },
+              { id: 2, label: 'Fleet', icon: Car },
+              { id: 3, label: 'Details', icon: User },
+              { id: 4, label: 'Summary', icon: FileText }
             ].map((s, idx, arr) => (
-              <div key={s.id} className="flex items-center gap-3 shrink-0">
+              <div key={s.id} className="flex items-center gap-2 shrink-0">
                 <div
                   className={cn(
-                    "w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-700 border",
-                    step === s.id ? "bg-gold text-black border-gold shadow-[0_0_20px_rgba(212,175,55,0.3)]" :
-                      step > s.id ? "bg-gold/10 text-gold border-gold/30" : "bg-white/5 text-white/20 border-white/10"
+                    "flex flex-row items-center gap-1 sm:gap-2 transition-all duration-300 justify-center",
+                    Math.abs(s.id - step) === 1 ? "cursor-pointer group" : "cursor-not-allowed opacity-50"
                   )}
+                  onClick={() => {
+                    if (Math.abs(s.id - step) === 1) {
+                      if (s.id > step) {
+                        if (step === 1 && !selectedPackage) return;
+                        if (step === 2 && !selectedFleet) return;
+                      }
+                      setStep(s.id);
+                    }
+                  }}
                 >
-                  {s.id}
+                  {/* Icon */}
+                  <div
+                    className={cn(
+                      "w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-700 border",
+                      step === s.id
+                        ? "bg-gold text-black border-gold shadow-[0_0_15px_rgba(212,175,55,0.3)] scale-110 rotate-[360deg]"
+                        : step > s.id
+                          ? "bg-gold/10 text-gold border-gold/30"
+                          : "bg-white/5 text-white/20 border-white/10 group-hover:bg-white/10"
+                    )}
+                  >
+                    {step > s.id ? <CheckCircle size={12} /> : <s.icon size={12} />}
+                  </div>
+
+                  {/* Label – show only active step on mobile */}
+                  <span
+                    className={cn(
+                      "text-[9px] uppercase tracking-[0.15em] font-bold transition-colors duration-500 hidden sm:inline",
+                      step === s.id ? "text-gold sm:text-white" : "text-white/20 group-hover:text-white/40"
+                    )}
+                  >
+                    {s.label}
+                  </span>
+                  {/* Mobile active label */}
+                  {step === s.id && (
+                    <span className="text-[9px] uppercase tracking-[0.15em] font-bold text-gold sm:hidden">
+                      {s.label}
+                    </span>
+                  )}
                 </div>
-                <span className={cn(
-                  "text-[10px] uppercase tracking-[0.2em] font-bold transition-colors duration-500",
-                  step === s.id ? "text-white" : "text-white/20"
-                )}>
-                  {s.label}
-                </span>
+
+                {/* Connector line */}
                 {idx < arr.length - 1 && (
-                  <div className={cn("w-8 h-[1px] mx-2", step > s.id ? "bg-gold/30" : "bg-white/5")} />
+                  <div
+                    className={cn(
+                      "w-6 h-[1px] mx-1 shrink-0 hidden sm:block", // hide on mobile
+                      step > s.id ? "bg-gold/30" : "bg-white/5"
+                    )}
+                  />
                 )}
               </div>
             ))}
@@ -453,15 +629,44 @@ export default function Offers() {
                       <p className="text-white/40 text-sm italic">Please provide your contact and journey details to finalize the reservation.</p>
                     </div>
 
-                    <form onSubmit={handleDetailsSubmit} className="space-y-10">
-                      {/* Identity Section */}
-                      <div className="space-y-6">
-                        <div className="flex items-center gap-3 mb-2">
+                    <div className="mb-12">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
                           <User size={14} className="text-gold" />
                           <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-white/30">
                             Personal Details
                           </span>
                         </div>
+                        {!currentUser && (
+                          <div className="flex items-center gap-4">
+                            <button
+                              type="button"
+                              onClick={() => navigate('/login')}
+                              className="text-[10px] uppercase tracking-widest text-gold hover:text-white transition-colors"
+                            >
+                              Login
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate('/login')}
+                              className="text-[10px] uppercase tracking-widest bg-white/5 px-3 py-1 rounded-full text-white/60 hover:bg-white/10 transition-all"
+                            >
+                              Register
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {!currentUser && (
+                        <div className="mb-6">
+                          <LoginInline />
+                        </div>
+                      )}
+                    </div>
+
+                    <form onSubmit={handleDetailsSubmit} className="space-y-10">
+                      {/* Identity Section */}
+                      <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="space-y-2">
                             <input
@@ -517,6 +722,7 @@ export default function Offers() {
                                 <Autocomplete
                                   onLoad={(ref) => (pickupAutocompleteRef.current = ref)}
                                   onPlaceChanged={() => onPlaceChanged('pickup')}
+                                  options={autocompleteOptions}
                                 >
                                   <input
                                     required
@@ -534,6 +740,7 @@ export default function Offers() {
                                 <Autocomplete
                                   onLoad={(ref) => (dropoffAutocompleteRef.current = ref)}
                                   onPlaceChanged={() => onPlaceChanged('dropoff')}
+                                  options={autocompleteOptions}
                                 >
                                   <input
                                     type="text"
@@ -556,6 +763,7 @@ export default function Offers() {
                             <input
                               required
                               type="date"
+                              min={new Date().toISOString().split('T')[0]}
                               value={details.date}
                               onChange={(e) => setDetails({ ...details, date: e.target.value })}
                               className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
@@ -576,6 +784,52 @@ export default function Offers() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Return Ride Section */}
+                      <div className="space-y-4 pt-4">
+                        <label className="flex items-center gap-3 cursor-pointer group w-fit" onClick={() => setDetails(prev => ({ ...prev, returnRide: !prev.returnRide }))}>
+                          <div className={cn(
+                            "w-12 h-6 rounded-full flex items-center transition-colors p-1",
+                            details.returnRide ? "bg-gold" : "bg-white/10 group-hover:bg-white/20"
+                          )}>
+                            <div className={cn(
+                              "w-4 h-4 rounded-full bg-white transition-transform",
+                              details.returnRide ? "translate-x-6" : "translate-x-0"
+                            )} />
+                          </div>
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-white/70 group-hover:text-gold transition-colors">
+                            Add Return Ride (+100% Base Fare)
+                          </span>
+                        </label>
+                      </div>
+
+                      {details.returnRide && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-4">
+                          <div className="space-y-2">
+                            <input
+                              required={details.returnRide}
+                              type="date"
+                              min={details.date || new Date().toISOString().split('T')[0]}
+                              value={details.returnDate}
+                              onChange={(e) => setDetails({ ...details, returnDate: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                       focus:border-gold outline-none transition-all 
+                       text-sm font-medium appearance-none h-[53px]"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <input
+                              required={details.returnRide}
+                              type="time"
+                              value={details.returnTime}
+                              onChange={(e) => setDetails({ ...details, returnTime: e.target.value })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 
+                       focus:border-gold outline-none transition-all 
+                       text-sm font-medium appearance-none h-[53px]"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       {/* Notes Section */}
                       <div className="space-y-4 pt-4">
@@ -700,7 +954,7 @@ export default function Offers() {
                           <div className="pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-6">
                             <div>
                               <div className="flex items-center gap-2 mb-1">
-                                <CreditCard size={14} className="text-gold" />
+                                {paymentMethod === 'stripe' ? <CreditCard size={14} className="text-gold" /> : <Banknote size={14} className="text-gold" />}
                                 <span className="text-gold text-[10px] uppercase tracking-[0.3em] font-bold italic">Premier Reservation Asset</span>
                               </div>
                               <p className="text-[9px] text-white/20 uppercase tracking-[0.2em]">Inclusive of all terminal taxes & luxury surcharges</p>
@@ -712,37 +966,106 @@ export default function Offers() {
                         </div>
                       </div>
 
+                      <div className="mt-12 space-y-6">
+                        <h3 className="text-gold text-xs uppercase tracking-widest font-bold">Secure Payment Method</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {[
+                            { id: 'stripe', label: 'Stripe Pay', sub: 'Instant Update', icon: CreditCard },
+                            { id: 'cash', label: 'Cash Payment', sub: 'Pay on Arrival', icon: Banknote }
+                          ].map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => setPaymentMethod(p.id as any)}
+                              className={cn(
+                                "p-6 rounded-2xl border transition-all text-left group",
+                                paymentMethod === p.id ? "bg-gold border-gold" : "bg-white/5 border-white/10 hover:border-gold/50"
+                              )}
+                            >
+                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-4 transition-all", paymentMethod === p.id ? "bg-black text-gold" : "bg-white/5 text-white/20 group-hover:text-gold")}>
+                                <p.icon size={18} />
+                              </div>
+                              <p className={cn("text-[9px] uppercase font-bold tracking-widest", paymentMethod === p.id ? "text-black" : "text-white/30")}>{p.label}</p>
+                              <p className={cn("text-[8px] uppercase font-bold opacity-40", paymentMethod === p.id ? "text-black" : "text-gold")}>{p.sub}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
                       <div className="mt-16">
                         <button
                           onClick={async () => {
                             setIsLoading(true);
                             try {
-                              const bookingData = {
+                              const basePrice = Number(selectedFleet.salePrice || selectedPackage.price || 0);
+                              const finalPrice = details.returnRide ? basePrice * 2 : basePrice;
+
+                              const bookingData: any = {
                                 customerName: details.name,
                                 customerEmail: details.email?.toLowerCase(),
                                 customerPhone: details.phone,
                                 pickup: details.pickup,
-                                dropoff: details.dropoff || 'N/A',
+                                dropoff: details.dropoff || null,
                                 date: details.date,
                                 time: details.time,
                                 purpose: details.notes || "",
+                                returnRide: details.returnRide,
+                                returnDate: details.returnRide ? details.returnDate : null,
+                                returnTime: details.returnRide ? details.returnTime : null,
                                 packageId: selectedPackage.id,
                                 packageTitle: selectedPackage.title,
                                 vehicleType: selectedFleet.type,
-                                price: selectedFleet.salePrice,
+                                price: finalPrice,
                                 status: 'pending',
                                 type: 'offer',
                                 paymentStatus: 'unpaid',
-                                paymentMethod: 'cash',
+                                paymentMethod: paymentMethod,
                                 serviceType: 'offer',
-                                createdAt: serverTimestamp(),
                                 userId: auth.currentUser?.uid || 'guest'
                               };
-                              await addDoc(collection(db, 'bookings'), bookingData);
-                              navigate('/payment/success');
-                            } catch (err) {
+
+                              if (paymentMethod === 'stripe') {
+                                // Save draft for restoration if cancelled
+                                localStorage.setItem('offer_booking_draft', JSON.stringify({
+                                  details,
+                                  step,
+                                  selectedPackage,
+                                  selectedFleet,
+                                  paymentMethod
+                                }));
+
+                                const response = await fetch('/api/create-checkout-session', {
+                                  method: 'POST',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                  },
+                                  body: JSON.stringify({
+                                    bookingData,
+                                    vehicleName: `${selectedPackage.title} - ${selectedFleet.type}`,
+                                    cancelUrl: `${window.location.origin}${window.location.pathname}?cancelled=true`
+                                  }),
+                                });
+
+                                if (!response.ok) {
+                                  const errorData = await response.json();
+                                  throw new Error(errorData.error || 'Failed to create checkout session');
+                                }
+
+                                const { url } = await response.json();
+                                if (url) {
+                                  window.location.href = url;
+                                } else {
+                                  throw new Error('No checkout URL received');
+                                }
+                              } else {
+                                const docRef = await addDoc(collection(db, 'bookings'), {
+                                  ...bookingData,
+                                  createdAt: serverTimestamp(),
+                                });
+                                navigate(`/payment/success?booking_id=${docRef.id}&method=cash`);
+                              }
+                            } catch (err: any) {
                               console.error("Booking error:", err);
-                              alert("There was an issue processing your booking. Please try again.");
+                              alert(err.message || "There was an issue processing your booking. Please try again.");
                             } finally {
                               setIsLoading(false);
                             }
@@ -869,7 +1192,7 @@ export default function Offers() {
                           <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/30">Premium total</span>
                           <div className="h-[1px] flex-1 bg-white/5 mx-4" />
                           <span className="text-2xl font-display text-white">
-                            ${selectedFleet?.salePrice || selectedPackage?.price || '0'}
+                            ${((Number(selectedFleet?.salePrice || selectedPackage?.price || 0)) * (details.returnRide ? 2 : 1)).toFixed(2)}
                           </span>
                         </div>
                         <p className="text-[9px] text-white/20 italic text-right leading-none lowercase tracking-tight">exclusive airport fees & taxes included.</p>

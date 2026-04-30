@@ -88,7 +88,7 @@ export default function Navbar() {
     <>
       <nav
         className={cn(
-          'fixed top-0 left-0 right-0 z-50 transition-all duration-300 px-6 py-4',
+          'relative z-50 transition-all duration-300 px-6 py-4 w-full',
           scrolled ? 'bg-black/90 backdrop-blur-md py-3 border-b border-white/10' : 'bg-transparent'
         )}
       >

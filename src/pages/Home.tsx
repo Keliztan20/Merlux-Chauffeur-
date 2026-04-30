@@ -4,7 +4,7 @@ import {
   ChevronRight, ChevronLeft, Star, Shield, Clock, MapPin, 
   Car, Plane, Briefcase, Heart, Wine, Camera, Send, 
   ArrowRight, Calendar, User, Phone, Mail, MessageSquare,
-  Map
+  Map as MapIcon
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
@@ -19,7 +19,7 @@ const HERO_IMAGES = [
 const SERVICE_OPTIONS = [
   { name: 'Airport Transfer', id: 'airport', icon: Plane },
   { name: 'Corporate Travel', id: 'corporate', icon: Briefcase },
-  { name: 'Private Tour', id: 'tour', icon: Map },
+  { name: 'Private Tour', id: 'tour', icon: MapIcon },
   { name: 'Special Event', id: 'wedding', icon: Heart }
 ];
 
@@ -578,7 +578,7 @@ export default function Home() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-12">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-gold/10 rounded-2xl flex items-center justify-center border border-gold/20">
-                  <Map size={24} className="text-gold" />
+                  <MapIcon size={24} className="text-gold" />
                 </div>
                 <div>
                   <h4 className="font-display text-xl">Custom Routes</h4>

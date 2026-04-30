@@ -1,0 +1,138 @@
+src/components/layout/Footer.tsx:                <a key={i} href="#" className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center hover:bg-gold hover:text-black transition-all">
+src/components/layout/Footer.tsx:                <li key={link}>
+src/components/layout/Footer.tsx:                <li key={service}>
+src/components/layout/Navbar.tsx:                key={link.path}
+src/components/layout/Navbar.tsx:                        key={link.path}
+src/components/layout/Navbar.tsx:                key={item.name}
+src/components/layout/Navbar.tsx:                key={item.name}
+src/components/layout/Navbar.tsx:                    key={link.path}
+src/components/FloatingElements.tsx:              key={bar.id || bIdx}
+src/components/FloatingElements.tsx:                        <div key={i} className="flex items-center gap-3 md:gap-6">
+src/components/FloatingElements.tsx:                key={icon.id || idx}
+src/components/FloatingElements.tsx:              key={popup.id}
+src/pages/Services.tsx:            <div key={i} className="glass group overflow-hidden">
+src/pages/AppDashboard.tsx:                                          key={`${driver.id}-${dIdx}`}
+src/pages/AppDashboard.tsx:                              key={opt.value}
+src/pages/AppDashboard.tsx:                                <option key={y} value={y} className="bg-black">
+src/pages/AppDashboard.tsx:                                <option key={y} value={y} className="bg-black">
+src/pages/AppDashboard.tsx:                  <div key={`booking-card-${booking.id}-${idx}`} className={cn("glass p-5 rounded-2xl overflow-hidden border transition-all group flex flex-col h-full relative", selectedBookings.includes(booking.id) ? "border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "border-white/5")}>
+src/pages/AppDashboard.tsx:                                    <div key={`wp-pop-${i}`} className="flex gap-2 items-start">
+src/pages/AppDashboard.tsx:                                          key={`${id}-${index}`}
+src/pages/AppDashboard.tsx:                                        <div key={`extra-summary-${id}`} className="flex justify-between items-center bg-white/5 p-1.5 rounded-lg border border-white/5">
+src/pages/AppDashboard.tsx:                                          key={s}
+src/pages/AppDashboard.tsx:                                        <option key={driver.id} value={driver.id} className="bg-black">
+src/pages/AppDashboard.tsx:                        <tr key={`booking-row-${booking.id}-${idx}`} className={cn("hover:bg-white/[0.02] transition-colors group", selectedBookings.includes(booking.id) ? "bg-gold/5" : "")}>
+src/pages/AppDashboard.tsx:                                        <option key={`opt-${booking.id}-${driver.id}`} value={driver.id} className="bg-black">
+src/pages/AppDashboard.tsx:                      key={v.id}
+src/pages/AppDashboard.tsx:                        key={f.id}
+src/pages/AppDashboard.tsx:                            <option key={i} value={i} className="bg-black text-white">
+src/pages/AppDashboard.tsx:                              <option key={year} value={year} className="bg-black text-white">
+src/pages/AppDashboard.tsx:                            <option key={i} value={i} className="bg-black text-white">
+src/pages/AppDashboard.tsx:                              <option key={year} value={year} className="bg-black text-white">
+src/pages/AppDashboard.tsx:                <div key={`stat-${i}`} className="glass p-4 rounded-xl border border-white/5 relative overflow-hidden group">
+src/pages/AppDashboard.tsx:                        key={chart.id}
+src/pages/AppDashboard.tsx:                                    <Cell key={`cell-${index}`} fill={entry.color} />
+src/pages/AppDashboard.tsx:                          <div key={`top-driver-${i}`} className="flex justify-between p-4 bg-white/5 rounded-xl">
+src/pages/AppDashboard.tsx:                          <div key={`top-customer-${i}`} className="flex justify-between p-4 bg-white/5 rounded-xl">
+src/pages/AppDashboard.tsx:                            <tr key={b.id}>
+src/pages/AppDashboard.tsx:                  <div key={day} className="text-center text-[10px] font-bold uppercase tracking-widest text-white/20">
+src/pages/AppDashboard.tsx:                      key={dayStr}
+src/pages/AppDashboard.tsx:                                  key={status}
+src/pages/AppDashboard.tsx:                  key={`user-role-tab-${roleTab.id}`}
+src/pages/AppDashboard.tsx:                <div key={u.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
+src/pages/AppDashboard.tsx:                                      key={i}
+src/pages/AppDashboard.tsx:                                                key={j}
+src/pages/AppDashboard.tsx:                  key={sub.id}
+src/pages/AppDashboard.tsx:                          <div key={`edit-${icon.id || idx}`} className="bg-black/40 border border-white/10 p-5 rounded-2xl flex flex-col gap-5 relative overflow-hidden group/editor">
+src/pages/AppDashboard.tsx:                        <div key={bar.id || bIdx} className="glass p-6 rounded-2xl border border-white/5 space-y-4 relative group hover:border-gold/20 transition-all">
+src/pages/AppDashboard.tsx:                        <div key={popup.id} className="glass p-6 rounded-2xl border border-white/5 space-y-4 relative group hover:border-gold/20 transition-all">
+src/pages/AppDashboard.tsx:                      key={media.u_key || media.id}
+src/pages/AppDashboard.tsx:                      <div key={blog.id || blog.slug || blog.title} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+src/pages/AppDashboard.tsx:                            key={page.id || page.slug}
+src/pages/AppDashboard.tsx:                          <div key={offer.id} className={cn("glass rounded-2xl overflow-hidden border transition-all flex flex-col group relative", selectedOffers.includes(offer.id) ? "border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "border-white/5 hover:border-gold/30")}>
+src/pages/AppDashboard.tsx:                                        key={`${offer.id}-tag-${tag}-${tIdx}`}
+src/pages/AppDashboard.tsx:                                  <tr key={`list-offer-${offer.id}`} className={cn("transition-colors group", selectedOffers.includes(offer.id) ? "bg-gold/5" : "hover:bg-white/5")}>
+src/pages/AppDashboard.tsx:                                              <span key={`${offer.id}-list-tag-${tag}-${tIdx}`} className="text-[8px] bg-gold/10 text-gold px-1 rounded uppercase tracking-widest">
+src/pages/AppDashboard.tsx:                            <div key={tour.id} className={cn("glass rounded-2xl overflow-hidden border transition-all flex flex-col group relative", selectedTours.includes(tour.id) ? "border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "border-white/5 hover:border-gold/30")}>
+src/pages/AppDashboard.tsx:                                  <tr key={`list-tour-${tour.id}`} className={cn("transition-colors group", selectedTours.includes(tour.id) ? "bg-gold/5" : "hover:bg-white/5")}>
+src/pages/AppDashboard.tsx:                      <div key={v.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all">
+src/pages/AppDashboard.tsx:                      <div key={e.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
+src/pages/AppDashboard.tsx:                      <div key={c.id} className="glass p-6 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group relative overflow-hidden">
+src/pages/AppDashboard.tsx:                                    key={`${c.id}-${service}`}
+src/pages/AppDashboard.tsx:                                key={pill.id}
+src/pages/AppDashboard.tsx:                  <div key={`wallet-hist-${booking.id}`} className="glass p-4 rounded-xl flex items-center justify-between">
+src/pages/AppDashboard.tsx:                  key={`top-${item.id}`}
+src/pages/AppDashboard.tsx:              key={activeTab}
+src/pages/AppDashboard.tsx:                    key={`star-${star}`}
+src/pages/AppDashboard.tsx:                                  <div key={`view-extra-${id}`} className="flex justify-between items-center text-[10px] text-white/70 bg-white/5 p-1.5 rounded-lg">
+src/pages/AppDashboard.tsx:                                <div key={`calc-range-${i}`} className="flex justify-between items-center text-[10px]">
+src/pages/AppDashboard.tsx:                          <div key={`view-wp-${idx}`} className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-start gap-3">
+src/pages/AppDashboard.tsx:                            <span key={`${extraId}-${index}`} className="px-3 py-1 bg-gold/10 border border-gold/20 rounded-full text-[10px] text-gold font-bold uppercase">
+src/pages/AppDashboard.tsx:                    <div key={`route-wp-${i}`} className="flex items-start gap-3 p-2 bg-white/5 rounded-lg border border-white/5 ml-4">
+src/pages/AppDashboard.tsx:                        <option key={cat} value={cat}>{cat}</option>
+src/pages/AppDashboard.tsx:                      <div key={fIdx} className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group/fleet">
+src/pages/AppDashboard.tsx:                    key={tab.id}
+src/pages/AppDashboard.tsx:                              <div key={`inc-${idx}`} className="flex items-center gap-2">
+src/pages/AppDashboard.tsx:                              <div key={`exc-${idx}`} className="flex items-center gap-2">
+src/pages/AppDashboard.tsx:                              <div key={`act-${idx}-${act.slice(0, 5)}`} className="flex items-center gap-2">
+src/pages/AppDashboard.tsx:                              <div key={`pl-${idx}-${pl.slice(0, 5)}`} className="flex items-center gap-2">
+src/pages/AppDashboard.tsx:                            <div key={f.id || idx} className="bg-white/5 border border-white/10 rounded-2xl p-6 relative group/row hover:border-gold/30 transition-all">
+src/pages/AppDashboard.tsx:                                      {fleet.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+src/pages/AppDashboard.tsx:                            <div key={e.id || idx} className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group/extra">
+src/pages/AppDashboard.tsx:                          <div key={step.id || idx} className="relative pl-16 group/step">
+src/pages/AppDashboard.tsx:                                  <div key={i} className="w-12 h-12 rounded bg-black border border-white/10 overflow-hidden relative" title={img}>
+src/pages/AppDashboard.tsx:                              <div key={faq.id || `faq-${idx}`} className="bg-white/5 border border-white/5 rounded-2xl p-4 relative">
+src/pages/AppDashboard.tsx:                      <div key={`km-${index}`} className="flex gap-2 items-center">
+src/pages/AppDashboard.tsx:                          key={service}
+src/pages/AppDashboard.tsx:                  <div key={`day-booking-${booking.id}`} className="glass p-4 rounded-xl border border-white/5 space-y-3">
+src/pages/AppDashboard.tsx:                            <th key={h} className="px-3 py-2 text-gold font-black uppercase tracking-widest border-r border-gold/10 last:border-0 whitespace-nowrap">
+src/pages/AppDashboard.tsx:                            <td key={i} className="px-3 py-2 text-white/50 font-mono border-r border-white/5 last:border-0 whitespace-nowrap italic">
+src/pages/AppDashboard.tsx:                                    key={type}
+src/pages/AppDashboard.tsx:                                    key={type}
+src/pages/Tours.tsx:              <div key={s.id} className="flex-1 flex flex-col items-center xl:flex-row xl:items-center">
+src/pages/Tours.tsx:                        <option key={cat} value={cat}>
+src/pages/Tours.tsx:                        <option key={dur} value={dur}>
+src/pages/Tours.tsx:                              key={`gallery-${i}`}
+src/pages/Tours.tsx:                      <div key={`highlight-${i}`} className="glass p-6 rounded-3xl border border-white/5 text-center">
+src/pages/Tours.tsx:                        <div key={`itinerary-${idx}`} className="relative group">
+src/pages/Tours.tsx:                          <div key={`faq-${i}`} className="p-6 bg-white/5 rounded-2xl border border-white/5">
+src/pages/Tours.tsx:                        <div key={`sidebar-info-${idx}`} className="glass-heavy p-6 rounded-3xl border border-white/5 bg-white/5 transition-all hover:bg-white/10">
+src/pages/Tours.tsx:                              <div key={`${section.label}-${i}`} className="flex items-start gap-3 text-[11px] text-white/50 leading-relaxed group">
+src/pages/Tours.tsx:                    key={`${tour.id || 'tour'}-${tourIdx}`}
+src/pages/Tours.tsx:                          key={f.id || `fleet-${f.name}-${idx}`}
+src/pages/Tours.tsx:                            key={`extra-${extraId}-${extraIdx}`}
+src/pages/Tours.tsx:                              <div key={`extra-summary-${idx}`} className="flex justify-between items-center text-[11px] border-b border-white/5 pb-2 last:border-0 last:pb-0">
+src/pages/Tours.tsx:                            return <p key={idx} className="text-[10px] text-white/60">• {extra?.name} (x{count})</p>
+src/pages/Tours.tsx:                      <div key={`summary-extra-${idOrName}-${idx}`} className="flex justify-between border-b border-white/5 pb-4">
+src/pages/Tours.tsx:                      key={p.id}
+src/pages/Tours.tsx:            <div key={`feature-${i}`} className="text-center">
+src/pages/Booking.tsx:              <div key={s.id} className="flex items-center gap-2">
+src/pages/Booking.tsx:                    key={type.id}
+src/pages/Booking.tsx:                      <div key={`wp-${idx}`} className="relative flex gap-2">
+src/pages/Booking.tsx:                            <option key={h} value={h} className="bg-black">
+src/pages/Booking.tsx:                          key={v.id}
+src/pages/Booking.tsx:                            key={extra.id}
+src/pages/Booking.tsx:                                      key={idx}
+src/pages/Booking.tsx:                                    key={id}
+src/pages/Booking.tsx:                                                key={i}
+src/pages/Booking.tsx:                                          key={idx}
+src/pages/Booking.tsx:                                        key={id}
+src/pages/Booking.tsx:                                                    key={i}
+src/pages/Blog.tsx:                key={cat}
+src/pages/Blog.tsx:                key={post.id}
+src/pages/Offers.tsx:              <div key={s.id} className="flex items-center gap-2 shrink-0">
+src/pages/Offers.tsx:                            <option key={tag} value={tag}>{tag}</option>
+src/pages/Offers.tsx:                            key={pkg.id}
+src/pages/Offers.tsx:                                  <span key={tIdx} className="bg-black/60 backdrop-blur-md border border-white/10 text-white shadow-xl text-[8px] font-bold uppercase tracking-widest px-2 py-1 rounded">
+src/pages/Offers.tsx:                        key={`${fleet.type}-${idx}`}
+src/pages/Offers.tsx:                              key={p.id}
+src/pages/Offers.tsx:            <div key={i} className="space-y-4">
+src/pages/Home.tsx:            key={currentHero}
+src/pages/Home.tsx:              key={`hero-dot-${i}`}
+src/pages/Home.tsx:                          key={option.id}
+src/pages/Home.tsx:                  key={`guide-step-${i}`}
+src/pages/Home.tsx:                key={`service-card-${i}`}
+src/pages/Home.tsx:                key={currentFleet}
+src/pages/Home.tsx:                key={`home-blog-${blog.id}`}
+src/pages/Fleet.tsx:              key={car.id}
+src/pages/Fleet.tsx:                      <div key={feature} className="flex items-center gap-2 text-sm text-white/70">

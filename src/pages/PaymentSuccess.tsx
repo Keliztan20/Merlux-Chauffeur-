@@ -17,8 +17,8 @@ export default function PaymentSuccess() {
 
   useEffect(() => {
     const finalizeBooking = async () => {
-      // Handle Cash on Pickup
-      if (method === 'cash' && bookingIdParam) {
+      // Handle Direct Booking IDs (e.g. Cash on Pickup or pre-created bookings)
+      if (bookingIdParam) {
         setBookingId(bookingIdParam);
         setLoading(false);
         return;

@@ -6,6 +6,9 @@ import {
   BadgePercent,
   Clock,
   Car,
+  HandHeart,
+  Gem,
+  Cake,
   User,
   ChevronRight,
   ChevronLeft,
@@ -62,11 +65,9 @@ import {
 import { fetchFlightStatus, FlightStatus } from "../services/flightService";
 import Logo from "../components/layout/Logo";
 
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_ID } from "../lib/google-maps";
+
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
-const libraries: ("places" | "drawing" | "geometry" | "visualization")[] = [
-  "places",
-  "geometry",
-];
 
 const mapContainerStyle = {
   width: "100%",
@@ -164,7 +165,7 @@ const serviceTypes = [
   {
     id: "wedding",
     name: "Wedding Service",
-    icon: Heart,
+    icon: Gem,
     desc: "Luxury for your special day",
   },
   {
@@ -174,16 +175,16 @@ const serviceTypes = [
     desc: "Chauffeur at your disposal",
   },
     {
-    id: "tour",
-    name: "Private Tour",
-    icon: Map,
-    desc: "Bespoke regional Victoria tours",
+    id: "event",
+    name: "Events Hire",
+    icon: Cake,
+    desc: "Elegant transport for any event",
   },
-    {
-    id: "offer",
-    name: "Offer Ride Packages",
-    icon: BadgePercent,
-    desc: "Suburbs to/from Airport Ride Packages",
+      {
+    id: "occasions",
+    name: "Special Occasions",
+    icon: HandHeart,
+    desc: "Bespoke regional Victoria tours",
   },
 ];
 
@@ -235,9 +236,9 @@ export default function Booking() {
   } | null;
 
   const { isLoaded, loadError } = useJsApiLoader({
-    id: 'google-map-script',
+    id: GOOGLE_MAPS_ID,
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries: libraries,
+    libraries: GOOGLE_MAPS_LIBRARIES,
   });
 
   const [step, setStep] = useState(initialState?.step || 1);
@@ -255,6 +256,26 @@ export default function Booking() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
   const [showDistanceBreakdown, setShowDistanceBreakdown] = useState(false);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem('booking_draft');
+    const isCancelled = new URLSearchParams(location.search).get('cancelled');
+    
+    if (savedData && isCancelled === 'true') {
+      try {
+        const data = JSON.parse(savedData);
+        setFormData(data.formData);
+        setStep(data.step);
+        if (data.appliedCoupon) setAppliedCoupon(data.appliedCoupon);
+        if (data.distance) setDistance(data.distance);
+        if (data.duration) setDuration(data.duration);
+        // Clean up
+        localStorage.removeItem('booking_draft');
+      } catch (err) {
+        console.error('Failed to restore booking draft:', err);
+      }
+    }
+  }, [location.search]);
 
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [showLoginFields, setShowLoginFields] = useState(false);
@@ -959,6 +980,15 @@ export default function Booking() {
 
       if (paymentMethod === "card") {
         // Create Stripe Checkout Session
+        // Save draft for restoration if cancelled
+        localStorage.setItem('booking_draft', JSON.stringify({ 
+          formData, 
+          step,
+          appliedCoupon,
+          distance,
+          duration
+        }));
+
         const response = await fetch("/api/create-checkout-session", {
           method: "POST",
           headers: {
@@ -967,6 +997,7 @@ export default function Booking() {
           body: JSON.stringify({
             bookingData,
             vehicleName: selectedVehicle?.name,
+            cancelUrl: `${window.location.origin}${window.location.pathname}?cancelled=true`
           }),
         });
 

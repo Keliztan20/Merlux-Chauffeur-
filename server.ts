@@ -15,12 +15,16 @@ const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
-  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0235637334';
-  const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || 'ai-studio-19758109-ff4d-41af-92f4-5c0a6339ee89';
+  const config = JSON.parse(fs.readFileSync('./firebase-applet-config.json', 'utf-8'));
+  const projectId = config.projectId;
+  const databaseId = config.firestoreDatabaseId;
 
+  console.log(`Initializing Firebase Admin for project: ${projectId}, database: ${databaseId}`);
+  
   admin.initializeApp({
     projectId: projectId,
   });
+  console.log(`Firebase Admin initialized with project: ${projectId}`);
 
   if (databaseId) {
     admin.firestore().settings({ databaseId });
@@ -40,13 +44,17 @@ async function startServer() {
   // Stripe Checkout Session Endpoint
   app.post('/api/create-checkout-session', async (req, res) => {
     try {
-      const { bookingData, vehicleName } = req.body;
+      const { bookingData, vehicleName, cancelUrl } = req.body;
 
       if (!process.env.STRIPE_SECRET_KEY) {
         throw new Error('STRIPE_SECRET_KEY is not set');
       }
 
       const bookingDataString = JSON.stringify(bookingData);
+
+      const description = bookingData.dropoff && bookingData.dropoff !== 'N/A' 
+        ? `${bookingData.serviceType.toUpperCase()} - ${bookingData.pickup} to ${bookingData.dropoff}`
+        : `${bookingData.serviceType.toUpperCase()} - ${bookingData.pickup}`;
 
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
@@ -56,7 +64,7 @@ async function startServer() {
               currency: 'aud',
               product_data: {
                 name: `Chauffeur Service: ${vehicleName}`,
-                description: `${bookingData.serviceType.toUpperCase()} - ${bookingData.pickup} to ${bookingData.dropoff}`,
+                description: description,
               },
               unit_amount: Math.round(bookingData.price * 100), // Stripe expects cents
             },
@@ -65,7 +73,7 @@ async function startServer() {
         ],
         mode: 'payment',
         success_url: `${process.env.APP_URL || 'http://localhost:3000'}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.APP_URL || 'http://localhost:3000'}/booking`,
+        cancel_url: cancelUrl || `${process.env.APP_URL || 'http://localhost:3000'}/booking`,
         metadata: {
           bookingDataChunk1: bookingDataString.substring(0, 450),
           bookingDataChunk2: bookingDataString.substring(450, 900),
@@ -95,10 +103,12 @@ async function startServer() {
   app.post('/api/admin/create-user', async (req, res) => {
     try {
       const { email, password, displayName, role, phone, address } = req.body;
+      
+      console.log(`Attempting to create user: ${email} in project ${admin.app().options.projectId}`);
 
       // Create user in Firebase Auth
       const userRecord = await admin.auth().createUser({
-        email,
+        email: email.toLowerCase(),
         password,
         displayName,
         phoneNumber: phone || undefined,
@@ -119,7 +129,7 @@ async function startServer() {
       res.json({ success: true, uid: userRecord.uid });
     } catch (error: any) {
       console.error('Error creating user:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: error.message + ': ' + JSON.stringify(req.body), code: error.code });
     }
   });
 

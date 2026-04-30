@@ -3,14 +3,16 @@ import {
   Home, MapPin, Clock, User,
   Settings, Bell, CreditCard, History,
   ChevronRight, Star, LogOut, Plane, Loader2, Truck, X, ChevronLeft, ArrowRight, ChevronDown,
-  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage,
-  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, UserLock, Copy, Tag, Compass,
-  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, List, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2, Code2, Cog, MessageSquare, AlertCircle, PiggyBank, Activity, Award, Info, FileUp, Image, IdCard, Blocks
+  Search, ArrowUpDown, Filter, RefreshCw, RotateCcw, ArrowUp, ArrowDown, CalendarArrowUp, CalendarArrowDown, Luggage, Map as MapIcon,
+  Plus, Trash2, Ban, CheckCircle, DollarSign, Percent, Car, Shield, UserPlus, Edit2, Eye, EyeOff, UserLock, Copy, Tag, Compass,
+  Scaling, Maximize2,
+  Mail, Phone, Calendar, BarChart3, Users, LayoutGrid, List, Globe, Save, MoreVertical, Upload, CircleX, LocateFixed, UserCheck, XCircle, CheckSquare, CalendarCog, Navigation, Route, Settings2, Code2, Cog, MessageSquare, AlertCircle, PiggyBank, Activity, Award, Info, FileUp, Image, IdCard, Blocks, Download, Check, Square, SquareCheck, CheckCheck, XSquare, ThumbsDown, ThumbsUp,
+  Facebook, Instagram, Linkedin, MessageCircle, ArrowUpCircle, MousePointer2, Palette, Monitor, Smartphone, Layout, Twitter, Youtube
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader, DirectionsService, DirectionsRenderer, Marker } from '@react-google-maps/api';
 import { cn } from '../lib/utils';
-import { auth, db, storage } from '../lib/firebase';
+import { auth, db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, getDocs, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject, uploadBytesResumable } from 'firebase/storage';
 import { onAuthStateChanged, signOut, updateProfile, updatePassword } from 'firebase/auth';
@@ -18,7 +20,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area, PieChart, Pie, Cell
+  LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend, LabelList
 } from 'recharts';
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -26,61 +28,10 @@ import {
   isToday, parseISO, subDays, startOfYear, endOfYear, eachMonthOfInterval,
   startOfDay, endOfDay, setMonth, setYear, eachYearOfInterval
 } from 'date-fns';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_ID } from '../lib/google-maps';
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
-const libraries: ("places" | "drawing" | "geometry" | "visualization")[] = ["places", "geometry"];
 const BLOG_CATEGORIES = ["Travel Tips", "Business", "Weddings", "Tours", "Industry", "Safety"];
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 export default function AppDashboard() {
   const [activeTab, setActiveTab] = useState('bookings');
@@ -88,6 +39,10 @@ export default function AppDashboard() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
+  const [selectedBookings, setSelectedBookings] = useState<string[]>([]);
+  const [isBookingsSelectionMode, setIsBookingsSelectionMode] = useState(false);
+  const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
+  const [showDriverBulkAssign, setShowDriverBulkAssign] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -114,9 +69,9 @@ export default function AppDashboard() {
 
 
   const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
+    id: GOOGLE_MAPS_ID,
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries,
+    libraries: GOOGLE_MAPS_LIBRARIES
   });
 
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -221,11 +176,20 @@ export default function AppDashboard() {
   const [offers, setOffers] = useState<any[]>([]);
   const [editingOffer, setEditingOffer] = useState<any>(null);
   const [showOfferModal, setShowOfferModal] = useState(false);
+  const [offersSearchTerm, setOffersSearchTerm] = useState('');
+  const [offersLayout, setOffersLayout] = useState<'grid' | 'list'>('grid');
+  const [selectedOffers, setSelectedOffers] = useState<string[]>([]);
+  const [isOffersSelectionMode, setIsOffersSelectionMode] = useState(false);
 
   // Tours State
   const [tours, setTours] = useState<any[]>([]);
+  const [tourActiveTab, setTourActiveTab] = useState<'general' | 'content' | 'pricing' | 'itinerary' | 'marketing'>('general');
   const [editingTour, setEditingTour] = useState<any>(null);
   const [showTourModal, setShowTourModal] = useState(false);
+  const [toursSearchTerm, setToursSearchTerm] = useState('');
+  const [toursLayout, setToursLayout] = useState<'grid' | 'list'>('grid');
+  const [selectedTours, setSelectedTours] = useState<string[]>([]);
+  const [isToursSelectionMode, setIsToursSelectionMode] = useState(false);
   const [isUploadingCsv, setIsUploadingCsv] = useState(false);
   const [showCsvImportModal, setShowCsvImportModal] = useState(false);
   const [csvImportType, setCsvImportType] = useState<'offers' | 'tours'>('offers');
@@ -260,8 +224,14 @@ export default function AppDashboard() {
 
   // Settings State
   const [systemSettings, setSystemSettings] = useState<any>(null);
+  const [floatingSettings, setFloatingSettings] = useState<any>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSavingFloatingSettings, setIsSavingFloatingSettings] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [showBarModal, setShowBarModal] = useState(false);
+  const [editingBarIndex, setEditingBarIndex] = useState<number | null>(null);
+  const [showPopupModal, setShowPopupModal] = useState(false);
+  const [editingPopupIndex, setEditingPopupIndex] = useState<number | null>(null);
 
   // Media Management State
   const [mediaList, setMediaList] = useState<any[]>([]);
@@ -278,10 +248,10 @@ export default function AppDashboard() {
   const [storageLimitBytes, setStorageLimitBytes] = useState(5 * 1024 * 1024 * 1024); // 5GB Free Tier Simulation
 
   // Confirmation State
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra' | 'page' | 'blog', id: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'booking' | 'user' | 'vehicle' | 'coupon' | 'extra' | 'page' | 'blog' | 'tour' | 'offer' | 'bulk-tours' | 'bulk-offers' | 'bulk-bookings', id?: string, ids?: string[] } | null>(null);
 
   // New Analytics State
-  const [analyticsTimeFilter, setAnalyticsTimeFilter] = useState<'7d' | '30d' | 'month' | 'year'>('7d');
+  const [analyticsTimeFilter, setAnalyticsTimeFilter] = useState<'all' | '7d' | '30d' | 'month' | 'year'>('all');
   const [monthRange, setMonthRange] = useState({ start: 0, end: new Date().getMonth() });
   const [yearRange, setYearRange] = useState({
     start: new Date().getFullYear() - 2,
@@ -300,22 +270,14 @@ export default function AppDashboard() {
     end: new Date().getFullYear()
   });
   const [dashboardCharts, setDashboardCharts] = useState<any[]>([
-    { id: 'revenue-trend', type: 'area', title: 'Revenue Trend', dataKey: 'revenue', color: '#D4AF37', width: 'large' },
+    { id: 'revenue-trend', type: 'area', title: 'Revenue Trend', dataKey: 'revenue', color: '#D4AF37', width: 'medium' },
     { id: 'booking-volume', type: 'bar', title: 'Booking Volume', dataKey: 'bookings', color: '#60A5FA', width: 'medium' },
-    { id: 'booking-statuses', type: 'pie', title: 'Booking Statuses', dataKey: 'value', color: '#22D3EE', width: 'small', dataSource: 'statusData' },
-    { id: 'role-distribution', type: 'pie', title: 'User Roles', dataKey: 'value', color: '#F43F5E', width: 'small', dataSource: 'roleData' }
+    { id: 'booking-statuses', type: 'pie', title: 'Booking Statuses', dataKey: 'value', color: '#22D3EE', width: 'medium', dataSource: 'statusData' },
+    { id: 'role-distribution', type: 'pie', title: 'User Roles', dataKey: 'value', color: '#F43F5E', width: 'medium', dataSource: 'roleData' },
+    { id: 'service-performance', type: 'stacked-bar', title: 'Service Performance', dataKey: 'value', color: '#D4AF37', width: 'medium', dataSource: 'serviceDistribution' }
   ]);
-  const [showAddChartModal, setShowAddChartModal] = useState(false);
-  const [newChartConfig, setNewChartConfig] = useState({
-    title: '',
-    type: 'line',
-    dataKey: 'revenue',
-    dataSource: 'revenueData',
-    color: '#D4AF37',
-    width: 'medium'
-  });
 
-  const [bookingCategory, setBookingCategory] = useState<'standard' | 'offer'>('standard');
+  const [bookingCategory, setBookingCategory] = useState<'standard' | 'offer' | 'tour'>('standard');
   const [bookingViewMode, setBookingViewMode] = useState<'grid' | 'table'>('grid');
   const [offerViewMode, setOfferViewMode] = useState<'grid' | 'list'>('grid');
   const navigate = useNavigate();
@@ -325,7 +287,7 @@ export default function AppDashboard() {
 
   const navItems = [
     { id: 'bookings', label: 'Bookings', icon: LayoutGrid, adminOnly: false },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3, adminOnly: false },
     { id: 'calendar', label: 'Calendar', icon: Calendar, adminOnly: false },
     { id: 'users', label: 'Users', icon: Users, adminOnly: true },
     { id: 'profile', label: 'Profile', icon: IdCard, adminOnly: false },
@@ -429,6 +391,36 @@ export default function AppDashboard() {
       updateDoc(couponRef, { active: false });
     });
   }, [coupons, isAdmin]);
+
+  // Auto-deactivate Floating Bars based on date
+  useEffect(() => {
+    if (!isAdmin || !floatingSettings?.bars) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    let changed = false;
+
+    // Check Bars
+    const newBars = (floatingSettings.bars || []).map((bar: any) => {
+      if (bar.active && bar.endDate && bar.endDate < today) {
+        changed = true;
+        return { ...bar, active: false };
+      }
+      return bar;
+    });
+
+    // Check Popups
+    const newPopups = (floatingSettings.popups || []).map((popup: any) => {
+      if (popup.active && popup.endDate && popup.endDate < today) {
+        changed = true;
+        return { ...popup, active: false };
+      }
+      return popup;
+    });
+
+    if (changed) {
+      setFloatingSettings((prev: any) => ({ ...prev, bars: newBars, popups: newPopups }));
+    }
+  }, [floatingSettings?.bars, floatingSettings?.popups, isAdmin]);
 
 
   useEffect(() => {
@@ -608,6 +600,8 @@ export default function AppDashboard() {
         return bDate >= subDays(now, 6);
       } else if (analyticsTimeFilter === '30d') {
         return bDate >= subDays(now, 29);
+      } else if (analyticsTimeFilter === 'all') {
+        return true;
       }
       return true;
     });
@@ -628,15 +622,37 @@ export default function AppDashboard() {
       { name: 'Cancelled', value: cancelledCount, color: '#F87171' },
     ].filter(item => item.value > 0);
 
+    // Filter by Service Type for more insights
+    const serviceDistribution = [...new Set(filteredBookingsList.map(b => b.serviceType).filter(Boolean))].map(type => {
+      const typeBookings = filteredBookingsList.filter(b => b.serviceType === type);
+      const completed = typeBookings.filter(b => b.status === 'completed').length;
+      const cancelled = typeBookings.filter(b => b.status === 'cancelled').length;
+      const other = typeBookings.length - (completed + cancelled);
+      const revenue = typeBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0);
+
+      return {
+        name: type.charAt(0).toUpperCase() + type.slice(1),
+        value: typeBookings.length,
+        completed,
+        cancelled,
+        other,
+        revenue,
+        color: type === 'airport' ? '#60A5FA' : type === 'corporate' ? '#D4AF37' : type === 'wedding' ? '#F43F5E' : '#C084FC'
+      };
+    });
+
     let intervals: Date[] = [];
     let formatStr = 'MMM dd';
+    let grouping: 'day' | 'month' | 'year' = 'day';
 
     if (analyticsTimeFilter === '7d') {
       intervals = eachDayOfInterval({ start: subDays(now, 6), end: now });
       formatStr = 'MMM dd';
+      grouping = 'day';
     } else if (analyticsTimeFilter === '30d') {
       intervals = eachDayOfInterval({ start: subDays(now, 29), end: now });
       formatStr = 'MMM dd';
+      grouping = 'day';
     } else if (analyticsTimeFilter === 'month') {
       // Respect user selected month range
       const start = setMonth(startOfYear(now), monthRange.start);
@@ -646,6 +662,7 @@ export default function AppDashboard() {
         end: start < end ? end : start
       });
       formatStr = 'MMM';
+      grouping = 'month';
     } else if (analyticsTimeFilter === 'year') {
       // Respect user selected year range
       const start = startOfYear(setYear(now, yearRange.start));
@@ -655,6 +672,28 @@ export default function AppDashboard() {
         end: start < end ? end : start
       });
       formatStr = 'yyyy';
+      grouping = 'year';
+    } else if (analyticsTimeFilter === 'all') {
+      const allDates = bookings.map(b => b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : null).filter(Boolean) as Date[];
+      if (allDates.length > 0) {
+        const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
+        const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
+        const yearsDiff = maxDate.getFullYear() - minDate.getFullYear();
+
+        if (yearsDiff < 3) {
+          intervals = eachMonthOfInterval({ start: startOfMonth(minDate), end: endOfMonth(maxDate) });
+          formatStr = 'MMM yy';
+          grouping = 'month';
+        } else {
+          intervals = eachYearOfInterval({ start: startOfYear(minDate), end: endOfYear(maxDate) });
+          formatStr = 'yyyy';
+          grouping = 'year';
+        }
+      } else {
+        intervals = [startOfYear(now)];
+        formatStr = 'yyyy';
+        grouping = 'year';
+      }
     }
 
     const intervalsProcessed = intervals.length > 0;
@@ -664,16 +703,17 @@ export default function AppDashboard() {
     const rangeDescription = analyticsTimeFilter === '7d' ? `Last 7 Days (${format(rangeStart, 'MMM dd')} - ${format(rangeEnd, 'MMM dd')})` :
       analyticsTimeFilter === '30d' ? `Last 30 Days (${format(rangeStart, 'MMM dd')} - ${format(rangeEnd, 'MMM dd')})` :
         analyticsTimeFilter === 'month' ? `Monthly Range (${format(rangeStart, 'MMM yyyy')} - ${format(rangeEnd, 'MMM yyyy')})` :
-          `Yearly Range (${format(rangeStart, 'yyyy')} - ${format(rangeEnd, 'yyyy')})`;
+          analyticsTimeFilter === 'year' ? `Yearly Range (${format(rangeStart, 'yyyy')} - ${format(rangeEnd, 'yyyy')})` :
+            `All (${format(rangeStart, 'MMM yyyy')} - ${format(rangeEnd, 'MMM yyyy')})`;
 
     const revenueData = intervals.map(date => {
       const dayBookings = bookings.filter(b => {
         const bDate = b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : null;
         if (!bDate) return false;
 
-        if (analyticsTimeFilter === 'month') {
+        if (grouping === 'month') {
           return format(bDate, 'yyyy-MM') === format(date, 'yyyy-MM');
-        } else if (analyticsTimeFilter === 'year') {
+        } else if (grouping === 'year') {
           return format(bDate, 'yyyy') === format(date, 'yyyy');
         } else {
           return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd');
@@ -705,12 +745,14 @@ export default function AppDashboard() {
       .filter(b => b.paymentStatus === 'paid' || b.status === 'completed')
       .reduce((sum, b) => sum + (Number(b.price) || 0), 0);
 
-    const uniqueCustomers = new Set(filteredBookingsList.map(b => b.userId).filter(Boolean)).size;
-    const uniqueDrivers = new Set(filteredBookingsList.map(b => b.driverId).filter(Boolean)).size;
+    const adminCount = allUsers.filter(u => u.role === 'admin').length;
+    const customerCount = allUsers.filter(u => u.role === 'customer' || !u.role).length;
+    const driverCount = allUsers.filter(u => u.role === 'driver').length;
 
     const roleData = [
-      { name: 'Customers', value: uniqueCustomers, color: '#22D3EE' },
-      { name: 'Drivers', value: uniqueDrivers, color: '#F43F5E' }
+      { name: 'Admins', value: adminCount, color: '#D4AF37' },
+      { name: 'Customers', value: customerCount, color: '#22D3EE' },
+      { name: 'Drivers', value: driverCount, color: '#F43F5E' }
     ];
 
     return {
@@ -723,13 +765,15 @@ export default function AppDashboard() {
       confirmedBookings: confirmedCount,
       assignedBookings: assignedCount,
       acceptedBookings: acceptedCount,
-      customerCount: uniqueCustomers,
-      driverCount: uniqueDrivers,
+      customerCount: customerCount,
+      driverCount: driverCount,
+      adminCount: adminCount,
       statusData,
       roleData,
       currentMonthCount: currentMonthBookings.length,
       currentMonthRevenue,
       revenueData,
+      serviceDistribution,
       topDrivers: [...new Set(filteredBookingsList.map(b => b.driverId).filter(Boolean))].map(id => {
         const name = allUsers.find(u => u.id === id)?.name || 'Unknown Driver';
         const dBookings = filteredBookingsList.filter(b => b.driverId === id);
@@ -741,7 +785,7 @@ export default function AppDashboard() {
         return { name, count: cBookings.length, revenue: cBookings.reduce((sum, b) => sum + (Number(b.price) || 0), 0) };
       }).sort((a, b) => b.revenue - a.revenue).slice(0, 5)
     };
-  }, [bookings, analyticsTimeFilter, monthRange, yearRange]);
+  }, [bookings, analyticsTimeFilter, monthRange, yearRange, allUsers]);
 
   const userDetailStats = useMemo(() => {
     const stats: Record<string, any> = {};
@@ -941,7 +985,68 @@ export default function AppDashboard() {
           setDoc(settingsRef, defaultSettings);
         }
       }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'settings/system');
+        console.error('Error fetching system settings:', err);
+      });
+
+      // Fetch floating settings
+      const floatingRef = doc(db, 'settings', 'floating');
+      const unsubscribeFloating = onSnapshot(floatingRef, (docSnap) => {
+        if (docSnap.exists()) {
+          setFloatingSettings(docSnap.data());
+        } else {
+          const defaultFloating = {
+            bars: [
+              {
+                id: 'default-bar',
+                active: true,
+                content: "GRAND OPENING: 20% OFF ON ALL AIRPORT TRANSFERS! USE CODE: MEL20",
+                promoCode: "MEL20",
+                bgColor: "#D4AF37",
+                bgType: "solid",
+                bgGradient: "linear-gradient(90deg, #D4AF37, #F1D483)",
+                textColor: "#000000",
+                promoColor: "#000000",
+                promoBg: "rgba(0,0,0,0.1)",
+                closeColor: "#000000",
+                position: "top",
+                showClose: true,
+                animation: "marquee",
+                marqueeSpeed: 20,
+                startDate: "",
+                endDate: "",
+                displayCondition: "all",
+                specificPages: [],
+                ctaText: "",
+                ctaLink: ""
+              }
+            ],
+            social: {
+              active: true,
+              position: "right-bottom",
+              offsetX: 24,
+              offsetY: 40,
+              icons: [
+                { id: 'whatsapp', type: 'whatsapp', label: 'WhatsApp', url: 'https://wa.me/yournumber', active: true, color: '#25D366', iconColor: '#ffffff', bgType: 'solid', bgColor: '#25D366', bgGradient: 'linear-gradient(45deg, #25D366, #128C7E)' },
+                { id: 'fb', type: 'facebook', label: 'Facebook', url: '', active: true, color: '#1877F2', iconColor: '#ffffff', bgType: 'solid', bgColor: '#1877F2', bgGradient: 'linear-gradient(45deg, #1877F2, #0C5CA0)' },
+                { id: 'insta', type: 'instagram', label: 'Instagram', url: '', active: true, color: '#E4405F', iconColor: '#ffffff', bgType: 'solid', bgColor: '#E4405F', bgGradient: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)' }
+              ]
+            },
+            scrollTop: {
+              active: true,
+              position: "right-bottom",
+              offset: 300,
+              offsetX: 24,
+              offsetY: 24,
+              color: "#D4AF37",
+              bgType: "solid",
+              bgGradient: "linear-gradient(45deg, #D4AF37, #F1D483)",
+              iconColor: "#000000"
+            }
+          };
+          setDoc(floatingRef, defaultFloating);
+        }
+      }, (err) => {
+        console.error('Error fetching floating settings:', err);
       });
 
       // Fetch coupons
@@ -993,9 +1098,14 @@ export default function AppDashboard() {
       unsubscribeMedia = onSnapshot(mediaQ, (snapshot) => {
         const mediaData = snapshot.docs.map(doc => {
           const data = doc.data();
-          return { ...data, id: doc.id };
+          return {
+            ...data,
+            id: doc.id,
+            // Ensure a stable, truly unique key for React that combines multiple sources of uniqueness
+            u_key: `media_${doc.id}_${data.createdAt?.seconds || Date.now()}`
+          };
         });
-        
+
         // Final deduplication check before setting state
         const seen = new Set();
         const uniqueMedia = mediaData.filter(item => {
@@ -1099,6 +1209,73 @@ export default function AppDashboard() {
     }
   };
 
+  const executeBulkDeleteBookings = async (ids: string[]) => {
+    const validIds = ids.filter(id => {
+      const b = bookings.find(booking => booking.id === id);
+      return b && b.status !== 'completed' && b.status !== 'cancelled';
+    });
+    if (validIds.length === 0) return;
+    try {
+      for (const id of validIds) {
+        await deleteDoc(doc(db, 'bookings', id));
+      }
+      setConfirmDelete(null);
+      setSelectedBookings([]);
+    } catch (err) {
+      console.error('Error bulk deleting bookings:', err);
+      handleFirestoreError(err, OperationType.DELETE, `bookings`);
+    }
+  };
+
+  const executeBulkUpdateBookingsStatus = async (ids: string[], newStatus: string) => {
+    const validIds = ids.filter(id => {
+      const b = bookings.find(booking => booking.id === id);
+      return b && b.status !== 'completed' && b.status !== 'cancelled';
+    });
+    if (validIds.length === 0) return;
+    try {
+      for (const id of validIds) {
+        await updateDoc(doc(db, 'bookings', id), {
+          status: newStatus,
+          updatedAt: serverTimestamp()
+        });
+      }
+      setSelectedBookings([]);
+    } catch (err) {
+      console.error('Error bulk updating booking statuses:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `bookings`);
+    }
+  };
+
+  const executeBulkAssignDriver = async (ids: string[], driverId: string | null) => {
+    const validIds = ids.filter(id => {
+      const b = bookings.find(booking => booking.id === id);
+      return b && b.status !== 'completed' && b.status !== 'cancelled';
+    });
+    if (validIds.length === 0) return;
+    try {
+      for (const id of validIds) {
+        if (driverId) {
+          await updateDoc(doc(db, 'bookings', id), {
+            driverId,
+            status: 'assigned',
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          await updateDoc(doc(db, 'bookings', id), {
+            driverId: null,
+            status: 'confirmed',
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+      setSelectedBookings([]);
+    } catch (err) {
+      console.error('Error bulk assigning/unassigning driver:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `bookings`);
+    }
+  };
+
   const handleUpdateUser = async (userId: string, data: any) => {
     try {
       // Ensure the internal id field always matches the document path ID
@@ -1169,11 +1346,13 @@ export default function AppDashboard() {
   const filteredAndSortedBookings = useMemo(() => {
     let result = [...bookings];
 
-    // Filter by category (Standard vs Offers) - ONLY for Admin/Driver dashboard views
+    // Filter by category (Standard vs Offers vs Tours) - ONLY for Admin/Driver dashboard views
     if (bookingCategory === 'offer') {
       result = result.filter(b => b.type === 'offer');
+    } else if (bookingCategory === 'tour') {
+      result = result.filter(b => b.type === 'tour');
     } else {
-      result = result.filter(b => b.type !== 'offer');
+      result = result.filter(b => b.type !== 'offer' && b.type !== 'tour');
     }
 
     // Filter by time period
@@ -1412,6 +1591,22 @@ export default function AppDashboard() {
     }
   };
 
+  const handleUpdateFloatingSettings = async (data: any) => {
+    setIsSavingFloatingSettings(true);
+    try {
+      await setDoc(doc(db, 'settings', 'floating'), {
+        ...data,
+        updatedAt: serverTimestamp()
+      });
+      alert('Floating elements settings saved successfully!');
+    } catch (err) {
+      console.error('Error saving floating settings:', err);
+      handleFirestoreError(err, OperationType.UPDATE, 'settings/floating');
+    } finally {
+      setIsSavingFloatingSettings(false);
+    }
+  };
+
   const handleCreateVehicle = async (data: any) => {
     try {
       await addDoc(collection(db, 'fleet'), {
@@ -1472,77 +1667,90 @@ export default function AppDashboard() {
       alert('Please select a file to upload');
       return;
     }
+
+    // Ensure we are signed in and admin before even starting
+    if (!isAdmin) {
+      alert('You must be an admin to upload media.');
+      return;
+    }
+
     setUploadingMedia(true);
-    console.log('Starting upload to folder:', folder, 'File:', file.name);
-    
+    console.log('--- STARTING UPLOAD ---');
+    console.log('Folder:', folder);
+    console.log('File Name:', file.name);
+    console.log('File Size:', file.size);
+
     try {
-      // Use a truly unique path for storage
       const timestamp = Date.now();
       const sanitizedName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-      const fileName = `${timestamp}_${sanitizedName}`;
-      const storageRef = ref(storage, `media/${folder}/${fileName}`);
-      
-      console.log('Initiating uploadBytesResumable...');
+      const folderPath = (folder || 'general').replace(/^\//, '').replace(/\/$/, '');
+      const storagePath = `media/${folderPath}/${timestamp}_${sanitizedName}`;
+
+      const storageRef = ref(storage, storagePath);
+      console.log('Storage Path:', storagePath);
 
       const uploadTask = uploadBytesResumable(storageRef, file);
 
-      // We wrap the resumable task in a promise to use await normally
       const url = await new Promise<string>((resolve, reject) => {
-        uploadTask.on('state_changed', 
+        uploadTask.on('state_changed',
           (snapshot) => {
             const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            console.log(`Upload is ${progress}% done`);
-          }, 
+            console.log(`Upload Progress: ${progress.toFixed(2)}%`);
+          },
           (error) => {
-            console.error('UploadTask failed:', error);
+            console.error('SERVER REJECTED UPLOAD:', error);
             reject(error);
-          }, 
+          },
           async () => {
-            console.log('Upload finished, fetching download URL...');
             try {
+              console.log('Upload task completed successfully.');
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
               resolve(downloadURL);
             } catch (err) {
+              console.error('Failed to get download URL:', err);
               reject(err);
             }
           }
         );
       });
 
+      console.log('Download URL obtained:', url);
+
       const mediaData = {
         name: file.name,
         url,
         size: file.size,
         type: file.type,
-        folder: folder || 'general',
+        folder: folderPath,
         alt: metadata.alt || '',
         title: metadata.title || '',
         description: metadata.description || '',
         caption: metadata.caption || '',
         createdAt: serverTimestamp(),
-        usedIn: [], 
+        usedIn: [],
       };
 
-      console.log('Recording media metadata in Firestore...');
+      console.log('Committing to Firestore...');
       const docRef = await addDoc(collection(db, 'media'), mediaData);
-      console.log('Media metadata recorded with ID:', docRef.id);
+      console.log('SUCCESS: Media created in Firestore with ID:', docRef.id);
 
       setShowMediaModal(false);
       setMediaFile(null);
       setEditingMedia({ alt: '', title: '', description: '', caption: '' });
-      setTimeout(() => alert('Media uploaded successfully!'), 150);
-    } catch (err) {
-      console.error('CRITICAL ERROR during upload process:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Unknown storage error';
-      alert(`Upload Failed: ${errorMsg}`);
+      setTimeout(() => alert('Media uploaded successfully!'), 100);
+    } catch (err: any) {
+      console.error('CRITICAL FAILURE:', err);
+      let msg = 'Unknown error';
+      if (err.code === 'storage/unauthorized') msg = 'Permission denied (Storage Rules)';
+      else if (err.message) msg = err.message;
+      alert(`Upload Error: ${msg}`);
     } finally {
       setUploadingMedia(false);
-      console.log('Upload lifecycle concluded.');
+      console.log('--- UPLOAD PROCESS FINISHED ---');
     }
   };
 
   const handleDeleteMedia = async (id: string, url: string) => {
-    if (!window.confirm('Are you sure you want to delete this media?')) return;
     try {
       // 1. Delete from storage if it exists
       if (url) {
@@ -1712,16 +1920,72 @@ export default function AppDashboard() {
   const handleUpdateTour = async (id: string | null, data: any) => {
     try {
       const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = data;
-      const processedData = {
-        ...rest,
-        price: Number(rest.price),
-        capacity: Number(rest.capacity),
-        active: rest.active === undefined ? true : Boolean(rest.active),
-        slug: rest.slug || rest.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `tour-${Date.now()}`,
-        locations: typeof rest.locations === 'string'
-          ? rest.locations.split(',').map((l: string) => l.trim()).filter((l: string) => l !== '')
-          : (rest.locations || [])
+
+      const deepClean = (obj: any): any => {
+        if (Array.isArray(obj)) {
+          return obj.map(v => deepClean(v)).filter(v => v !== undefined);
+        }
+        if (obj !== null && typeof obj === 'object' && !(obj instanceof Date)) {
+          return Object.fromEntries(
+            Object.entries(obj)
+              .map(([k, v]) => [k, deepClean(v)])
+              .filter(([_, v]) => v !== undefined)
+          );
+        }
+        return obj === undefined ? undefined : obj;
       };
+
+      const cleanList = (list: any[], filterKey: string) => {
+        return (list || []).filter(item => {
+          if (typeof item === 'string') return item.trim() !== '';
+          if (typeof item === 'object' && item !== null) {
+            return item[filterKey] && String(item[filterKey]).trim() !== '';
+          }
+          return false;
+        });
+      };
+
+      const rawData: any = {
+        title: rest.title || 'Untitled Tour',
+        slug: rest.slug || rest.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `tour-${Date.now()}`,
+        active: rest.active === undefined ? true : Boolean(rest.active),
+        maxPeople: Number(rest.maxPeople || 0),
+        duration: rest.duration || '',
+        startPlace: rest.startPlace || '',
+        ageRange: rest.ageRange || '',
+        shortDescription: rest.shortDescription || '',
+        fullDescription: rest.fullDescription || '',
+        promoTag: rest.promoTag || '',
+        customerNote: rest.customerNote || '',
+        category: rest.category || '',
+        image: rest.image || rest.featuredImage || '',
+        featuredImage: rest.featuredImage || rest.image || '',
+        gallery: cleanList(rest.gallery, ''),
+        inclusions: cleanList(rest.inclusions, ''),
+        exclusions: cleanList(rest.exclusions, ''),
+        activities: cleanList(rest.activities, ''),
+        placesToVisit: cleanList(rest.placesToVisit, ''),
+        fleets: cleanList(rest.fleets, 'name').map((f: any) => ({
+          ...f,
+          passengers: Number(f.passengers || 0),
+          standardPrice: Number(f.standardPrice || 0),
+          salePrice: Number(f.salePrice || 0)
+        })),
+        extras: cleanList(rest.extras, 'name').map((e: any) => ({
+          ...e,
+          price: Number(e.price || 0),
+          availableCount: Number(e.availableCount || 0)
+        })),
+        itinerary: cleanList(rest.itinerary, 'name').map((it: any, idx: number) => ({
+          ...it,
+          order: it.order !== undefined ? Number(it.order) : idx
+        })),
+        faqs: cleanList(rest.faqs, 'question'),
+        tags: cleanList(rest.tags, ''),
+        availability: rest.availability || {}
+      };
+
+      const processedData = deepClean(rawData);
 
       if (!id || id === 'new') {
         const newRef = doc(collection(db, 'tours'));
@@ -1735,6 +1999,7 @@ export default function AppDashboard() {
       setShowTourModal(false);
       setEditingTour(null);
     } catch (err) {
+      console.error('Error updating tour:', err);
       handleFirestoreError(err, OperationType.WRITE, 'tours');
     }
   };
@@ -1749,6 +2014,88 @@ export default function AppDashboard() {
       setConfirmDelete(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `tours/${id}`);
+    }
+  };
+
+  const handleBulkDuplicateTours = async () => {
+    for (const id of selectedTours) {
+      const tour = tours.find(t => t.id === id);
+      if (tour) {
+        await handleDuplicateTour(tour);
+      }
+    }
+    setSelectedTours([]);
+  };
+
+  const executeBulkDeleteTours = async (ids: string[]) => {
+    try {
+      for (const id of ids) {
+        await deleteDoc(doc(db, 'tours', id));
+      }
+      setConfirmDelete(null);
+      setSelectedTours([]);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `tours`);
+    }
+  };
+
+  const handleBulkDuplicateOffers = async () => {
+    for (const id of selectedOffers) {
+      const offer = offers.find(o => o.id === id);
+      if (offer) {
+        await handleDuplicateOffer(offer);
+      }
+    }
+    setSelectedOffers([]);
+  };
+
+  const executeBulkDeleteOffers = async (ids: string[]) => {
+    try {
+      for (const id of ids) {
+        await deleteDoc(doc(db, 'offers', id));
+      }
+      setConfirmDelete(null);
+      setSelectedOffers([]);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `offers`);
+    }
+  };
+
+  const executeBulkUpdateOffersStatus = async (ids: string[], active: boolean) => {
+    try {
+      for (const id of ids) {
+        await updateDoc(doc(db, 'offers', id), { active, updatedAt: serverTimestamp() });
+      }
+      setSelectedOffers([]);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `offers`);
+    }
+  };
+
+  const executeBulkUpdateToursStatus = async (ids: string[], active: boolean) => {
+    try {
+      for (const id of ids) {
+        await updateDoc(doc(db, 'tours', id), { active, updatedAt: serverTimestamp() });
+      }
+      setSelectedTours([]);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `tours`);
+    }
+  };
+
+  const handleToggleOfferStatus = async (id: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'offers', id), { active: !currentStatus, updatedAt: serverTimestamp() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `offers/${id}`);
+    }
+  };
+
+  const handleToggleTourStatus = async (id: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'tours', id), { active: !currentStatus, updatedAt: serverTimestamp() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `tours/${id}`);
     }
   };
 
@@ -1775,7 +2122,9 @@ export default function AppDashboard() {
 
           const item: any = {};
           headers.forEach((header, index) => {
-            item[header] = values[index];
+            if (header && header.trim() !== "") {
+              item[header.trim()] = values[index];
+            }
           });
 
           // Metadata & conversions
@@ -1786,6 +2135,11 @@ export default function AppDashboard() {
             const fleetsData = item.fleets_data || "";
             delete item.fleets_data;
 
+            if (item.overalldescription) {
+              item.description = item.overalldescription;
+              delete item.overalldescription;
+            }
+
             // Process tags
             if (item.tags && typeof item.tags === 'string') {
               item.tags = item.tags.split('|').map((t: string) => t.trim());
@@ -1793,8 +2147,8 @@ export default function AppDashboard() {
 
             // Process nested fleets
             item.fleets = (fleetsData as string).split(';').filter(f => f.trim() !== '').map((fleetStr: string) => {
-              const [type, image, description, capacity, luggage, basePrice] = fleetStr.split('|').map(v => v.trim());
-              const bPrice = Number(basePrice) || 0;
+              const [fType, fImage, fDescription, fCapacity, fLuggage, fBasePrice, fAdditionalInfo] = fleetStr.split('|').map(v => v.trim());
+              const bPrice = Number(fBasePrice) || 0;
               const dValue = Number(item.discountvalue || item.discval) || 15;
               const dType = item.discounttype || item.disctype || 'percentage';
               item.discountType = dType;
@@ -1805,14 +2159,14 @@ export default function AppDashboard() {
                 : Math.max(0, bPrice - dValue);
 
               return {
-                type: type || 'Standard',
-                image: image || '',
-                description: description || '',
-                capacity: capacity || '3 Passengers',
-                luggage: luggage || '2 Suitcases',
+                type: fType || 'Standard',
+                image: fImage || '',
+                description: fDescription || '',
+                capacity: fCapacity || '3 Passengers',
+                luggage: fLuggage || '2 Suitcases',
                 basePrice: bPrice,
                 salePrice,
-                additionalInfo: ''
+                additionalInfo: fAdditionalInfo || ''
               };
             });
 
@@ -1824,10 +2178,86 @@ export default function AppDashboard() {
 
             await handleUpdateOffer('new', item);
           } else {
-            // Process tour locations if present
-            if (item.locations && typeof item.locations === 'string') {
-              item.locations = item.locations.split('|').map((l: string) => l.trim());
+            // Process complex tour fields
+            // Normalize common lowercase CSV keys to camelCase
+            if (item.maxpeople) { item.maxPeople = item.maxpeople; delete item.maxpeople; }
+            if (item.agerange) { item.ageRange = item.agerange; delete item.agerange; }
+            if (item.startplace) { item.startPlace = item.startplace; delete item.startplace; }
+            if (item.shortdescription) { item.shortDescription = item.shortdescription; delete item.shortdescription; }
+            if (item.fulldescription) { item.fullDescription = item.fulldescription; delete item.fulldescription; }
+            if (item.placestovisit) { item.placesToVisit = item.placestovisit; delete item.placestovisit; }
+            if (item.promotag) { item.promoTag = item.promotag; delete item.promotag; }
+            if (item.customernote) { item.customerNote = item.customernote; delete item.customernote; }
+
+            if (item.availabilitystartdate || item.availabilityenddate) {
+              item.availability = {
+                startDate: item.availabilitystartdate || '',
+                endDate: item.availabilityenddate || ''
+              };
+              delete item.availabilitystartdate;
+              delete item.availabilityenddate;
             }
+
+            item.active = String(item.active).toLowerCase() === 'false' ? false : true;
+            item.maxPeople = Number(item.maxPeople || 0);
+
+            // Basic lists
+            const splitList = (key: string) => {
+              if (item[key] && typeof item[key] === 'string') {
+                item[key] = item[key].split('|').map((s: string) => s.trim()).filter((s: string) => s !== '');
+              } else if (!Array.isArray(item[key])) {
+                item[key] = [];
+              }
+            };
+            ['gallery', 'inclusions', 'exclusions', 'activities', 'placesToVisit', 'tags'].forEach(splitList);
+
+            // Fleets: Name|Image|Pax|Luggage|StdPrice|SalePrice|Info ; Name2...
+            if (item.fleets && typeof item.fleets === 'string') {
+              item.fleets = item.fleets.split(';').filter(f => f.trim() !== '').map((f: string) => {
+                const [name, image, passengers, luggage, standardPrice, salePrice, additionalInfo] = f.split('|').map(v => v.trim());
+                return {
+                  name, image,
+                  passengers: Number(passengers) || 0,
+                  luggage,
+                  standardPrice: Number(standardPrice) || 0,
+                  salePrice: Number(salePrice) || 0,
+                  additionalInfo
+                };
+              });
+            } else {
+              item.fleets = [];
+            }
+
+            // Extras: Name|Description|Price|Count ; Name2...
+            if (item.extras && typeof item.extras === 'string') {
+              item.extras = item.extras.split(';').filter(e => e.trim() !== '').map((e: string) => {
+                const [name, description, price, availableCount] = e.split('|').map(v => v.trim());
+                return { name, description, price: Number(price) || 0, availableCount: Number(availableCount) || 0 };
+              });
+            } else {
+              item.extras = [];
+            }
+
+            // Itinerary: Name|Image|Details ; Name2...
+            if (item.itinerary && typeof item.itinerary === 'string') {
+              item.itinerary = item.itinerary.split(';').filter(it => it.trim() !== '').map((it: string) => {
+                const [name, image, details] = it.split('|').map(v => v.trim());
+                return { name, image, details };
+              });
+            } else {
+              item.itinerary = [];
+            }
+
+            // FAQs: Q|A ; Q2|A2
+            if (item.faqs && typeof item.faqs === 'string') {
+              item.faqs = item.faqs.split(';').filter(f => f.trim() !== '').map((f: string) => {
+                const [question, answer] = f.split('|').map(v => v.trim());
+                return { question, answer };
+              });
+            } else {
+              item.faqs = [];
+            }
+
             await handleUpdateTour('new', item);
           }
           successCount++;
@@ -2002,7 +2432,7 @@ export default function AppDashboard() {
                     </div>
                     {/* Accepted */}
                     <div className="flex flex-col items-center">
-                      <UserCheck size={12} className="text-cyan-400 mb-2" />
+                      <ThumbsUp size={12} className="text-cyan-400 mb-2" />
                       <span className="text-xs font-display text-cyan-400">{analytics.acceptedBookings}</span>
                     </div>
                     {/* Completed */}
@@ -2045,7 +2475,9 @@ export default function AppDashboard() {
                           : "text-white/40 hover:text-white"
                       )}
                     >
-                      Standard
+                      <span className="flex items-center gap-1.5">
+                        Standard <span className={cn("px-1.5 py-0.5 rounded text-[9px]", bookingCategory === 'standard' ? "bg-black/20 text-black" : "bg-white/10 text-white/60")}>{bookings.filter(b => b.type !== 'offer' && b.type !== 'tour').length}</span>
+                      </span>
                     </button>
                     <button
                       onClick={() => setBookingCategory('offer')}
@@ -2056,7 +2488,22 @@ export default function AppDashboard() {
                           : "text-white/40 hover:text-white"
                       )}
                     >
-                      Offers
+                      <span className="flex items-center gap-1.5">
+                        Offers <span className={cn("px-1.5 py-0.5 rounded text-[9px]", bookingCategory === 'offer' ? "bg-black/20 text-black" : "bg-white/10 text-white/60")}>{bookings.filter(b => b.type === 'offer').length}</span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setBookingCategory('tour')}
+                      className={cn(
+                        "px-4 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
+                        bookingCategory === 'tour'
+                          ? "bg-gold text-black shadow-lg"
+                          : "text-white/40 hover:text-white"
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        Tours <span className={cn("px-1.5 py-0.5 rounded text-[9px]", bookingCategory === 'tour' ? "bg-black/20 text-black" : "bg-white/10 text-white/60")}>{bookings.filter(b => b.type === 'tour').length}</span>
+                      </span>
                     </button>
                   </div>
 
@@ -2089,124 +2536,309 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
-                {/* Right side: Day/Time filters */}
+                {/* Right side: Day/Time filters + Bulk Actions */}
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Time range buttons */}
-                  <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
-                    {[
-                      { label: 'All', value: 'all' },
-                      { label: '3D', value: '3d' },
-                      { label: '7D', value: '7d' },
-                      { label: '30D', value: '30d' },
-                      { label: 'Month', value: 'month' },
-                      { label: 'Year', value: 'year' }
-                    ].map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setBookingTimeFilter(opt.value as any)}
-                        className={cn(
-                          "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
-                          bookingTimeFilter === opt.value
-                            ? "bg-gold text-black shadow-lg"
-                            : "text-white/40 hover:text-white"
+                  <AnimatePresence>
+                    {isFiltersExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 20 }}
+                        className="flex flex-wrap items-center gap-2"
+                      >
+                        <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9 mr-2">
+                          {(() => {
+                            const selectableBookings = filteredAndSortedBookings.filter((b: any) => b.status !== 'completed' && b.status !== 'cancelled');
+                            const allSelected = isBookingsSelectionMode && selectableBookings.length > 0 && selectedBookings.length === selectableBookings.length;
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsBookingsSelectionMode(!isBookingsSelectionMode);
+                                    setSelectedBookings([]);
+                                  }}
+                                  className={cn(
+                                    "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                                    isBookingsSelectionMode && !allSelected ? "bg-gold text-black" : "text-white/40 hover:text-white"
+                                  )}
+                                  title="Selection Mode ON"
+                                >
+                                  <Check size={14} />
+                                  <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">Select</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsBookingsSelectionMode(true);
+                                    setSelectedBookings(selectableBookings.map((b: any) => b.id));
+                                  }}
+                                  className={cn(
+                                    "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                                    allSelected ? "bg-gold text-black" : "text-white/40 hover:text-white"
+                                  )}
+                                  title="Select All"
+                                >
+                                  <CheckCheck size={14} />
+                                  <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">All</span>
+                                </button>
+                              </>
+                            );
+                          })()}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedBookings([]);
+                              setIsBookingsSelectionMode(false);
+                            }}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                              !isBookingsSelectionMode ? "bg-white/10 text-white" : "text-white/40 hover:text-white"
+                            )}
+                            title="Select None"
+                          >
+                            <XSquare size={14} />
+                            <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">None</span>
+                          </button>
+                        </div>
+
+
+                        {selectedBookings.length > 0 && (
+                          <div className="flex items-center gap-2 mr-2 animate-in fade-in zoom-in duration-200">
+                            <span className="text-[10px] uppercase tracking-widest font-bold text-gold px-2 shrink-0">
+                              {selectedBookings.length} Selected
+                            </span>
+
+                            {isAdmin && (
+                              <>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'pending')}
+                                  className="p-2 bg-yellow-500/10 text-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-white transition-all"
+                                  title="Mark as Pending"
+                                >
+                                  <Clock size={16} />
+                                </button>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'confirmed')}
+                                  className="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
+                                  title="Mark as Confirmed"
+                                >
+                                  <CheckCircle size={16} />
+                                </button>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'cancelled')}
+                                  className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                  title="Mark as Cancelled"
+                                >
+                                  <XCircle size={16} />
+                                </button>
+                                <div className="relative">
+                                  <button
+                                    onClick={() => setShowDriverBulkAssign(!showDriverBulkAssign)}
+                                    className="p-2 bg-purple-500/10 text-purple-400 rounded-lg hover:bg-purple-500 hover:text-white transition-all"
+                                  >
+                                    <Truck size={16} />
+                                  </button>
+                                  {showDriverBulkAssign && (
+                                    <div className="absolute right-0 top-full mt-2 w-48 bg-black/90 p-2 rounded-xl border border-white/10 shadow-xl z-20 flex flex-col gap-1 max-h-[300px] overflow-y-auto custom-scrollbar">
+                                      <div className="text-[8px] uppercase tracking-widest text-white/40 px-2 py-1 font-bold mb-1">Assign Driver To Selection</div>
+                                      <button
+                                        onClick={() => { executeBulkAssignDriver(selectedBookings, null); setShowDriverBulkAssign(false); }}
+                                        className="text-left px-3 py-2 text-xs text-white/40 hover:bg-white/10 hover:text-white rounded-lg transition-colors truncate italic"
+                                      >
+                                        None (Unassign)
+                                      </button>
+                                      {drivers.map((driver, dIdx) => (
+                                        <button
+                                          key={`${driver.id}-${dIdx}`}
+                                          onClick={() => { executeBulkAssignDriver(selectedBookings, driver.id); setShowDriverBulkAssign(false); }}
+                                          className="text-left px-3 py-2 text-xs text-white/70 hover:bg-white/10 hover:text-white rounded-lg transition-colors truncate mt-1"
+                                        >
+                                          {driver.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={() => setConfirmDelete({ type: 'bulk-bookings', ids: selectedBookings })}
+                                  className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all ml-1"
+                                  title="Delete Selected"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </>
+                            )}
+
+                            {isDriver && !isAdmin && (
+                              <>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'accepted')}
+                                  className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
+                                  title="Accept Bookings"
+                                >
+                                  <CheckCircle size={16} />
+                                </button>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'rejected')}
+                                  className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                  title="Reject Bookings"
+                                >
+                                  <X size={16} />
+                                </button>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'completed')}
+                                  className="p-2 bg-gold/10 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                                  title="Mark as Completed"
+                                >
+                                  <CheckSquare size={16} />
+                                </button>
+                              </>
+                            )}
+
+                            {!isAdmin && !isDriver && (
+                              <>
+                                <button
+                                  onClick={() => executeBulkUpdateBookingsStatus(selectedBookings, 'cancelled')}
+                                  className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                  title="Cancel Select Bookings"
+                                >
+                                  <XCircle size={16} />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
 
-                  {/* Year range select */}
-                  {bookingTimeFilter === 'year' && (
-                    <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9">
-                      {/* start year */}
-                      <select
-                        value={bookingYearRange.start}
-                        onChange={(e) =>
-                          setBookingYearRange((prev) => ({
-                            ...prev,
-                            start: parseInt(e.target.value),
-                          }))
-                        }
-                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
-                      >
-                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-                          <option key={y} value={y} className="bg-black">
-                            {y}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="text-white/20 text-[10px]">-</span>
-                      {/* end year */}
-                      <select
-                        value={bookingYearRange.end}
-                        onChange={(e) =>
-                          setBookingYearRange((prev) => ({
-                            ...prev,
-                            end: parseInt(e.target.value),
-                          }))
-                        }
-                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
-                      >
-                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-                          <option key={y} value={y} className="bg-black">
-                            {y}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                        {/* Time range buttons */}
+                        <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                          {[
+                            { label: 'All', value: 'all' },
+                            { label: '3D', value: '3d' },
+                            { label: '7D', value: '7d' },
+                            { label: '30D', value: '30d' },
+                            { label: 'Month', value: 'month' },
+                            { label: 'Year', value: 'year' }
+                          ].map((opt) => (
+                            <button
+                              key={opt.value}
+                              onClick={() => setBookingTimeFilter(opt.value as any)}
+                              className={cn(
+                                "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
+                                bookingTimeFilter === opt.value
+                                  ? "bg-gold text-black shadow-lg"
+                                  : "text-white/40 hover:text-white"
+                              )}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
 
-                  {/* Month range inputs */}
-                  {bookingTimeFilter === 'month' && (
-                    <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9">
-                      <input
-                        type="month"
-                        value={bookingMonthRange.start}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val) setBookingMonthRange((prev) => ({ ...prev, start: val }));
-                        }}
-                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
-                      />
-                      <span className="text-white/20 text-[10px]">-</span>
-                      <input
-                        type="month"
-                        value={bookingMonthRange.end}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val) setBookingMonthRange((prev) => ({ ...prev, end: val }));
-                        }}
-                        className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
-                      />
-                    </div>
-                  )}
+                        {/* Year range select */}
+                        {bookingTimeFilter === 'year' && (
+                          <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9">
+                            {/* start year */}
+                            <select
+                              value={bookingYearRange.start}
+                              onChange={(e) =>
+                                setBookingYearRange((prev) => ({
+                                  ...prev,
+                                  start: parseInt(e.target.value),
+                                }))
+                              }
+                              className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
+                            >
+                              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                                <option key={y} value={y} className="bg-black">
+                                  {y}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-white/20 text-[10px]">-</span>
+                            {/* end year */}
+                            <select
+                              value={bookingYearRange.end}
+                              onChange={(e) =>
+                                setBookingYearRange((prev) => ({
+                                  ...prev,
+                                  end: parseInt(e.target.value),
+                                }))
+                              }
+                              className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer"
+                            >
+                              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                                <option key={y} value={y} className="bg-black">
+                                  {y}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
 
-                  {/* Pickup / Booking toggle */}
-                  <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
-                    <button
-                      onClick={() => setBookingDateTypeFilter('pickup')}
-                      className={cn(
-                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
-                        bookingDateTypeFilter === 'pickup'
-                          ? "bg-gold text-black shadow-lg"
-                          : "text-white/40 hover:text-white"
-                      )}
-                    >
-                      Pickup
-                    </button>
-                    <button
-                      onClick={() => setBookingDateTypeFilter('booking')}
-                      className={cn(
-                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
-                        bookingDateTypeFilter === 'booking'
-                          ? "bg-gold text-black shadow-lg"
-                          : "text-white/40 hover:text-white"
-                      )}
-                    >
-                      Booking
-                    </button>
-                  </div>
+                        {/* Month range inputs */}
+                        {bookingTimeFilter === 'month' && (
+                          <div className="flex items-center gap-2 bg-black/20 p-1 rounded-xl border border-white/10 h-9">
+                            <input
+                              type="month"
+                              value={bookingMonthRange.start}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val) setBookingMonthRange((prev) => ({ ...prev, start: val }));
+                              }}
+                              className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
+                            />
+                            <span className="text-white/20 text-[10px]">-</span>
+                            <input
+                              type="month"
+                              value={bookingMonthRange.end}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val) setBookingMonthRange((prev) => ({ ...prev, end: val }));
+                              }}
+                              className="bg-transparent text-[10px] text-white/70 outline-none px-1 cursor-pointer [color-scheme:dark]"
+                            />
+                          </div>
+                        )}
+
+                        {/* Pickup / Booking toggle */}
+                        <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 h-9">
+                          <button
+                            onClick={() => setBookingDateTypeFilter('pickup')}
+                            className={cn(
+                              "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                              bookingDateTypeFilter === 'pickup'
+                                ? "bg-gold text-black shadow-lg"
+                                : "text-white/40 hover:text-white"
+                            )}
+                          >
+                            Pickup
+                          </button>
+                          <button
+                            onClick={() => setBookingDateTypeFilter('booking')}
+                            className={cn(
+                              "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                              bookingDateTypeFilter === 'booking'
+                                ? "bg-gold text-black shadow-lg"
+                                : "text-white/40 hover:text-white"
+                            )}
+                          >
+                            Booking
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <button
+                    onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
+                    className={cn(
+                      "p-2 rounded-xl border border-white/5 bg-white/5 text-gold hover:bg-white/10 transition-all self-end",
+                      isFiltersExpanded ? "rotate-180" : ""
+                    )}
+                    title={isFiltersExpanded ? "Collapse Filters" : "Expand Filters"}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
                 </div>
               </div>
             </div>
@@ -2259,8 +2891,9 @@ export default function AppDashboard() {
                 >
                   <option value="all">All Services</option>
                   <option value="wedding">Wedding</option>
-                  <option value="tour">Tour</option>
+                  <option value="occasions">Special Occasions</option>
                   <option value="hourly">Hourly</option>
+                  <option value="event">Event</option>
                   <option value="airport">Airport</option>
                   <option value="corporate">Corporate</option>
                 </select>
@@ -2373,66 +3006,87 @@ export default function AppDashboard() {
             ) : bookingViewMode === 'grid' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredAndSortedBookings.map((booking, idx) => (
-                  <div key={`booking-card-${booking.id}-${idx}`} className="glass p-5 rounded-2xl border border-white/5 hover:border-gold/30 transition-all group flex flex-col h-full">
+                  <div key={`booking-card-${booking.id}-${idx}`} className={cn("glass p-5 rounded-2xl overflow-hidden border transition-all group flex flex-col h-full relative", selectedBookings.includes(booking.id) ? "border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "border-white/5")}>
+
                     <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold mb-1">
-                          Booked on: {booking.createdAt?.seconds
-                            ? format(new Date(booking.createdAt.seconds * 1000), 'MMM dd, yyyy HH:mm')
-                            : 'N/A'}
-                        </p>
-                        <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors">
-                          {bookingCategory === 'offer'
-                            ? booking.packageTitle || 'Package'
-                            : booking.customerName || 'Customer'}
-                        </h3>
+                      {/* Left side: Selection + stacked date + name */}
+                      <div className="flex items-start gap-3">
+                        {isBookingsSelectionMode &&
+                          booking.status !== 'completed' &&
+                          booking.status !== 'cancelled' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (selectedBookings.includes(booking.id))
+                                  setSelectedBookings((prev) => prev.filter((id) => id !== booking.id));
+                                else setSelectedBookings((prev) => [...prev, booking.id]);
+                              }}
+                              className={cn(
+                                "w-5 h-5 flex items-center justify-center transition-all flex-shrink-0 mt-1",
+                                selectedBookings.includes(booking.id)
+                                  ? "text-gold"
+                                  : "text-white/40 hover:text-white"
+                              )}
+                            >
+                              {selectedBookings.includes(booking.id) ? (
+                                <SquareCheck size={14} />
+                              ) : (
+                                <Square size={14} />
+                              )}
+                            </button>
+                          )}
+
+                        <div className="flex flex-col min-w-0">
+                          <p className="text-[9px] text-white/30 uppercase tracking-widest font-bold">
+                            Booked on: {booking.createdAt?.seconds
+                              ? format(new Date(booking.createdAt.seconds * 1000), 'dd-MM-yyyy HH:mm')
+                              : 'N/A'}
+                          </p>
+                          <h3 className="text-lg font-display text-white group-hover:text-gold transition-colors truncate">
+                            {bookingCategory === 'offer'
+                              ? booking.packageTitle || 'Package'
+                              : bookingCategory === 'tour'
+                                ? booking.tourTitle || 'Tour'
+                                : booking.customerName || 'Customer'}
+                          </h3>
+                        </div>
                       </div>
 
-                      <span
-                        className={cn(
-                          "flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border",
-                          booking.status === 'completed'
-                            ? "bg-green-500/10 text-green-500 border-green-500/20"
-                            : booking.status === 'confirmed'
-                              ? "bg-blue-500/10 text-blue-400 border-blue-400/20"
-                              : booking.status === 'assigned'
-                                ? "bg-purple-500/10 text-purple-400 border-purple-400/20"
-                                : booking.status === 'accepted'
-                                  ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20"
-                                  : booking.status === 'cancelled'
-                                    ? "bg-red-500/10 text-red-400 border-red-400/20"
-                                    : booking.status === 'rejected'
-                                      ? "bg-red-500/10 text-pink-400 border-pink-400/20"
-                                      : "bg-gold/10 text-gold border-gold/20"
+                      {/* Right side: status pill */}
+                      <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest self-start">
+                        {booking.status && (
+                          <span
+                            className={cn(
+                              "flex items-center gap-1.5 px-2 py-1 rounded-full border",
+                              booking.status === 'pending'
+                                ? "bg-gold/10 text-gold border-gold/20"
+                                : booking.status === 'confirmed'
+                                  ? "bg-blue-500/10 text-blue-400 border-blue-400/20"
+                                  : booking.status === 'completed'
+                                    ? "bg-green-500/10 text-green-500 border-green-500/20"
+                                    : booking.status === 'cancelled'
+                                      ? "bg-red-500/10 text-red-400 border-red-400/20"
+                                      : booking.status === 'accepted'
+                                        ? "bg-cyan-500/10 text-cyan-400 border-cyan-400/20"
+                                        : booking.status === 'rejected'
+                                          ? "bg-orange-500/10 text-orange-400 border-orange-400/20"
+                                          : booking.status === 'assigned'
+                                            ? "bg-purple-500/10 text-purple-400 border-purple-400/20"
+                                            : "bg-black/10 text-white border-white/20"
+                            )}
+                          >
+                            {booking.status === 'pending' && <Clock className="h-3 w-3" />}
+                            {booking.status === 'confirmed' && <CheckCircle className="h-3 w-3" />}
+                            {booking.status === 'completed' && <CheckSquare className="h-3 w-3" />}
+                            {booking.status === 'cancelled' && <XCircle className="h-3 w-3" />}
+                            {booking.status === 'accepted' && <ThumbsUp className="h-3 w-3" />}
+                            {booking.status === 'rejected' && <ThumbsDown className="h-3 w-3" />}
+                            {booking.status === 'assigned' && <Truck className="h-3 w-3" />}
+                            <span>{booking.status}</span>
+                          </span>
                         )}
-                      >
-                        {/* Status icon + label */}
-                        {booking.status === 'completed' && (
-                          <CheckSquare className="h-3 w-3" />
-                        )}
-                        {booking.status === 'confirmed' && (
-                          <CheckCircle className="h-3 w-3" />
-                        )}
-                        {booking.status === 'assigned' && (
-                          <Truck className="h-3 w-3" />
-                        )}
-                        {booking.status === 'accepted' && (
-                          <UserCheck className="h-3 w-3" />
-                        )}
-                        {booking.status === 'cancelled' && (
-                          <XCircle className="h-3 w-3" />
-                        )}
-                        {booking.status === 'pending' && (
-                          <Clock className="h-3 w-3" />
-                        )}
-                        {booking.status === 'rejected' && (
-                          <X className="h-3 w-3" />
-                        )}
-
-                        <span className="sm:inline">{booking.status}</span>
-                      </span>
+                      </div>
                     </div>
-
                     <div className="space-y-1">
                       <div className="flex items-start gap-3">
                         <LocateFixed size={12} className="text-gold shrink-0 mt-0.5" />
@@ -2484,6 +3138,13 @@ export default function AppDashboard() {
                             {bookingCategory === 'offer' ? (
                               <>
                                 <Blocks size={12} className="text-gold" />
+                                <span className="text-[10px] text-white/60 font-bold uppercase truncate">
+                                  {booking.serviceType || 'Standard'}
+                                </span>
+                              </>
+                            ) : bookingCategory === 'tour' ? (
+                              <>
+                                <MapIcon size={12} className="text-gold" />
                                 <span className="text-[10px] text-white/60 font-bold uppercase truncate">
                                   {booking.serviceType || 'Standard'}
                                 </span>
@@ -2572,7 +3233,7 @@ export default function AppDashboard() {
                         <div className="flex flex-col relative">
                           <div className="flex items-center gap-1">
                             <span className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Extras</span>
-                            {booking.selectedExtras?.length > 0 && (
+                            {booking.selectedExtras && (Array.isArray(booking.selectedExtras) ? booking.selectedExtras.length > 0 : Object.keys(booking.selectedExtras).length > 0) && (
                               <button
                                 onMouseEnter={() => setShowExtrasPopup(booking.id)}
                                 onMouseLeave={() => setShowExtrasPopup(null)}
@@ -2583,30 +3244,47 @@ export default function AppDashboard() {
                             )}
                           </div>
                           <span className="text-[10px] text-white/70 truncate">
-                            {booking.selectedExtras?.length || 0} Added
+                            {Array.isArray(booking.selectedExtras)
+                              ? booking.selectedExtras.length
+                              : Object.keys(booking.selectedExtras || {}).length} Added
                           </span>
 
                           <AnimatePresence>
-                            {showExtrasPopup === booking.id && booking.selectedExtras?.length > 0 && (
+                            {showExtrasPopup === booking.id && (Array.isArray(booking.selectedExtras) ? booking.selectedExtras.length > 0 : Object.keys(booking.selectedExtras || {}).length > 0) && (
                               <motion.div
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                className="absolute bottom-full right-0 mb-2 w-40 bg-black p-3 rounded-xl border border-gold/20 z-50 shadow-2xl"
+                                className="absolute bottom-full right-0 mb-2 w-48 bg-black p-4 rounded-2xl border border-gold/20 z-50 shadow-2xl"
                               >
-                                <p className="text-[8px] uppercase tracking-widest text-gold font-bold mb-2">Selected Extras</p>
-                                <div className="space-y-1">
-                                  {(booking.selectedExtras || []).map((id: string, index: number) => {
-                                    const extra = extras.find((e) => e.id === id);
-                                    return (
-                                      <p
-                                        key={`${id}-${index}`}
-                                        className="text-[9px] text-white/70 font-bold uppercase tracking-tighter"
-                                      >
-                                        • {extra?.name || 'Extra'}
-                                      </p>
-                                    );
-                                  })}
+                                <p className="text-[9px] uppercase tracking-widest text-gold font-bold mb-3 border-b border-gold/10 pb-2">Selected Extras</p>
+                                <div className="space-y-2">
+                                  {Array.isArray(booking.selectedExtras) ? (
+                                    booking.selectedExtras.map((id: string, index: number) => {
+                                      const extra = extras.find((e) => e.id === id);
+                                      return (
+                                        <p
+                                          key={`${id}-${index}`}
+                                          className="text-[10px] text-white/70 font-bold uppercase tracking-tighter flex justify-between"
+                                        >
+                                          <span>• {extra?.name || 'Extra'}</span>
+                                        </p>
+                                      );
+                                    })
+                                  ) : (
+                                    Object.entries(booking.selectedExtras || {}).map(([id, count]) => {
+                                      const tour = tours.find(t => t.id === booking.tourId);
+                                      const extra = (tour?.extras || []).find((e: any) => e.id === id);
+                                      return (
+                                        <div key={`extra-summary-${id}`} className="flex justify-between items-center bg-white/5 p-1.5 rounded-lg border border-white/5">
+                                          <p className="text-[10px] text-white/70 font-bold uppercase tracking-tighter truncate">
+                                            {extra?.name || 'Extra'}
+                                          </p>
+                                          <span className="text-[10px] text-gold font-mono bg-gold/10 px-1.5 rounded">×{count as number}</span>
+                                        </div>
+                                      );
+                                    })
+                                  )}
                                 </div>
                               </motion.div>
                             )}
@@ -2734,7 +3412,7 @@ export default function AppDashboard() {
                                       : booking.status === "accepted"
                                         ? "bg-cyan-500/20"
                                         : booking.status === "rejected"
-                                          ? "bg-pink-400/20"
+                                          ? "bg-orange-400/20"
                                           : "bg-purple-500/20"
                                   )}
                                 >
@@ -2743,7 +3421,7 @@ export default function AppDashboard() {
                                   ) : booking.status === "accepted" ? (
                                     <UserCheck size={12} className="text-cyan-500" />
                                   ) : booking.status === "rejected" ? (
-                                    <X size={12} className="text-pink-400" />
+                                    <X size={12} className="text-orange-400" />
                                   ) : (
                                     <Truck size={12} className="text-purple-400" />
                                   )}
@@ -2759,7 +3437,7 @@ export default function AppDashboard() {
                                           : booking.status === "accepted"
                                             ? "text-cyan-500/75"
                                             : booking.status === "rejected"
-                                              ? "text-pink-400/75"
+                                              ? "text-orange-400/75"
                                               : "text-purple-400/75"
                                       )}
                                     >
@@ -3102,6 +3780,9 @@ export default function AppDashboard() {
                   <table className="w-full text-left border-collapse min-w-[1240px]">
                     <thead>
                       <tr className="bg-white/5 border-b border-white/10">
+                        {isBookingsSelectionMode && (
+                          <th className="px-4 py-4 w-10"></th>
+                        )}
                         <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Date & Time</th>
                         <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Customer</th>
                         <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold text-gold">Route (Pickup/Dropoff)</th>
@@ -3113,7 +3794,26 @@ export default function AppDashboard() {
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {filteredAndSortedBookings.map((booking, idx) => (
-                        <tr key={`booking-row-${booking.id}-${idx}`} className="hover:bg-white/[0.02] transition-colors group">
+                        <tr key={`booking-row-${booking.id}-${idx}`} className={cn("hover:bg-white/[0.02] transition-colors group", selectedBookings.includes(booking.id) ? "bg-gold/5" : "")}>
+                          {isBookingsSelectionMode && booking.status !== 'completed' && booking.status !== 'cancelled' && (
+                            <td className="px-4 py-5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (selectedBookings.includes(booking.id))
+                                    setSelectedBookings((prev) => prev.filter((id) => id !== booking.id));
+                                  else
+                                    setSelectedBookings((prev) => [...prev, booking.id]);
+                                }}
+                                className={cn(
+                                  "w-6 h-6 rounded flex items-center justify-center transition-all border",
+                                  selectedBookings.includes(booking.id) ? "bg-gold text-black border-gold" : "bg-black/40 text-white/40 border-white/10 hover:border-white/30"
+                                )}
+                              >
+                                {selectedBookings.includes(booking.id) && <Check size={14} />}
+                              </button>
+                            </td>
+                          )}
                           <td className="px-6 py-5">
                             <div className="flex flex-col">
                               <span className="text-white text-xs font-bold uppercase">{booking.date}</span>
@@ -3128,7 +3828,13 @@ export default function AppDashboard() {
                           </td>
                           <td className="px-6 py-5">
                             <div className="flex flex-col">
-                              <span className="text-white text-xs font-bold uppercase truncate max-w-[150px]">{booking.customerName || 'Guest'}</span>
+                              <span className="text-white text-xs font-bold uppercase truncate max-w-[150px]">
+                                {bookingCategory === 'tour'
+                                  ? booking.tourTitle || 'Tour'
+                                  : bookingCategory === 'offer'
+                                    ? booking.packageTitle || 'Package'
+                                    : (booking.customerName || 'Guest')}
+                              </span>
                               <span className="text-white/40 text-[10px] truncate max-w-[150px]">{booking.customerEmail}</span>
                               <span className="text-white/40 text-[10px]">{booking.customerPhone}</span>
                             </div>
@@ -3156,6 +3862,11 @@ export default function AppDashboard() {
                               {booking.type === 'offer' && (
                                 <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded text-[8px] font-bold uppercase tracking-widest border border-purple-500/20 whitespace-nowrap transition-all group-hover:bg-purple-500 group-hover:text-white">
                                   OFFER RIDE
+                                </span>
+                              )}
+                              {booking.type === 'tour' && (
+                                <span className="px-2 py-0.5 bg-cyan-500/10 text-cyan-400 rounded text-[8px] font-bold uppercase tracking-widest border border-cyan-500/20 whitespace-nowrap transition-all group-hover:bg-cyan-500 group-hover:text-white">
+                                  TOUR RIDE
                                 </span>
                               )}
                             </div>
@@ -3281,359 +3992,364 @@ export default function AppDashboard() {
             {/* Header with Filters */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h3 className="text-2xl font-display text-gold">Analytics Overview</h3>
+                <h3 className="text-2xl font-display text-gold">
+                  {isAdmin ? 'Analytics Overview' : isDriver ? 'Driver Insights' : 'My Travel Analytics'}
+                </h3>
                 <p className="text-white/40 text-[10px] uppercase tracking-widest">
-                  Business performance & insights
+                  {isAdmin ? 'Business performance & insights' : isDriver ? 'Your performance and earnings' : 'Your booking history and spending trends'}
                 </p>
               </div>
+            </div>
 
-              <div className="flex items-center gap-3">
-                <div className="flex flex-wrap items-center gap-4">
+            {/* Header / Filter Row */}
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
 
-                  {/* View Mode Filter FIRST */}
-                  <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+              {/* Active Range (Left Side) */}
+              <div className="flex items-center gap-2 bg-gold/10 pr-3 rounded-xs">
+                <div className="w-1 h-9 bg-white/30 rounded-full shadow-[0_0_10px_rgba(212,175,55,0.3)]" />
+                <div className="flex flex-col justify-center min-h-[32px]">
+                  <p className="text-[8px] font-black uppercase tracking-[0.2em] text-gold/60 leading-none mb-1">
+                    Active Range
+                  </p>
+                  <p className="text-[10px] font-bold text-white uppercase tracking-wider">
+                    {analytics.rangeDescription}
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Side: View Mode + Filters */}
+              <div className="flex flex-col sm:flex-row gap-4 item-center">
+
+                {/* View Mode Buttons */}
+                <div className="flex items-center gap-2 bg-black/40 p-1 rounded-lg border border-white/10">
+                  {[
+                    { id: 'charts', label: 'Visual', icon: BarChart3 },
+                    { id: 'numerical', label: 'Data', icon: LayoutGrid },
+                  ].map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => setAnalyticsViewMode(v.id as any)}
+                      className={cn(
+                        "flex items-center gap-2 h-7 px-4 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                        analyticsViewMode === v.id
+                          ? "bg-gold text-black shadow-lg shadow-gold/20"
+                          : "text-white/40 hover:text-white"
+                      )}
+                    >
+                      <v.icon size={12} />
+                      <span className="hidden sm:inline">{v.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Time Filters */}
+                {analyticsViewMode !== 'numerical' && (
+                  <div className="flex items-center gap-1 bg-black/20 p-1 rounded-lg border border-white/10">
                     {[
-                      { id: 'charts', label: 'Visual', icon: BarChart3 },
-                      { id: 'numerical', label: 'Data', icon: LayoutGrid },
-                    ].map((v) => (
+                      { id: 'all', label: 'All' },
+                      { id: '7d', label: '7D' },
+                      { id: '30d', label: '30D' },
+                      { id: 'month', label: 'Monthly' },
+                      { id: 'year', label: 'Yearly' },
+                    ].map((f) => (
                       <button
-                        key={v.id}
-                        onClick={() => setAnalyticsViewMode(v.id as any)}
+                        key={f.id}
+                        onClick={() => setAnalyticsTimeFilter(f.id as any)}
                         className={cn(
-                          "flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                          analyticsViewMode === v.id
-                            ? "bg-gold text-black shadow-lg shadow-gold/20"
-                            : "text-white/40 hover:text-white"
+                          "h-7 px-3 rounded-lg text-[9px] font-bold uppercase tracking-widest transition-all",
+                          analyticsTimeFilter === f.id
+                            ? "bg-gold text-black shadow-md shadow-gold/10"
+                            : "text-white/30 hover:text-white"
                         )}
                       >
-                        <v.icon size={12} />
-                        <span className="hidden sm:inline">{v.label}</span>
+                        {f.label}
                       </button>
                     ))}
                   </div>
+                )}
 
-                  {/* Time Filters (only show if NOT Data mode) */}
-                  {analyticsViewMode !== 'numerical' && (
-                    <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
-                      {[
-                        { id: '7d', label: '7D' },
-                        { id: '30d', label: '30D' },
-                        { id: 'month', label: 'Monthly' },
-                        { id: 'year', label: 'Yearly' },
-                      ].map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => setAnalyticsTimeFilter(f.id as any)}
-                          className={cn(
-                            "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                            analyticsTimeFilter === f.id
-                              ? "bg-gold text-black shadow-lg shadow-gold/20"
-                              : "text-white/40 hover:text-white"
-                          )}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
+                {/* Range Selectors */}
+                {analyticsViewMode !== 'numerical' &&
+                  (analyticsTimeFilter === 'month' || analyticsTimeFilter === 'year') && (
+                    <div className="flex items-center gap-2 bg-black/40 p-1 rounded-lg border border-white/10">
+                      <select
+                        value={analyticsTimeFilter === 'month' ? monthRange.start : yearRange.start}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          if (analyticsTimeFilter === 'month') setMonthRange(prev => ({ ...prev, start: val }));
+                          else setYearRange(prev => ({ ...prev, start: val }));
+                        }}
+                        className="h-7 custom-select bg-transparent border-none text-[10px] pr-10 text-white"
+                      >
+                        {analyticsTimeFilter === 'month'
+                          ? Array.from({ length: 12 }, (_, i) => (
+                            <option key={i} value={i} className="bg-black text-white">
+                              {format(new Date(2024, i, 1), 'MMM')}
+                            </option>
+                          ))
+                          : Array.from({ length: 10 }, (_, i) => {
+                            const year = new Date().getFullYear() - 9 + i;
+                            return (
+                              <option key={year} value={year} className="bg-black text-white">
+                                {year}
+                              </option>
+                            );
+                          })}
+                      </select>
+                      <span className="text-white/20 text-[10px]">—</span>
+                      <select
+                        value={analyticsTimeFilter === 'month' ? monthRange.end : yearRange.end}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          if (analyticsTimeFilter === 'month') {
+                            setMonthRange(prev => ({ ...prev, end: val }));
+                          } else {
+                            setYearRange(prev => ({ ...prev, end: val }));
+                          }
+                        }}
+                        className="h-7 custom-select bg-transparent border-none text-[10px] pr-10 text-white"
+                      >
+                        {analyticsTimeFilter === 'month'
+                          ? Array.from({ length: 12 }, (_, i) => (
+                            <option key={i} value={i} className="bg-black text-white">
+                              {format(new Date(2024, i, 1), 'MMM')}
+                            </option>
+                          ))
+                          : Array.from({ length: 10 }, (_, i) => {
+                            const year = new Date().getFullYear() - 9 + i;
+                            return (
+                              <option key={year} value={year} className="bg-black text-white">
+                                {year}
+                              </option>
+                            );
+                          })}
+                      </select>
                     </div>
                   )}
-
-                  {/* Range Selectors (only show if NOT Data mode AND month/year selected) */}
-                  {analyticsViewMode !== 'numerical' &&
-                    (analyticsTimeFilter === 'month' || analyticsTimeFilter === 'year') && (
-                      <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10 animate-in fade-in slide-in-from-right-4 duration-300">
-                        {/* Start Select */}
-                        <select
-                          value={
-                            analyticsTimeFilter === 'month'
-                              ? monthRange.start
-                              : yearRange.start
-                          }
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (analyticsTimeFilter === 'month')
-                              setMonthRange((prev) => ({ ...prev, start: val }));
-                            else setYearRange((prev) => ({ ...prev, start: val }));
-                          }}
-                          className="custom-select bg-transparent border-none py-1 h-auto text-[10px] pr-8"
-                        >
-                          {analyticsTimeFilter === 'month'
-                            ? Array.from({ length: 12 }, (_, i) => (
-                              <option key={i} value={i} className="bg-black">
-                                {format(new Date(2024, i, 1), 'MMM')}
-                              </option>
-                            ))
-                            : Array.from({ length: 10 }, (_, i) => {
-                              const year = new Date().getFullYear() - 9 + i;
-                              return (
-                                <option key={year} value={year} className="bg-black">
-                                  {year}
-                                </option>
-                              );
-                            })}
-                        </select>
-
-                        <span className="text-white/20 text-[10px]">—</span>
-
-                        {/* End Select */}
-                        <select
-                          value={
-                            analyticsTimeFilter === 'month'
-                              ? monthRange.end
-                              : yearRange.end
-                          }
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (analyticsTimeFilter === 'month')
-                              setMonthRange((prev) => ({ ...prev, end: val }));
-                            else setYearRange((prev) => ({ ...prev, end: val }));
-                          }}
-                          className="custom-select bg-transparent border-none py-1 h-auto text-[10px] pr-8"
-                        >
-                          {analyticsTimeFilter === 'month'
-                            ? Array.from({ length: 12 }, (_, i) => (
-                              <option key={i} value={i} className="bg-black">
-                                {format(new Date(2024, i, 1), 'MMM')}
-                              </option>
-                            ))
-                            : Array.from({ length: 10 }, (_, i) => {
-                              const year = new Date().getFullYear() - 9 + i;
-                              return (
-                                <option key={year} value={year} className="bg-black">
-                                  {year}
-                                </option>
-                              );
-                            })}
-                        </select>
-                      </div>
-                    )}
-
-                  {/* Add Chart Button INLINE with same height */}
-                  <button
-                    onClick={() => setShowAddChartModal(true)}
-                    className="flex items-center justify-center px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-white/5 border border-white/10 hover:border-gold/50 hover:bg-gold/5 text-gold transition-all"
-                    title="Add Custom Chart"
-                  >
-                    <Plus size={12} />
-                    <span className="hidden sm:inline">Add</span>
-                  </button>
-                </div>
               </div>
             </div>
 
             {/* Main Stats Grid */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 px-1">
-                <div className="w-1 h-4 bg-gold rounded-full" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
-                  Insights for {analytics.rangeDescription}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[
-                  { label: 'Total Revenue', value: `$${Math.round(analytics.totalRevenue)}`, icon: DollarSign, color: 'text-green-500' },
-                  { label: 'Completed', value: analytics.completedBookings, icon: CheckCircle, color: 'text-blue-500' },
-                  { label: 'Pending Requests', value: analytics.pendingBookings, icon: Clock, color: 'text-gold' },
-                  { label: 'Total Volume', value: analytics.totalBookings, icon: LayoutGrid, color: 'text-purple-500' },
-                ].map((stat, i) => (
-                  <div key={`stat-${i}`} className="glass p-4 rounded-xl border border-white/5 relative overflow-hidden group">
-                    <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                      <stat.icon size={20} className={stat.color} />
-                    </div>
-                    <div className="relative z-10">
-                      <div className="flex justify-between items-start mb-2">
-                        <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/40">{stat.label}</p>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <h3 className={cn("text-2xl font-display", stat.color)}>{stat.value}</h3>
-                      </div>
-                    </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                {
+                  label: isAdmin ? 'Total Revenue' : isDriver ? 'My Earnings' : 'Total Spending',
+                  value: `$${Math.round(analytics.totalRevenue)}`,
+                  icon: isAdmin ? DollarSign : PiggyBank,
+                  color: 'text-gold'
+                },
+                {
+                  label: isAdmin ? 'Completed' : isDriver ? 'Finished Jobs' : 'Completed Rides',
+                  value: analytics.completedBookings,
+                  icon: CheckCircle,
+                  color: 'text-green-500'
+                },
+                {
+                  label: isAdmin ? 'Active' : isDriver ? 'Active Jobs' : 'Active Rides',
+                  value: analytics.confirmedBookings + analytics.assignedBookings + analytics.acceptedBookings,
+                  icon: Clock,
+                  color: 'text-blue-400'
+                },
+                {
+                  label: 'Cancelled',
+                  value: analytics.cancelledBookings,
+                  icon: XCircle,
+                  color: 'text-red-400'
+                },
+              ].map((stat, i) => (
+                <div key={`stat-${i}`} className="glass p-4 rounded-xl border border-white/5 relative overflow-hidden group">
+                  <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-30 transition-opacity">
+                    <stat.icon size={20} className={stat.color} />
                   </div>
-                ))}
-              </div>
+                  <div className="relative z-10">
+                    <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/40 mb-1">{stat.label}</p>
+                    <h3 className={cn("text-2xl font-display", stat.color)}>{stat.value}</h3>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            {/* Analytics Content Sections */}
             {analyticsViewMode === 'charts' ? (
-              <div className="space-y-8 animate-in fade-in duration-500">
-                {/* Dynamic Charts Grid */}
+              <div className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  {dashboardCharts.map((chart) => (
-                    <div
-                      key={chart.id}
-                      className={cn(
-                        "glass p-8 rounded-3xl border border-white/5 relative group transition-all duration-500",
-                        chart.width === 'small' ? "lg:col-span-4" :
-                          chart.width === 'large' ? "lg:col-span-12" : "lg:col-span-8"
-                      )}
-                    >
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h4 className="text-sm font-bold text-gold uppercase tracking-widest">{chart.title}</h4>
-                          <p className="text-[10px] text-white/40 mt-1">
-                            {analyticsTimeFilter === 'month' ? 'Monthly distribution' :
-                              analyticsTimeFilter === 'year' ? 'Yearly performance' : 'Performance metrics'}
-                          </p>
+                  {dashboardCharts
+                    .filter(chart => isAdmin || chart.id !== 'role-distribution')
+                    .map((chart) => (
+                      <div
+                        key={chart.id}
+                        className={cn(
+                          "glass p-8 rounded-3xl border border-white/5 relative group transition-all duration-500",
+                          chart.width === 'small' ? "lg:col-span-4" :
+                            chart.width === 'medium' ? "lg:col-span-6" :
+                              chart.width === 'large' ? "lg:col-span-8" : "lg:col-span-12"
+                        )}
+                      >
+                        <div className="flex justify-between items-center mb-6">
+                          <div>
+                            <h4 className="text-sm font-bold text-gold uppercase tracking-widest">{chart.title}</h4>
+                            <p className="text-[10px] text-white/40 mt-1 uppercase tracking-tighter italic">Based on filtered data</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                setDashboardCharts(prev => prev.map(c => {
+                                  if (c.id === chart.id) {
+                                    const widths = ['small', 'medium', 'large', 'full'];
+                                    const currentIndex = widths.indexOf(c.width || 'large');
+                                    const nextIndex = (currentIndex + 1) % widths.length;
+                                    return { ...c, width: widths[nextIndex] };
+                                  }
+                                  return c;
+                                }));
+                              }}
+                              className="p-2 text-white/40 hover:text-gold transition-all"
+                              title="Change Size"
+                            >
+                              <Scaling size={16} />
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => setDashboardCharts(prev => prev.filter(c => c.id !== chart.id))}
-                          className="p-2 opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
 
-                      <div className="h-80 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          {chart.type === 'area' ? (
-                            <AreaChart data={analytics.revenueData}>
-                              <defs>
-                                <linearGradient id={`color-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor={chart.color || '#D4AF37'} stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor={chart.color || '#D4AF37'} stopOpacity={0} />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                              <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                              <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                                itemStyle={{ color: chart.color || '#D4AF37', fontSize: '12px' }}
-                              />
-                              <Area type="monotone" dataKey={chart.dataKey} stroke={chart.color || '#D4AF37'} fillOpacity={1} fill={`url(#color-${chart.id})`} strokeWidth={2} />
-                            </AreaChart>
-                          ) : chart.type === 'bar' ? (
-                            <BarChart data={analytics.revenueData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                              <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                              <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                                cursor={{ fill: '#ffffff05' }}
-                              />
-                              <Bar dataKey={chart.dataKey} fill={chart.color || '#D4AF37'} radius={[4, 4, 0, 0]} />
-                            </BarChart>
-                          ) : chart.type === 'line' ? (
-                            <LineChart data={analytics.revenueData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                              <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                              <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                              />
-                              <Line type="monotone" dataKey={chart.dataKey} stroke={chart.color || '#D4AF37'} strokeWidth={3} dot={{ r: 4, fill: '#0a0a0a', strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                            </LineChart>
-                          ) : chart.type === 'pie' ? (
-                            <PieChart>
-                              <Pie
-                                data={chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={80}
-                                paddingAngle={5}
-                                dataKey="value"
-                                stroke="none"
-                              >
-                                {(chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData).map((entry: any, index: number) => (
-                                  <Cell key={`cell-${index}`} fill={entry.color} />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                              />
-                            </PieChart>
-                          ) : null}
-                        </ResponsiveContainer>
-                      </div>
-                      {chart.type === 'pie' && (
-                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2 justify-center">
-                          {(chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData).map((status: any, i: number) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: status.color }} />
-                              <span className="text-[10px] text-white/60 font-medium">{status.name}</span>
-                              <span className="text-[10px] text-white/40">{status.value}</span>
-                            </div>
-                          ))}
+                        <div className="h-60 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            {chart.type === 'area' ? (
+                              <AreaChart data={analytics.revenueData}>
+                                <defs>
+                                  <linearGradient id={`color-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor={chart.color || '#D4AF37'} stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor={chart.color || '#D4AF37'} stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                                <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                                <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                                <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }} />
+                                <Area type="monotone" dataKey={chart.dataKey} stroke={chart.color || '#D4AF37'} fillOpacity={1} fill={`url(#color-${chart.id})`} strokeWidth={2} />
+                              </AreaChart>
+                            ) : chart.type === 'bar' ? (
+                              <BarChart data={analytics.revenueData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                                <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                                <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                                <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }} />
+                                <Bar dataKey={chart.dataKey} fill={chart.color || '#D4AF37'} radius={[4, 4, 0, 0]}>
+                                  <LabelList dataKey={chart.dataKey} position="insideTop" fill="#000" fontSize={10} formatter={(val: number) => typeof val === 'number' ? `${val.toLocaleString()}` : val} />
+                                </Bar>
+                              </BarChart>
+                            ) : chart.type === 'line' ? (
+                              <LineChart data={analytics.revenueData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                                <XAxis dataKey="name" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                                <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                                <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }} />
+                                <Line type="monotone" dataKey={chart.dataKey} stroke={chart.color || '#D4AF37'} strokeWidth={3} dot={{ r: 4, fill: '#0a0a0a', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                              </LineChart>
+                            ) : chart.type === 'pie' ? (
+                              <PieChart>
+                                <Pie
+                                  data={chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData}
+                                  cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none"
+                                >
+                                  {(chart.dataSource === 'roleData' ? analytics.roleData : analytics.statusData).map((entry: any, index: number) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '12px' }} />
+                                <Legend
+                                  verticalAlign="bottom"
+                                  height={36}
+                                  iconType="circle"
+                                  iconSize={9}
+                                  wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                                  formatter={(value, entry: any) => (
+                                    <span className="text-white/70 ml-1">
+                                      {value}: <span className="text-gold font-bold ml-1">{entry.payload.value}</span>
+                                    </span>
+                                  )}
+                                />
+                              </PieChart>
+                            ) : chart.type === 'stacked-bar' ? (
+                              <BarChart data={analytics.serviceDistribution} layout="vertical">
+                                <XAxis type="number" hide />
+                                <YAxis dataKey="name" type="category" stroke="#ffffff40" fontSize={10} width={80} />
+                                <Tooltip
+                                  contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10' }}
+                                  formatter={(value: any, name: string) => [value, name.charAt(0).toUpperCase() + name.slice(1)]}
+                                />
+                                <Legend verticalAlign="top" height={36} iconType="circle" iconSize={9} wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
+                                <Bar dataKey="completed" stackId="a" fill="#4ADE80" name="Completed" radius={[0, 0, 0, 0]} />
+                                <Bar dataKey="other" stackId="a" fill="#60A5FA" name="Active / Other" radius={[0, 0, 0, 0]} />
+                                <Bar dataKey="cancelled" stackId="a" fill="#F87171" name="Cancelled" radius={[0, 4, 4, 0]} />
+                              </BarChart>
+                            ) : null}
+                          </ResponsiveContainer>
                         </div>
-                      )}
-                    </div>
-                  ))}
-
-                  {/* Add Chart Placeholder */}
-                  <button
-                    onClick={() => setShowAddChartModal(true)}
-                    className="lg:col-span-8 h-[300px] rounded-3xl border-2 border-dashed border-white/50 hover:border-gold/30 hover:bg-gold/5 flex flex-col items-center justify-center gap-4 group transition-all"
-                  >
-                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Plus className="text-white/40 group-hover:text-gold" size={24} />
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-bold text-white group-hover:text-gold uppercase tracking-widest">Add More Insights</p>
-                      <p className="text-[10px] text-white/20 mt-1">Customize your analytics dashboard</p>
-                    </div>
-                  </button>
+                      </div>
+                    ))}
                 </div>
               </div>
             ) : (
-              /* Performance Rankings */
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8 animate-in slide-in-from-bottom-4 duration-500">
-                <div className="glass p-8 rounded-3xl border border-white/5">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h4 className="text-lg font-display text-gold">Top Performing Drivers</h4>
-                      <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Based on revenue generated</p>
-                    </div>
-                    <Car size={20} className="text-gold opacity-20" />
-                  </div>
-                  <div className="space-y-4">
-                    {analytics.topDrivers.map((driver, i) => (
-                      <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 group hover:border-gold/30 transition-all">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-gold/10 flex items-center justify-center text-gold font-bold text-xs border border-gold/20">
-                            {i + 1}
+              /* Numerical Mode */
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {isAdmin ? (
+                  <>
+                    <div className="glass p-8 rounded-3xl border border-white/5">
+                      <h4 className="text-lg font-display text-gold mb-6">Top Drivers</h4>
+                      <div className="space-y-4">
+                        {analytics.topDrivers.map((d, i) => (
+                          <div key={`top-driver-${i}`} className="flex justify-between p-4 bg-white/5 rounded-xl">
+                            <span className="text-xs text-white/70">{d.name}</span>
+                            <span className="text-xs font-bold text-gold">${Math.round(d.revenue)}</span>
                           </div>
-                          <div>
-                            <p className="text-sm font-medium text-white">{driver.name}</p>
-                            <p className="text-[10px] text-white/40">{driver.count} Bookings</p>
-                          </div>
-                        </div>
-                        <p className="text-sm font-display text-gold">${Math.round(driver.revenue)}</p>
+                        ))}
                       </div>
-                    ))}
-                    {analytics.topDrivers.length === 0 && (
-                      <div className="text-center py-8 text-white/20 text-xs italic">No driver data for this period</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="glass p-8 rounded-3xl border border-white/5">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h4 className="text-lg font-display text-gold">Top Customers</h4>
-                      <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Highest spending clients</p>
                     </div>
-                    <Users size={20} className="text-gold opacity-20" />
-                  </div>
-                  <div className="space-y-4">
-                    {analytics.topCustomers.map((customer, i) => (
-                      <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 group hover:border-blue-500/30 transition-all">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400 font-bold text-xs border border-blue-500/20">
-                            {i + 1}
+                    <div className="glass p-8 rounded-3xl border border-white/5">
+                      <h4 className="text-lg font-display text-gold mb-6">Top Customers</h4>
+                      <div className="space-y-4">
+                        {analytics.topCustomers.map((c, i) => (
+                          <div key={`top-customer-${i}`} className="flex justify-between p-4 bg-white/5 rounded-xl">
+                            <span className="text-xs text-white/70">{c.name}</span>
+                            <span className="text-xs font-bold text-gold">${Math.round(c.revenue)}</span>
                           </div>
-                          <div>
-                            <p className="text-sm font-medium text-white">{customer.name}</p>
-                            <p className="text-[10px] text-white/40">{customer.count} Bookings</p>
-                          </div>
-                        </div>
-                        <p className="text-sm font-display text-gold">${Math.round(customer.revenue)}</p>
+                        ))}
                       </div>
-                    ))}
-                    {analytics.topCustomers.length === 0 && (
-                      <div className="text-center py-8 text-white/20 text-xs italic">No customer data for this period</div>
-                    )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="glass p-8 rounded-3xl border border-white/5 lg:col-span-2">
+                    <h4 className="text-lg font-display text-gold mb-6">Recent Activity Analysis</h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead>
+                          <tr className="text-white/20 uppercase tracking-widest border-b border-white/5">
+                            <th className="pb-4">Date</th>
+                            <th className="pb-4">Route</th>
+                            <th className="pb-4">Status</th>
+                            <th className="pb-4 text-right">Fare</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {bookings.map(b => (
+                            <tr key={b.id}>
+                              <td className="py-4 text-white/60">{b.date}</td>
+                              <td className="py-4 text-white/60">{b.pickup} → {b.dropoff}</td>
+                              <td className="py-4">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[10px] uppercase font-bold",
+                                  b.status === 'completed' ? "bg-green-500/10 text-green-500" :
+                                    b.status === 'cancelled' ? "bg-red-500/10 text-red-500" :
+                                      b.status === 'pending' ? "bg-gold/10 text-gold" : "bg-blue-500/10 text-blue-500"
+                                )}>{b.status}</span>
+                              </td>
+                              <td className="py-4 text-right text-gold font-bold">${b.price}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
@@ -3643,15 +4359,17 @@ export default function AppDashboard() {
           <div className="space-y-8">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 w-full">
               {/* Row 1: Title & Toggle */}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex flex-row items-center justify-between w-full">
                 <h3 className="text-2xl font-display text-gold">Booking Calendar</h3>
 
-                <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10 w-fit">
+                <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
                   <button
                     onClick={() => setCalendarDateType('pickup')}
                     className={cn(
                       "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                      calendarDateType === 'pickup' ? "bg-gold text-black shadow-lg" : "text-white/40 hover:text-white"
+                      calendarDateType === 'pickup'
+                        ? "bg-gold text-black shadow-lg"
+                        : "text-white/40 hover:text-white"
                     )}
                   >
                     Pickup Date
@@ -3660,16 +4378,21 @@ export default function AppDashboard() {
                     onClick={() => setCalendarDateType('booking')}
                     className={cn(
                       "px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
-                      calendarDateType === 'booking' ? "bg-gold text-black shadow-lg" : "text-white/40 hover:text-white"
+                      calendarDateType === 'booking'
+                        ? "bg-gold text-black shadow-lg"
+                        : "text-white/40 hover:text-white"
                     )}
                   >
                     Booking Date
                   </button>
                 </div>
               </div>
+            </div>
 
-              {/* Row 2: Month navigation */}
-              <div className="flex flex-row items-center justify-between sm:justify-start gap-4 bg-white/5 p-2 rounded-2xl border border-white/10 w-full sm:w-auto">
+            <div className="glass p-4 sm:p-8 rounded-3xl border border-white/5">
+              {/* Month Navigation now inside */}
+              <div className="flex items-center justify-between gap-4 mb-6 bg-white/5 p-1.5 rounded-xl">
+                {/* Left chevron */}
                 <button
                   onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
                   className="p-2 hover:bg-gold hover:text-black rounded-xl transition-all"
@@ -3677,10 +4400,12 @@ export default function AppDashboard() {
                   <ChevronLeft size={20} />
                 </button>
 
+                {/* Month label */}
                 <span className="text-xs font-bold uppercase tracking-[0.2em] min-w-[140px] text-center text-white/80">
                   {format(currentMonth, 'MMMM yyyy')}
                 </span>
 
+                {/* Right chevron */}
                 <button
                   onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
                   className="p-2 hover:bg-gold hover:text-black rounded-xl transition-all"
@@ -3688,9 +4413,7 @@ export default function AppDashboard() {
                   <ChevronRight size={20} />
                 </button>
               </div>
-            </div>
 
-            <div className="glass p-4 sm:p-8 rounded-3xl border border-white/5">
               <div className="grid grid-cols-7 gap-2 sm:gap-4 mb-4">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
                   <div key={day} className="text-center text-[10px] font-bold uppercase tracking-widest text-white/20">
@@ -3736,12 +4459,17 @@ export default function AppDashboard() {
                         dayBookings.length > 0 && "bg-white/5"
                       )}
                     >
-                      <span className={cn(
-                        "text-[10px] sm:text-xs font-bold font-mono",
-                        isToday(day) ? "text-gold" : "text-white/40"
-                      )}>
-                        {format(day, 'd')}
+                      {/* Date number pinned at top */}
+                      <span
+                        className={cn(
+                          "absolute top-1 left-1 sm:top-2 sm:left-2 text-[10px] sm:text-xs font-bold font-mono",
+                          isToday(day) ? "text-gold" : "text-white/40"
+                        )}
+                      >
+                        {format(day, "d")}
                       </span>
+
+
 
                       {dayBookings.length > 0 && (
                         <div className="absolute bottom-1 sm:bottom-2 left-1 sm:left-3 right-1 sm:right-3">
@@ -4151,7 +4879,7 @@ export default function AppDashboard() {
                 { id: 'seo', label: 'SEO', icon: Globe },
                 { id: 'config', label: 'Config', icon: Cog },
                 { id: 'offers-tours', label: 'Offers & Tours', icon: Tag },
-
+                { id: 'floating', label: 'Floating Elements', icon: Blocks },
                 { id: 'media', label: 'Media', icon: Upload }
               ].map((sub) => (
                 <button
@@ -4173,6 +4901,1261 @@ export default function AppDashboard() {
               ))}
             </div>
 
+
+            {activeSubTab === 'floating' && !floatingSettings && (
+              <div className="flex flex-col items-center justify-center p-20 glass rounded-3xl border border-white/5">
+                <Loader2 size={40} className="text-gold animate-spin mb-4" />
+                <p className="text-white/40 uppercase tracking-widest text-[10px] font-bold">Loading Floating Settings...</p>
+              </div>
+            )}
+
+            {activeSubTab === 'floating' && floatingSettings && (
+              <div className="space-y-12 animate-in fade-in duration-700">
+                {/* Section Header */}
+                <div className="flex flex-row justify-between items-center gap-6 mb-4">
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <h3 className="text-2xl font-display text-gold tracking-tight">Floating Elements</h3>
+                      <p className="text-white/40 text-[10px] uppercase tracking-widest">
+                        Global Floating Element Controls
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleUpdateFloatingSettings(floatingSettings)}
+                    disabled={isSavingFloatingSettings}
+                    className="btn-primary flex items-center justify-center gap-2 sm:gap-3 h-10 px-3 sm:px-6 py-2 sm:py-3 group"
+                  >
+                    {isSavingFloatingSettings ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Save size={18} />
+                    )}
+                    {/* Hide text on mobile, show on sm+ */}
+                    <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">
+                      Save All
+                    </span>
+                  </button>
+                </div>
+
+                {/* Social Icons Section */}
+                <div className="glass p-6 sm:p-8 rounded-2xl border border-white/5 space-y-4">
+                  <div>
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-6 border-b border-white/5 pb-3">
+                      <div>
+                        <h4 className="text-lg sm:text-xl font-display text-white">
+                          Floating Social Icons
+                        </h4>
+                        <p className="text-xs sm:text-sm text-white/40">
+                          Manage your floating contact & social media shortcuts
+                        </p>
+                      </div>
+
+                      <label className="inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={floatingSettings?.social?.active}
+                          onChange={() =>
+                            setFloatingSettings((prev: any) => ({
+                              ...prev,
+                              social: { ...(prev?.social || {}), active: !prev?.social?.active },
+                            }))
+                          }
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-white/20 rounded-full peer-checked:bg-gold relative transition-colors">
+                          <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5/6" />
+                        </div>
+                        <span className="ml-2 text-[10px] font-black uppercase tracking-widest text-white/40 peer-checked:text-gold">
+                          {floatingSettings?.social?.active ? "Active" : "Disabled"}
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* MAIN GRID */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                      {/* ================= LEFT COLUMN ================= */}
+                      <div className="space-y-6">
+
+                        {/* Heading */}
+                        <div className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-gold" />
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">
+                            Layout & Placement
+                          </span>
+                        </div>
+
+                        {/* Offset Controls */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-6 bg-white/[0.02] rounded-2xl border border-white/5">
+
+                          {/* Horizontal Offset */}
+                          <div className="space-y-4">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
+                              Horizontal Offset
+                            </label>
+
+                            <div className="px-3 py-4 bg-black/40 rounded-xl border border-white/5 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-mono text-gold/60">X-AXIS</span>
+                                <span className="text-xs font-mono text-gold">
+                                  {floatingSettings?.social?.offsetX || 24}px
+                                </span>
+                              </div>
+
+                              <input
+                                type="range"
+                                min="0"
+                                max="200"
+                                step="4"
+                                value={floatingSettings?.social?.offsetX || 24}
+                                onChange={(e) =>
+                                  setFloatingSettings((prev: any) => ({
+                                    ...prev,
+                                    social: {
+                                      ...(prev?.social || {}),
+                                      offsetX: Number(e.target.value),
+                                    },
+                                  }))
+                                }
+                                className="w-full accent-gold h-1"
+                                style={{ '--value': `${(((floatingSettings?.social?.offsetX || 24) - 0) / (200 - 0)) * 100}%` } as React.CSSProperties}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Vertical Offset */}
+                          <div className="space-y-4">
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
+                              Vertical Offset
+                            </label>
+
+                            <div className="px-3 py-4 bg-black/40 rounded-xl border border-white/5 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-mono text-gold/60">Y-AXIS</span>
+                                <span className="text-xs font-mono text-gold">
+                                  {floatingSettings?.social?.offsetY || 40}px
+                                </span>
+                              </div>
+
+                              <input
+                                type="range"
+                                min="0"
+                                max="200"
+                                step="4"
+                                value={floatingSettings?.social?.offsetY || 40}
+                                onChange={(e) =>
+                                  setFloatingSettings((prev: any) => ({
+                                    ...prev,
+                                    social: {
+                                      ...(prev?.social || {}),
+                                      offsetY: Number(e.target.value),
+                                    },
+                                  }))
+                                }
+                                className="w-full accent-gold h-1"
+                                style={{ '--value': `${(((floatingSettings?.social?.offsetY || 40) - 0) / (200 - 0)) * 100}%` } as React.CSSProperties}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Screen Position Dropdown */}
+                        <div className="space-y-4">
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 block">
+                            Screen Position
+                          </label>
+
+                          <select
+                            value={floatingSettings?.social?.position || "right-bottom"}
+                            onChange={(e) =>
+                              setFloatingSettings((prev: any) => ({
+                                ...prev,
+                                social: {
+                                  ...(prev?.social || {}),
+                                  position: e.target.value,
+                                },
+                              }))
+                            }
+                            className="custom-select w-full"
+                          >
+                            <option value="right-bottom">Bottom Right</option>
+                            <option value="left-bottom">Bottom Left</option>
+                            <option value="right-center">Center Right</option>
+                            <option value="left-center">Center Left</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* ================= RIGHT COLUMN ================= */}
+                      <div className="space-y-6">
+
+                        {/* Heading */}
+                        <div className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-gold" />
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">
+                            Visibility & Auto Close Rules
+                          </span>
+                        </div>
+
+                        {/* Auto Close Timing */}
+                        <div className="p-5 bg-black/20 rounded-2xl border border-white/5 space-y-4">
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold/60 flex items-center gap-2">
+                            <EyeOff size={12} />
+                            Auto Close Timing
+                          </label>
+
+                          <div className="space-y-4">
+                            <div className="flex justify-between items-center px-1">
+                              <span className="text-[9px] text-white/30 uppercase font-bold tracking-widest">
+                                Close after (seconds)
+                              </span>
+                              <span className="text-xs font-mono text-gold bg-gold/10 px-2 py-0.5 rounded-lg">
+                                {floatingSettings?.social?.autoCloseTime || 0}s
+                              </span>
+                            </div>
+
+                            <input
+                              type="range"
+                              min="0"
+                              max="60"
+                              step="1"
+                              value={floatingSettings?.social?.autoCloseTime || 0}
+                              onChange={(e) =>
+                                setFloatingSettings((prev: any) => ({
+                                  ...prev,
+                                  social: {
+                                    ...(prev?.social || {}),
+                                    autoCloseTime: Number(e.target.value),
+                                  },
+                                }))
+                              }
+                              className="w-full accent-gold h-1.5"
+                              style={{ '--value': `${(((floatingSettings?.social?.autoCloseTime || 0) - 0) / (60 - 0)) * 100}%` } as React.CSSProperties}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Page Visibility */}
+                        <div className="p-5 bg-black/20 rounded-2xl border border-white/5 space-y-4">
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold/60 flex items-center gap-2">
+                            <Eye size={12} />
+                            Page Visibility Rules
+                          </label>
+
+                          <select
+                            value={floatingSettings?.social?.displayCondition || "all"}
+                            onChange={(e) =>
+                              setFloatingSettings((prev: any) => ({
+                                ...prev,
+                                social: {
+                                  ...(prev?.social || {}),
+                                  displayCondition: e.target.value,
+                                },
+                              }))
+                            }
+                            className="custom-select w-full"
+                          >
+                            <option value="all">Show Everywhere</option>
+                            <option value="landing">Home Page Only</option>
+                            <option value="specific">Specific Pages Only</option>
+                            <option value="except">Except Specific Pages</option>
+                          </select>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* Detailed Icon Editor */}
+                  <div className="pt-8 border-t border-white/5">
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-gold" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">Configuration Details</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newIcon = {
+                            id: `custom-${Date.now()}`,
+                            type: 'whatsapp',
+                            label: 'Whatsapp',
+                            url: '',
+                            active: true,
+                            color: '#D4AF37',
+                            iconColor: '#ffffff',
+                            bgType: 'solid',
+                            bgColor: '#D4AF37',
+                            bgGradient: 'linear-gradient(45deg, #D4AF37, #F1D483)',
+                            padding: 12,
+                            iconSize: 20,
+                          };
+                          setFloatingSettings((prev: any) => ({
+                            ...prev,
+                            social: {
+                              ...prev.social,
+                              icons: [...(prev.social.icons || []), newIcon],
+                            },
+                          }));
+                        }}
+                        className="flex items-center justify-center gap-2 sm:gap-3 h-10 px-3 sm:px-4 py-2 bg-gold text-black      rounded-lg text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105"
+                      >
+                        <Plus size={16} />
+                        {/* Hide text on mobile, show on sm+ */}
+                        <span className="hidden sm:inline">Add New</span>
+                      </button>
+                    </div>
+
+                    {(floatingSettings?.social?.icons || []).length === 0 ? (
+                      <div className="flex flex-col items-center justify-center text-center p-8 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl">
+                        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-white/20 mb-4">
+                          <Plus size={24} />
+                        </div>
+                        <p className="text-xs text-white/40">No icons added yet</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {(floatingSettings?.social?.icons || []).map((icon: any, idx: number) => (
+                          <div key={`edit-${icon.id || idx}`} className="bg-black/40 border border-white/10 p-5 rounded-2xl flex flex-col gap-5 relative overflow-hidden group/editor">
+                            {/* Header Section */}
+                            <div className="flex items-center justify-between border-b border-white/5 pb-4 relative z-10">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/50">
+                                  {icon.type === 'whatsapp' ? <MessageCircle size={16} /> :
+                                    icon.type === 'facebook' ? <Facebook size={16} /> :
+                                      icon.type === 'instagram' ? <Instagram size={16} /> :
+                                        icon.type === 'linkedin' ? <Linkedin size={16} /> :
+                                          icon.type === 'email' ? <Mail size={16} /> :
+                                            icon.type === 'phone' ? <Phone size={16} /> :
+                                              icon.type === 'twitter' ? <Twitter size={16} /> :
+                                                icon.type === 'youtube' ? <Youtube size={16} /> :
+                                                  <Globe size={16} />}
+                                </div>
+
+                                {/* Hide on mobile, show from md breakpoint upwards */}
+                                <input
+                                  type="text"
+                                  value={icon.label}
+                                  onChange={(e) => {
+                                    setFloatingSettings((prev: any) => {
+                                      const newIcons = [...prev.social.icons];
+                                      newIcons[idx].label = e.target.value;
+                                      return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                    });
+                                  }}
+                                  className="hidden md:block bg-transparent border-none text-sm font-display text-white outline-none focus:ring-0 border-b border-transparent focus:border-gold/30 transition-all px-0 w-32"
+                                  placeholder="Icon Label"
+                                />
+                              </div>
+                              <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
+                                <button
+                                  onClick={() => {
+                                    if (idx > 0) {
+                                      setFloatingSettings((prev: any) => {
+                                        const newIcons = [...prev.social.icons];
+                                        [newIcons[idx], newIcons[idx - 1]] = [newIcons[idx - 1], newIcons[idx]];
+                                        return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                      });
+                                    }
+                                  }}
+                                  disabled={idx === 0}
+                                  className="p-1.5 hover:bg-white/10 text-white/40 hover:text-white rounded disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all"
+                                  title="Move Up"
+                                >
+                                  <ArrowUp size={12} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (idx < (floatingSettings?.social?.icons?.length || 0) - 1) {
+                                      setFloatingSettings((prev: any) => {
+                                        const newIcons = [...prev.social.icons];
+                                        [newIcons[idx], newIcons[idx + 1]] = [newIcons[idx + 1], newIcons[idx]];
+                                        return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                      });
+                                    }
+                                  }}
+                                  disabled={idx === (floatingSettings?.social?.icons?.length || 0) - 1}
+                                  className="p-1.5 hover:bg-white/10 text-white/40 hover:text-white rounded disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all"
+                                  title="Move Down"
+                                >
+                                  <ArrowDown size={12} />
+                                </button>
+                                <div className="w-px h-4 bg-white/10 mx-1" />
+                                <button
+                                  onClick={() => {
+                                    setFloatingSettings((prev: any) => ({
+                                      ...prev,
+                                      social: {
+                                        ...prev.social,
+                                        icons: prev.social.icons.filter((_: any, i: number) => i !== idx)
+                                      }
+                                    }));
+                                  }}
+                                  className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded transition-all"
+                                  title="Remove Icon"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Settings Grid */}
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-4 relative z-10 scale-[0.98] origin-top">
+                              {/* Platform */}
+                              <div className="space-y-1.5">
+                                <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30 pl-1">Platform</label>
+                                <select
+                                  value={icon.type}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    const labelMap: Record<string, string> = {
+                                      whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn',
+                                      twitter: 'Twitter', youtube: 'YouTube', email: 'Email', phone: 'Phone / Call', website: 'Website / Link'
+                                    };
+                                    setFloatingSettings((prev: any) => {
+                                      const newIcons = [...prev.social.icons];
+                                      newIcons[idx].type = value;
+                                      newIcons[idx].label = labelMap[value] || value;
+                                      return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                    });
+                                  }}
+                                  className="custom-select w-full py-2 text-[10px]"
+                                >
+                                  <option value="whatsapp">WhatsApp</option>
+                                  <option value="facebook">Facebook</option>
+                                  <option value="instagram">Instagram</option>
+                                  <option value="linkedin">LinkedIn</option>
+                                  <option value="twitter">Twitter</option>
+                                  <option value="youtube">YouTube</option>
+                                  <option value="email">Email</option>
+                                  <option value="phone">Phone / Call</option>
+                                  <option value="website">Website / Link</option>
+                                </select>
+                              </div>
+
+                              {/* Destination URL */}
+                              <div className="space-y-1.5">
+                                <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30 pl-1">URL / ID</label>
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    value={icon.url}
+                                    onChange={(e) => {
+                                      setFloatingSettings((prev: any) => {
+                                        const newIcons = [...prev.social.icons];
+                                        newIcons[idx].url = e.target.value;
+                                        return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                      });
+                                    }}
+                                    className="w-full bg-black/40 border border-white/5 rounded-xl px-3 py-2 text-[10px] text-white/80 focus:border-gold outline-none transition-all pr-8"
+                                    placeholder={icon.type === 'phone' ? 'tel:+61...' : 'https://...'}
+                                  />
+                                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/20">
+                                    <Plus size={12} className="rotate-45" />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Style */}
+                              <div className="space-y-1.5">
+                                <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30 pl-1">Style</label>
+                                <select
+                                  value={icon.bgType || 'solid'}
+                                  onChange={(e) => {
+                                    setFloatingSettings((prev: any) => {
+                                      const newIcons = [...prev.social.icons];
+                                      newIcons[idx].bgType = e.target.value;
+                                      return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                    });
+                                  }}
+                                  className="custom-select w-full py-2 text-[10px]"
+                                >
+                                  <option value="solid">Solid Background</option>
+                                  <option value="gradient">Gradient Finish</option>
+                                </select>
+                              </div>
+
+                              {/* Background / Gradient */}
+                              <div className="space-y-1.5">
+                                <div className="flex justify-between items-center pl-1 pr-1">
+                                  <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30">
+                                    {icon.bgType === 'gradient' ? 'Gradient CSS' : 'BG Color'}
+                                  </label>
+                                  {!icon.bgType || icon.bgType === 'solid' ? (
+                                    <div className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: icon.bgColor || icon.color || '#D4AF37' }} />
+                                  ) : (
+                                    <div className="w-3 h-3 rounded-full border border-white/20" style={{ background: icon.bgGradient }} />
+                                  )}
+                                </div>
+                                {icon.bgType === 'gradient' ? (
+                                  <input
+                                    type="text"
+                                    value={icon.bgGradient || 'linear-gradient(45deg, #D4AF37, #F1D483)'}
+                                    onChange={(e) => {
+                                      setFloatingSettings((prev: any) => {
+                                        const newIcons = [...prev.social.icons];
+                                        newIcons[idx].bgGradient = e.target.value;
+                                        return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                      });
+                                    }}
+                                    className="w-full h-7 bg-black/40 border border-white/10 rounded-lg text-[8px] font-mono px-2 outline-none focus:border-gold text-white/60"
+                                  />
+                                ) : (
+                                  <input
+                                    type="color"
+                                    value={icon.bgColor || icon.color || '#D4AF37'}
+                                    onChange={(e) => {
+                                      setFloatingSettings((prev: any) => {
+                                        const newIcons = [...prev.social.icons];
+                                        newIcons[idx].bgColor = e.target.value;
+                                        newIcons[idx].color = e.target.value;
+                                        return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                      });
+                                    }}
+                                    className="w-full h-7 bg-transparent border-none cursor-pointer rounded-lg overflow-hidden p-0"
+                                  />
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4 pt-1 border-t border-white/5 relative z-10 scale-[0.98] origin-top">
+                              {/* Padding */}
+                              <div className="space-y-2.5">
+                                <div className="flex justify-between items-center px-1">
+                                  <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30">Padding</label>
+                                  <span className="text-[8px] font-mono text-gold">{icon.padding || 12}px</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="4"
+                                  max="32"
+                                  value={icon.padding || 12}
+                                  onChange={(e) => {
+                                    setFloatingSettings((prev: any) => {
+                                      const newIcons = [...prev.social.icons];
+                                      newIcons[idx].padding = parseInt(e.target.value);
+                                      return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                    });
+                                  }}
+                                  className="w-full accent-gold h-1"
+                                  style={{ '--value': `${(((icon.padding || 12) - 4) / (32 - 4)) * 100}%` } as React.CSSProperties}
+                                />
+                              </div>
+
+                              {/* Icon Size */}
+                              <div className="space-y-2.5">
+                                <div className="flex justify-between items-center px-1">
+                                  <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30">Size</label>
+                                  <span className="text-[8px] font-mono text-gold">{icon.iconSize || 20}px</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="10"
+                                  max="48"
+                                  value={icon.iconSize || 20}
+                                  onChange={(e) => {
+                                    setFloatingSettings((prev: any) => {
+                                      const newIcons = [...prev.social.icons];
+                                      newIcons[idx].iconSize = parseInt(e.target.value);
+                                      return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                    });
+                                  }}
+                                  className="w-full accent-gold h-1"
+                                  style={{ '--value': `${(((icon.iconSize || 20) - 10) / (48 - 10)) * 100}%` } as React.CSSProperties}
+                                />
+                              </div>
+
+                              {/* Icon Color */}
+                              <div className="space-y-2.5">
+                                <div className="flex justify-between items-center px-1">
+                                  <label className="text-[7.5px] uppercase tracking-widest font-black text-white/30">Color</label>
+                                  <div className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: icon.iconColor || '#ffffff' }} />
+                                </div>
+                                <input
+                                  type="color"
+                                  value={icon.iconColor || '#ffffff'}
+                                  onChange={(e) => {
+                                    setFloatingSettings((prev: any) => {
+                                      const newIcons = [...prev.social.icons];
+                                      newIcons[idx].iconColor = e.target.value;
+                                      return { ...prev, social: { ...prev.social, icons: newIcons } };
+                                    });
+                                  }}
+                                  className="w-full h-4 bg-transparent border-none cursor-pointer rounded-lg overflow-hidden p-0"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Scroll To Top Section */}
+                <div className="glass p-6 sm:p-8 rounded-2xl border border-white/5 space-y-8">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-emerald-500/10 rounded-xl text-emerald-400">
+                        <ArrowUpCircle size={22} />
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-display text-gold tracking-tight">Scroll To Top Button</h4>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Automated navigation helper</p>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-3 cursor-pointer group bg-black/20 self-start sm:self-auto py-2 px-4 rounded-xl border border-white/5 hover:border-gold/30 transition-all">
+                      <div className={cn("w-10 h-5 rounded-full transition-all relative shrink-0", floatingSettings?.scrollTop?.active ? "bg-gold" : "bg-white/10")}>
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={floatingSettings?.scrollTop?.active || false}
+                          onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), active: e.target.checked } }))}
+                        />
+                        <div className={cn("absolute top-1 w-3 h-3 rounded-full bg-white shadow-sm transition-all", floatingSettings?.scrollTop?.active ? "right-1" : "left-1")} />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-white/60">Status</span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                    {/* Left Column: Layout & Visibility */}
+                    <div className="space-y-8">
+                      <div className="space-y-4">
+                        <label className="text-[10px] uppercase tracking-widest font-black text-gold/60 flex items-center gap-2">
+                          <Layout size={12} />
+                          Position & Threshold
+                        </label>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            onClick={() => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), position: 'right-bottom' } }))}
+                            className={cn(
+                              "py-3.5 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest shadow-sm",
+                              floatingSettings?.scrollTop?.position === 'right-bottom' ? "bg-gold text-black border-gold" : "bg-black/40 border-white/5 text-white/40 hover:border-white/20"
+                            )}
+                          >
+                            Bottom Right
+                          </button>
+                          <button
+                            onClick={() => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), position: 'left-bottom' } }))}
+                            className={cn(
+                              "py-3.5 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest shadow-sm",
+                              floatingSettings?.scrollTop?.position === 'left-bottom' ? "bg-gold text-black border-gold" : "bg-black/40 border-white/5 text-white/40 hover:border-white/20"
+                            )}
+                          >
+                            Bottom Left
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <span className="text-[9px] text-white/30 uppercase font-black tracking-widest ml-1">X-Axis Offset</span>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={floatingSettings?.scrollTop?.offsetX || 24}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), offsetX: Number(e.target.value) } }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-gold outline-none focus:border-gold/50 transition-all font-mono"
+                              />
+                              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-white/20 font-mono">PX</span>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <span className="text-[9px] text-white/30 uppercase font-black tracking-widest ml-1">Y-Axis Offset</span>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={floatingSettings?.scrollTop?.offsetY || 24}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), offsetY: Number(e.target.value) } }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-gold outline-none focus:border-gold/50 transition-all font-mono"
+                              />
+                              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-white/20 font-mono">PX</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-2">
+                          <div className="flex justify-between items-center mb-4">
+                            <span className="text-[9px] text-white/30 uppercase font-black tracking-widest ml-1">Show after scroll of</span>
+                            <span className="text-xs font-mono text-gold bg-gold/10 px-2 py-0.5 rounded-lg border border-gold/20">{floatingSettings?.scrollTop?.offset || 300}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="100"
+                            max="2000"
+                            step="50"
+                            value={floatingSettings?.scrollTop?.offset || 300}
+                            onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), offset: Number(e.target.value) } }))}
+                            className="w-full accent-gold h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer"
+                            style={{ '--value': `${(((floatingSettings?.scrollTop?.offset || 300) - 100) / (2000 - 100)) * 100}%` } as React.CSSProperties}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-5 bg-black/20 rounded-2xl border border-white/5 space-y-4">
+                        <label className="text-[10px] uppercase tracking-widest font-black text-gold/60 flex items-center gap-2">
+                          <Eye size={12} />
+                          Page Visibility Rules
+                        </label>
+                        <div className="space-y-4">
+                          <select
+                            value={floatingSettings?.scrollTop?.displayCondition || 'all'}
+                            onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), displayCondition: e.target.value } }))}
+                            className="custom-select w-full"
+                          >
+                            <option value="all">Show Everywhere</option>
+                            <option value="landing">Home Page Only</option>
+                            <option value="specific">Specific Pages Only</option>
+                            <option value="except">Except Specific Pages</option>
+                          </select>
+
+                          {floatingSettings?.scrollTop?.displayCondition === 'specific' && (
+                            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                              <input
+                                type="text"
+                                value={floatingSettings?.scrollTop?.specificPages?.join(', ') || ''}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), specificPages: e.target.value.split(',').map(s => s.trim()) } }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3.5 text-xs text-white placeholder:text-white/20 outline-none focus:border-gold/50"
+                                placeholder="/fleet, /offers, /pricing"
+                              />
+                            </div>
+                          )}
+
+                          {floatingSettings?.scrollTop?.displayCondition === 'except' && (
+                            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                              <input
+                                type="text"
+                                value={floatingSettings?.scrollTop?.exceptPages?.join(', ') || ''}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), exceptPages: e.target.value.split(',').map(s => s.trim()) } }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3.5 text-xs text-white placeholder:text-white/20 outline-none focus:border-gold/50"
+                                placeholder="/checkout, /payment"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right Column: Style & Customization */}
+                    <div className="space-y-6">
+                      <div className="p-6 bg-black/20 rounded-2xl border border-white/5 space-y-6">
+                        <label className="text-[10px] uppercase tracking-widest font-black text-gold/60 flex items-center gap-2">
+                          <Palette size={12} />
+                          Style & Appearance
+                        </label>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <span className="text-[9px] text-white/20 uppercase font-bold tracking-widest ml-1">Shape</span>
+                              <select
+                                value={floatingSettings?.scrollTop?.shape || 'circle'}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), shape: e.target.value } }))}
+                                className="custom-select w-full"
+                              >
+                                <option value="circle">Circle</option>
+                                <option value="square">Sharp Square</option>
+                                <option value="rounded">Modern Rounded</option>
+                                <option value="pulse">Pulse Glow Effect</option>
+                              </select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <span className="text-[9px] text-white/20 uppercase font-bold tracking-widest ml-1">Icon Style</span>
+                              <select
+                                value={floatingSettings?.scrollTop?.icon || 'arrow-up'}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), icon: e.target.value } }))}
+                                className="custom-select w-full"
+                              >
+                                <option value="arrow-up">Arrow Simple</option>
+                                <option value="chevron-up">Chevron Minimal</option>
+                                <option value="arrow-up-circle">Circle Arrow</option>
+                                <option value="move-up">Move Up Accent</option>
+                                <option value="rocket">Rocket Launcher</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center px-1">
+                                <span className="text-[9px] text-white/20 uppercase font-bold tracking-widest">Button Sizing</span>
+                                <span className="text-[10px] font-mono text-gold">{floatingSettings?.scrollTop?.padding || 12}px</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="4"
+                                max="40"
+                                value={floatingSettings?.scrollTop?.padding || 12}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), padding: parseInt(e.target.value) } }))}
+                                className="w-full accent-gold h-1 bg-white/5 rounded-full appearance-none cursor-pointer"
+                                style={{ '--value': `${(((floatingSettings?.scrollTop?.padding || 12) - 4) / (40 - 4)) * 100}%` } as React.CSSProperties}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center px-1">
+                                <span className="text-[9px] text-white/20 uppercase font-bold tracking-widest">Icon Scale</span>
+                                <span className="text-[10px] font-mono text-gold">{floatingSettings?.scrollTop?.iconSize || 20}px</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="12"
+                                max="64"
+                                value={floatingSettings?.scrollTop?.iconSize || 20}
+                                onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), iconSize: parseInt(e.target.value) } }))}
+                                className="w-full accent-gold h-1 bg-white/5 rounded-full appearance-none cursor-pointer"
+                                style={{ '--value': `${(((floatingSettings?.scrollTop?.iconSize || 20) - 12) / (64 - 12)) * 100}%` } as React.CSSProperties}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-white/5 space-y-6">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                              <span className="text-[9px] text-white/20 uppercase font-bold tracking-widest block ml-1">Background style</span>
+                              <div className="space-y-3">
+                                <select
+                                  value={floatingSettings?.scrollTop?.bgType || 'solid'}
+                                  onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), bgType: e.target.value } }))}
+                                  className="custom-select w-full"
+                                >
+                                  <option value="solid">Flat Color</option>
+                                  <option value="gradient">Premium Gradient</option>
+                                </select>
+
+                                {floatingSettings?.scrollTop?.bgType === 'gradient' ? (
+                                  <input
+                                    type="text"
+                                    value={floatingSettings?.scrollTop?.bgGradient || 'linear-gradient(45deg, #D4AF37, #F1D483)'}
+                                    onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), bgGradient: e.target.value } }))}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-mono text-gold outline-none focus:border-gold/50"
+                                  />
+                                ) : (
+                                  <div className="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                                    <input
+                                      type="color"
+                                      value={floatingSettings?.scrollTop?.color || '#D4AF37'}
+                                      onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), color: e.target.value } }))}
+                                      className="w-10 h-10 rounded-lg overflow-hidden bg-transparent border-none cursor-pointer"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={floatingSettings?.scrollTop?.color || '#D4AF37'}
+                                      onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), color: e.target.value } }))}
+                                      className="flex-1 bg-transparent text-[10px] font-mono text-gold outline-none"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-4">
+                              <span className="text-[9px] text-white/20 uppercase font-bold tracking-widest block ml-1">Icon Color</span>
+                              <div className="flex items-center gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+                                <input
+                                  type="color"
+                                  value={floatingSettings?.scrollTop?.iconColor || '#000000'}
+                                  onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), iconColor: e.target.value } }))}
+                                  className="w-10 h-10 rounded-lg overflow-hidden bg-transparent border-none cursor-pointer"
+                                />
+                                <input
+                                  type="text"
+                                  value={floatingSettings?.scrollTop?.iconColor || '#000000'}
+                                  onChange={(e) => setFloatingSettings((prev: any) => ({ ...prev, scrollTop: { ...(prev?.scrollTop || {}), iconColor: e.target.value } }))}
+                                  className="flex-1 bg-transparent text-[10px] font-mono text-gold outline-none"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Promo Bars Area */}
+                <div className="space-y-8">
+                  {/* Header */}
+                  <div className="flex flex-col md:flex-row items-center md:justify-between group transition-all">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3 px-2">
+                        <div className="w-1.5 h-8 bg-gold/50 rounded-full shadow-[0_0_10px_rgba(212,175,55,0.3)]" />
+                        <div>
+                          <h4 className="text-xl font-display text-white tracking-tight">Promo Bars</h4>
+                          <p className="text-[9px] uppercase tracking-[0.2em] font-black text-gold">
+                            Create a new floating bar for sales or news
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bars Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {(floatingSettings?.bars || []).map((bar: any, bIdx: number) => {
+                      const today = new Date().toISOString().split('T')[0];
+                      const isExpired = bar.endDate && bar.endDate < today;
+                      const isUpcoming = bar.startDate && bar.startDate > today;
+                      const isWithinDate = (!bar.startDate || bar.startDate <= today) && (!bar.endDate || bar.endDate >= today);
+
+                      return (
+                        <div key={bar.id || bIdx} className="glass p-6 rounded-2xl border border-white/5 space-y-4 relative group hover:border-gold/20 transition-all">
+                          <div className="flex justify-between items-start w-full">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-sm font-display text-white group-hover:text-gold transition-colors">
+                                  {bar.name || `Bar #${bIdx + 1}`}
+                                </h4>
+                                {bar.active && isWithinDate && (
+                                  <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[8px] font-black uppercase rounded border border-emerald-500/20">
+                                    <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                                    Live
+                                  </span>
+                                )}
+                                {!bar.active && (
+                                  <span className="px-1.5 py-0.5 bg-white/5 text-white/30 text-[8px] font-black uppercase rounded border border-white/10">
+                                    Inactive
+                                  </span>
+                                )}
+                                {bar.active && isExpired && (
+                                  <span className="px-1.5 py-0.5 bg-red-500/10 text-red-400 text-[8px] font-black uppercase rounded border border-red-500/20">
+                                    Expired
+                                  </span>
+                                )}
+                                {bar.active && isUpcoming && (
+                                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase rounded border border-blue-500/20">
+                                    Scheduled
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-white/40 line-clamp-1 max-w-[200px]">
+                                {bar.content?.replace(/<[^>]*>?/gm, '')}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingBarIndex(bIdx);
+                                  setShowBarModal(true);
+                                }}
+                                className="p-1.5 bg-white/5 hover:bg-blue-500/10 text-white/40 hover:text-blue-500 rounded transition-all"
+                                title="Edit Bar"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const duplicated = {
+                                    ...bar,
+                                    id: `bar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                                    name: `${bar.name || 'Bar'} (Copy)`
+                                  };
+                                  setFloatingSettings((prev: any) => {
+                                    const newBars = [...(prev.bars || [])];
+                                    newBars.splice(bIdx + 1, 0, duplicated);
+                                    return { ...prev, bars: newBars };
+                                  });
+                                }}
+                                className="p-1.5 bg-white/5 hover:bg-gold/10 text-white/40 hover:text-gold rounded transition-all"
+                                title="Duplicate"
+                              >
+                                <Copy size={14} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setFloatingSettings((prev: any) => ({
+                                    ...prev,
+                                    bars: (prev.bars || []).filter((_: any, i: number) => i !== bIdx)
+                                  }));
+                                }}
+                                className="p-1.5 bg-white/5 hover:bg-red-500/10 text-white/40 hover:text-red-500 rounded transition-all"
+                                title="Delete"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-3 pt-3 mt-2 border-t border-white/5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: bar.bgType === 'gradient' ? '#D4AF37' : (bar.bgColor || '#D4AF37') }} />
+                                  <span className="text-[9px] uppercase tracking-wider text-white/40 font-bold">{bar.bgType || 'solid'}</span>
+                                </div>
+                                <div className="text-[9px] text-white/30 font-bold uppercase tracking-widest">
+                                  {bar.position === 'top' ? 'Header' : 'Footer'}
+                                </div>
+                              </div>
+
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <span className="text-[9px] uppercase font-bold text-white/20 tracking-widest">Enabled</span>
+                                <div className={cn("w-8 h-4 rounded-full transition-all relative", bar.active ? "bg-emerald-500" : "bg-white/10")}>
+                                  <input
+                                    type="checkbox"
+                                    className="hidden"
+                                    checked={bar.active || false}
+                                    onChange={(e) => {
+                                      setFloatingSettings((prev: any) => {
+                                        const newBars = [...(prev.bars || [])];
+                                        newBars[bIdx].active = e.target.checked;
+                                        return { ...prev, bars: newBars };
+                                      });
+                                    }}
+                                  />
+                                  <div className={cn("absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm", bar.active ? "right-0.5" : "left-0.5")} />
+                                </div>
+                              </label>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[9px] text-white/30 font-bold uppercase tracking-widest bg-black/20 p-2 rounded-lg border border-white/5">
+                              <div className="flex items-center gap-1.5" title="Visibility Rule">
+                                <Eye size={10} className="text-white/40" />
+                                {bar.displayCondition === 'all' ? 'Everywhere' : bar.displayCondition === 'landing' ? 'Home' : bar.displayCondition === 'specific' ? 'Specific Pages' : 'Excluded Pages'}
+                              </div>
+                              <div className="flex items-center gap-1.5" title="Available Dates">
+                                <Calendar size={10} className="text-white/40" />
+                                {(!bar.startDate && !bar.endDate) ? 'Always Available' : `${bar.startDate || 'Any'} to ${bar.endDate || 'Any'}`}
+                              </div>
+                              <div className="flex items-center gap-1.5" title="Display Timing">
+                                <Clock size={10} className="text-white/40" />
+                                Wait <span className="text-gold">{bar.delay || 0}ms</span>
+                                {bar.autoCloseTime > 0 && <span className="text-white/20 mx-1">•</span>}
+                                {bar.autoCloseTime > 0 && <span>Close <span className="text-gold">{bar.autoCloseTime}s</span></span>}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <button
+                      onClick={() => {
+                        const newBar = {
+                          id: `bar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                          name: "New Promo Bar",
+                          active: true,
+                          content: "New Promo Bar",
+                          promoCode: "",
+                          bgColor: "#D4AF37",
+                          bgType: "solid",
+                          bgGradient: "linear-gradient(90deg, #D4AF37, #F1D483)",
+                          textColor: "#000000",
+                          promoColor: "#000000",
+                          promoBg: "rgba(0,0,0,0.1)",
+                          closeColor: "#000000",
+                          position: "top",
+                          showClose: true,
+                          animation: "marquee",
+                          marqueeSpeed: 20,
+                          delay: 0,
+                          autoCloseTime: 0,
+                          startDate: "",
+                          endDate: "",
+                          displayCondition: "all",
+                          specificPages: [],
+                          exceptPages: [],
+                          ctaText: "",
+                          ctaLink: ""
+                        };
+                        setFloatingSettings((prev: any) => ({
+                          ...prev,
+                          bars: [...(prev.bars || []), newBar]
+                        }));
+                        setEditingBarIndex((floatingSettings?.bars || []).length);
+                        setShowBarModal(true);
+                      }}
+                      className="glass p-6 rounded-2xl border-2 border-dashed border-white/20 hover:border-gold hover:bg-gold/5 flex flex-col items-center justify-center gap-3 transition-all min-h-[140px] h-full w-full text-white/50 hover:text-gold group cursor-pointer"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-white/5 group-hover:bg-gold/20 flex items-center justify-center transition-colors">
+                        <Plus size={24} />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-widest">Add Promo Bar</span>
+                    </button>
+                  </div>
+
+                  {/* Popups Management Header */}
+                  <div className="flex flex-col md:flex-row md:items-center md:gap-6 px-2 pt-8">
+                    {/* Info Block */}
+                    <div className="flex items-center gap-4 mb-4 md:mb-0">
+                      <div className="w-1.5 h-8 bg-gold/50 rounded-full shadow-[0_0_10px_rgba(212,175,55,0.3)]" />
+                      <div>
+                        <h4 className="text-xl font-display text-white tracking-tight">
+                          Floating Popups
+                        </h4>
+                        <p className="text-[9px] uppercase tracking-[0.2em] font-black text-gold/40">
+                          Targeted popups for sales, offers or news
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Popups Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {(floatingSettings?.popups || []).map((popup: any, pIdx: number) => {
+                      const today = new Date().toISOString().split('T')[0];
+                      const isExpired = popup.endDate && popup.endDate < today;
+                      const isWithinDate = (!popup.startDate || popup.startDate <= today) && (!popup.endDate || popup.endDate >= today);
+
+                      return (
+                        <div key={popup.id} className="glass p-6 rounded-2xl border border-white/5 space-y-4 relative group hover:border-gold/20 transition-all">
+                          <div className="flex justify-between items-start w-full">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-sm font-display text-white group-hover:text-gold transition-colors">
+                                  {popup.name || `Popup #${pIdx + 1}`}
+                                </h4>
+                                {popup.active && isWithinDate && (
+                                  <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[8px] font-black uppercase rounded border border-emerald-500/20">
+                                    <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                                    Live
+                                  </span>
+                                )}
+                                {popup.active && isExpired && (
+                                  <span className="px-1.5 py-0.5 bg-red-500/10 text-red-400 text-[8px] font-black uppercase rounded border border-red-500/20">
+                                    Expired
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-white/40 uppercase tracking-widest font-black">
+                                Type: {popup.type} • {popup.position}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => { setEditingPopupIndex(pIdx); setShowPopupModal(true); }}
+                                className="p-1.5 bg-white/5 hover:bg-blue-500/10 text-white/40 hover:text-blue-500 rounded transition-all"
+                                title="Edit Popup"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const clonedPopup = {
+                                    ...popup,
+                                    id: Math.random().toString(36).substr(2, 9),
+                                    name: `${popup.name || 'Popup'} (Copy)`,
+                                    active: false
+                                  };
+                                  setFloatingSettings((prev: any) => ({
+                                    ...prev,
+                                    popups: [...(prev.popups || []), clonedPopup]
+                                  }));
+                                }}
+                                className="p-1.5 bg-white/5 hover:bg-gold/10 text-white/40 hover:text-gold rounded transition-all"
+                                title="Duplicate Popup"
+                              >
+                                <Copy size={14} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setFloatingSettings((prev: any) => ({
+                                    ...prev,
+                                    popups: (prev.popups || []).filter((_: any, i: number) => i !== pIdx)
+                                  }));
+                                }}
+                                className="p-1.5 bg-white/5 hover:bg-red-500/10 text-white/40 hover:text-red-500 rounded transition-all"
+                                title="Delete Popup"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-3 pt-3 mt-2 border-t border-white/5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className="text-[9px] text-white/30 font-bold uppercase tracking-widest">
+                                  Animation: {popup.animation}
+                                </div>
+                              </div>
+
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <span className="text-[9px] uppercase font-bold text-white/20 tracking-widest">Enabled</span>
+                                <div className={cn("w-8 h-4 rounded-full transition-all relative", popup.active ? "bg-gold" : "bg-white/10")}>
+                                  <input
+                                    type="checkbox"
+                                    className="hidden"
+                                    checked={popup.active || false}
+                                    onChange={(e) => {
+                                      setFloatingSettings((prev: any) => {
+                                        const newPopups = [...(prev.popups || [])];
+                                        newPopups[pIdx].active = e.target.checked;
+                                        return { ...prev, popups: newPopups };
+                                      });
+                                    }}
+                                  />
+                                  <div className={cn("absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm", popup.active ? "right-0.5" : "left-0.5")} />
+                                </div>
+                              </label>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[9px] text-white/30 font-bold uppercase tracking-widest bg-black/20 p-2 rounded-lg border border-white/5">
+                              <div className="flex items-center gap-1.5" title="Visibility Rule">
+                                <Eye size={10} className="text-white/40" />
+                                {popup.displayCondition === 'all' ? 'Everywhere' : popup.displayCondition === 'landing' ? 'Home' : popup.displayCondition === 'specific' ? 'Specific Pages' : 'Excluded Pages'}
+                              </div>
+                              <div className="flex items-center gap-1.5" title="Available Dates">
+                                <Calendar size={10} className="text-white/40" />
+                                {(!popup.startDate && !popup.endDate) ? 'Always Available' : `${popup.startDate || 'Any'} to ${popup.endDate || 'Any'}`}
+                              </div>
+                              <div className="flex items-center gap-1.5" title="Display Timing">
+                                <Clock size={10} className="text-white/40" />
+                                Wait <span className="text-gold">{popup.delay || 0}ms</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <button
+                      onClick={() => {
+                        const newPopup = {
+                          id: `popup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                          name: "New Promo Popup",
+                          type: "sales",
+                          active: true,
+                          title: "Summer Offer",
+                          subtitle: "Limited Time Only",
+                          details: "Get exclusive access to our luxury fleet with 15% discount.",
+                          promoCode: "SUMMER15",
+                          ctaText: "Get Offer",
+                          ctaLink: "/offers",
+                          bgType: "gradient",
+                          bgGradient: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)",
+                          textColor: "#FFFFFF",
+                          accentColor: "#D4AF37",
+                          position: "center",
+                          animation: "scale",
+                          delay: 2000,
+                          displayCondition: "all"
+                        };
+                        setFloatingSettings((prev: any) => ({
+                          ...prev,
+                          popups: [...(prev.popups || []), newPopup]
+                        }));
+                        setEditingPopupIndex((floatingSettings?.popups || []).length);
+                        setShowPopupModal(true);
+                      }}
+                      className="glass p-6 rounded-2xl border-2 border-dashed border-white/20 hover:border-gold hover:bg-gold/5 flex flex-col items-center justify-center gap-3 transition-all min-h-[140px] h-full w-full text-white/50 hover:text-gold group cursor-pointer"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-white/5 group-hover:bg-gold/20 flex items-center justify-center transition-colors">
+                        <Plus size={24} />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-widest">Add Popup</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {activeSubTab === 'media' && (
               <div className="space-y-8">
@@ -4206,10 +6189,10 @@ export default function AppDashboard() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
-                  {mediaList.map((media, idx) => (
+                  {mediaList.map((media) => (
                     <motion.div
                       layout
-                      key={`${media.id}-${idx}`}
+                      key={media.u_key || media.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="group relative bg-[#050505] rounded-xl overflow-hidden border border-white/5 hover:border-gold/30 transition-all duration-500"
@@ -4312,10 +6295,17 @@ export default function AppDashboard() {
                     <button
                       onClick={() => handleUpdateSettings(systemSettings)}
                       disabled={isSavingSettings}
-                      className="btn-primary px-6 py-2 flex items-center gap-2"
+                      className="btn-primary flex items-center justify-center gap-2 h-10 sm:h-10 px-3 sm:px-4 py-2"
                     >
-                      {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                      <span className="text-xs font-bold uppercase tracking-widest">Save Changes</span>
+                      {isSavingSettings ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Save size={18} />
+                      )}
+                      {/* Hide text on mobile, show on sm+ */}
+                      <span className="hidden sm:inline text-xs font-bold uppercase tracking-widest">
+                        Save Changes
+                      </span>
                     </button>
                   </div>
 
@@ -4790,7 +6780,9 @@ export default function AppDashboard() {
                 <div className="space-y-6">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                      <h3 className="text-2xl font-display text-gold">Offers Management</h3>
+                      <h3 className="text-2xl font-display text-gold flex items-center gap-3">
+                        Offers Management
+                      </h3>
                       <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage special fixed-rate deals</p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -4819,7 +6811,7 @@ export default function AppDashboard() {
                           });
                           setShowOfferModal(true);
                         }}
-                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                        className="bg-gold text-black hover:bg-gold/80 px-6 py-2 rounded-xl flex items-center gap-2 transition-all"
                       >
                         <Plus size={18} />
                         <span className="text-xs font-bold uppercase tracking-widest">Add Offer</span>
@@ -4827,50 +6819,141 @@ export default function AppDashboard() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
-                    <div className="relative flex-1 w-full sm:max-w-sm">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
-                      <input
-                        type="text"
-                        placeholder="Search standard and special offers..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-gold/50 transition-all font-mono"
-                      />
-                      {searchQuery && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex flex-1 items-center gap-4">
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10 shrink-0">
                         <button
-                          onClick={() => setSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors"
+                          type="button"
+                          onClick={() => {
+                            setIsOffersSelectionMode(false);
+                            setSelectedOffers([]);
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                            !isOffersSelectionMode ? "bg-white/10 text-white" : "text-white/40 hover:text-white"
+                          )}
+                          title="None (Selection Mode OFF)"
                         >
-                          <XCircle size={16} />
+                          <CircleX size={14} />
+                          <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">None</span>
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsOffersSelectionMode(true);
+                            if (selectedOffers.length === filteredOffers.length) {
+                              setSelectedOffers([]);
+                            }
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                            isOffersSelectionMode && selectedOffers.length < filteredOffers.length ? "bg-gold text-black" : "text-white/40 hover:text-white"
+                          )}
+                          title="Selection Mode ON"
+                        >
+                          <Check size={14} />
+                          <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">Select</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsOffersSelectionMode(true);
+                            setSelectedOffers(filteredOffers.map((o: any) => o.id));
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                            isOffersSelectionMode && selectedOffers.length === filteredOffers.length && filteredOffers.length > 0 ? "bg-gold text-black" : "text-white/40 hover:text-white"
+                          )}
+                          title="Select All"
+                        >
+                          <CheckCheck size={14} />
+                          <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">All</span>
+                        </button>
+                      </div>
+
+                      <div className="relative flex-1 w-full sm:max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
+                        <input
+                          type="text"
+                          placeholder="Search standard and special offers..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-black/40 border border-white/15 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-gold/50 transition-all"
+                        />
+                        {searchQuery && (
+                          <button
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors"
+                          >
+                            <XCircle size={14} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 bg-black/40 p-1.5 rounded-xl border border-white/10 shrink-0">
-                      <button
-                        onClick={() => setOfferViewMode('grid')}
-                        className={cn(
-                          "p-2 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
-                          offerViewMode === 'grid'
-                            ? "bg-gold text-black shadow-lg"
-                            : "text-white/40 hover:text-white hover:bg-white/5"
-                        )}
-                        title="Grid View"
-                      >
-                        <LayoutGrid size={18} />
-                      </button>
-                      <button
-                        onClick={() => setOfferViewMode('list')}
-                        className={cn(
-                          "p-2 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
-                          offerViewMode === 'list'
-                            ? "bg-gold text-black shadow-lg"
-                            : "text-white/40 hover:text-white hover:bg-white/5"
-                        )}
-                        title="List View"
-                      >
-                        <List size={18} />
-                      </button>
+
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {selectedOffers.length > 0 && (
+                        <div className="flex items-center gap-2 mr-2 animate-in fade-in zoom-in duration-200">
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-gold px-2">
+                            {selectedOffers.length} Selected
+                          </span>
+                          <button
+                            onClick={() => executeBulkUpdateOffersStatus(selectedOffers, true)}
+                            className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
+                            title="Activate Selected"
+                          >
+                            <CheckCircle size={16} />
+                          </button>
+                          <button
+                            onClick={() => executeBulkUpdateOffersStatus(selectedOffers, false)}
+                            className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white transition-all"
+                            title="Deactivate Selected"
+                          >
+                            <Ban size={16} />
+                          </button>
+                          <button
+                            onClick={handleBulkDuplicateOffers}
+                            className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                            title="Duplicate Selected"
+                          >
+                            <Copy size={16} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete({ type: 'bulk-offers', ids: selectedOffers })}
+                            className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                            title="Delete Selected"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10">
+                        <button
+                          onClick={() => setOfferViewMode('grid')}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
+                            offerViewMode === 'grid'
+                              ? "bg-gold text-black shadow-lg"
+                              : "text-white/40 hover:text-white hover:bg-white/5"
+                          )}
+                          title="Grid View"
+                        >
+                          <LayoutGrid size={14} />
+                        </button>
+                        <button
+                          onClick={() => setOfferViewMode('list')}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
+                            offerViewMode === 'list'
+                              ? "bg-gold text-black shadow-lg"
+                              : "text-white/40 hover:text-white hover:bg-white/5"
+                          )}
+                          title="List View"
+                        >
+                          <List size={16} />
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -4878,27 +6961,53 @@ export default function AppDashboard() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {filteredOffers.length > 0 ? (
                         filteredOffers.map((offer) => (
-                          <div key={offer.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all flex flex-col">
+                          <div key={offer.id} className={cn("glass rounded-2xl overflow-hidden border transition-all flex flex-col group relative", selectedOffers.includes(offer.id) ? "border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "border-white/5 hover:border-gold/30")}>
+
                             <div className="h-40 relative">
-                              <img src={offer.image || 'https://picsum.photos/seed/offer/600/300'} alt={offer.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                              <img
+                                src={offer.image || 'https://picsum.photos/seed/offer/600/300'}
+                                alt={offer.title}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                              />
                               <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
-                              <div className="absolute top-4 right-4 flex flex-wrap gap-2 justify-end">
-                                {offer.tags?.map((tag: string, tIdx: number) => (
-                                  <span key={`${offer.id}-tag-${tag}-${tIdx}`} className="px-2 py-1 rounded bg-gold text-black text-[7px] font-black uppercase tracking-tighter shadow-lg">
-                                    {tag}
+
+                              {/* Top bar: tags left, active badge right */}
+                              <div className="absolute top-0 left-0 right-0 z-10 flex items-start justify-between px-3 pt-2">
+
+                                {/* Left side: tags */}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className="flex flex-wrap gap-1">
+                                    {offer.tags?.map((tag: string, tIdx: number) => (
+                                      <span
+                                        key={`${offer.id}-tag-${tag}-${tIdx}`}
+                                        className="px-2 py-1 rounded bg-gold text-black text-[8px] font-black uppercase shadow-sm"
+                                      >
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Right side: Active/Inactive badge */}
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "px-3 py-1 rounded-bl-2xl text-[9px] font-black uppercase tracking-widest shadow-lg -mr-3 -mt-2",
+                                      offer.active ? "bg-green-700 text-white" : "bg-red-700 text-white"
+                                    )}
+                                  >
+                                    {offer.active ? 'Active' : 'Inactive'}
                                   </span>
-                                ))}
-                                <span className={cn(
-                                  "px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest",
-                                  offer.active ? "bg-green-500 text-white" : "bg-red-500 text-white"
-                                )}>
-                                  {offer.active ? 'Active' : 'Inactive'}
-                                </span>
+                                </div>
                               </div>
+
+                              {/* Title and price bottom-left */}
                               <div className="absolute bottom-4 left-4">
                                 <p className="text-xl font-display">{offer.title}</p>
                                 {(() => {
-                                  const prices = (offer.fleets || []).map((f: any) => Number(f.salePrice)).filter((p: number) => !isNaN(p));
+                                  const prices = (offer.fleets || [])
+                                    .map((f: any) => Number(f.salePrice))
+                                    .filter((p: number) => !isNaN(p));
                                   const min = prices.length ? Math.min(...prices) : 0;
                                   const max = prices.length ? Math.max(...prices) : 0;
                                   return (
@@ -4912,29 +7021,54 @@ export default function AppDashboard() {
                             <div className="p-4 flex-1 flex flex-col">
                               <p className="text-white/60 text-[10px] line-clamp-2 mb-4 italic">"{offer.description}"</p>
                               <div className="mt-auto flex items-center gap-2">
+                                {isOffersSelectionMode && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (selectedOffers.includes(offer.id))
+                                        setSelectedOffers((prev) => prev.filter((id) => id !== offer.id));
+                                      else
+                                        setSelectedOffers((prev) => [...prev, offer.id]);
+                                    }}
+                                    className={cn(
+                                      "flex-1 py-2 px-2 font-bold rounded-lg transition-all flex items-center justify-center gap-1",
+                                      selectedOffers.includes(offer.id) ? "bg-gold text-black" : "bg-white/5 text-white/40 hover:bg-white/10"
+                                    )}
+                                    title={selectedOffers.includes(offer.id) ? "Deselect" : "Select"}
+                                  >
+                                    {selectedOffers.includes(offer.id) ? <SquareCheck size={16} /> : <Square size={16} />}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleToggleOfferStatus(offer.id, offer.active); }}
+                                  className={cn("flex-1 py-2 px-2 font-bold rounded-lg transition-all flex items-center justify-center gap-1", offer.active ? "bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white" : "bg-green-500/10 text-green-500 hover:bg-green-500/50 hover:text-white")}
+                                  title={offer.active ? "Deactivate" : "Activate"}
+                                >
+                                  {offer.active ? <Ban size={16} /> : <CheckCircle size={16} />}
+                                </button>
                                 <button
                                   onClick={() => handleDuplicateOffer(offer)}
-                                  className="flex-1 p-2 bg-white/5 text-white/40 hover:text-gold rounded-lg transition-all"
+                                  className="flex-1 py-2 px-2 bg-gold/10 text-gold hover:bg-gold/50 hover:text-white rounded-lg font-bold transition-all flex items-center justify-center gap-1"
                                   title="Duplicate"
                                 >
-                                  <Copy size={16} />
+                                  <Copy size={14} />
                                 </button>
                                 <button
                                   onClick={() => {
                                     setEditingOffer(offer);
                                     setShowOfferModal(true);
                                   }}
-                                  className="flex-1 p-2 bg-white/5 text-white/40 hover:text-white rounded-lg transition-all"
+                                  className="flex-1 py-2 px-2 bg-blue-500/10 text-blue-500 hover:bg-blue-500/50 hover:text-white font-bold rounded-lg transition-all flex items-center justify-center gap-1"
                                   title="Edit"
                                 >
-                                  <Edit2 size={16} />
+                                  <Edit2 size={14} />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteOffer(offer.id)}
-                                  className="flex-1 p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                  className="flex-1 py-2 px-2 bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white font-bold rounded-lg transition-all flex items-center justify-center gap-1"
                                   title="Delete"
                                 >
-                                  <Trash2 size={16} />
+                                  <Trash2 size={14} />
                                 </button>
                               </div>
                             </div>
@@ -4966,7 +7100,7 @@ export default function AppDashboard() {
                                 const min = prices.length ? Math.min(...prices) : 0;
                                 const max = prices.length ? Math.max(...prices) : 0;
                                 return (
-                                  <tr key={`list-offer-${offer.id}`} className="hover:bg-white/5 transition-colors group">
+                                  <tr key={`list-offer-${offer.id}`} className={cn("transition-colors group", selectedOffers.includes(offer.id) ? "bg-gold/5" : "hover:bg-white/5")}>
                                     <td className="px-6 py-4">
                                       <span className={cn(
                                         "px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest",
@@ -5001,10 +7135,33 @@ export default function AppDashboard() {
                                       {min === max ? `$${min}` : `$${min} - $${max}`}
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <div className="flex items-center gap-2 justify-end transition-opacity">
+                                        {isOffersSelectionMode && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (selectedOffers.includes(offer.id)) setSelectedOffers(prev => prev.filter(id => id !== offer.id));
+                                              else setSelectedOffers(prev => [...prev, offer.id]);
+                                            }}
+                                            className={cn(
+                                              "p-2 rounded-lg transition-all border",
+                                              selectedOffers.includes(offer.id) ? "bg-gold text-black border-gold" : "bg-white/5 text-white/40 hover:text-white border-white/10"
+                                            )}
+                                            title={selectedOffers.includes(offer.id) ? "Deselect" : "Select"}
+                                          >
+                                            {selectedOffers.includes(offer.id) ? <SquareCheck size={14} /> : <Square size={14} />}
+                                          </button>
+                                        )}
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleToggleOfferStatus(offer.id, offer.active); }}
+                                          className={cn("p-2 rounded-lg transition-all border", offer.active ? "bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white border-red-500/20" : "bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white border-green-500/20")}
+                                          title={offer.active ? "Deactivate" : "Activate"}
+                                        >
+                                          {offer.active ? <Ban size={14} /> : <CheckCircle size={14} />}
+                                        </button>
                                         <button
                                           onClick={() => handleDuplicateOffer(offer)}
-                                          className="p-2 bg-white/5 text-white/40 hover:text-gold rounded-lg transition-all"
+                                          className="p-2 bg-gold/10 text-gold border border-gold/20 hover:bg-gold hover:text-black rounded-lg transition-all"
                                           title="Duplicate"
                                         >
                                           <Copy size={14} />
@@ -5014,14 +7171,14 @@ export default function AppDashboard() {
                                             setEditingOffer(offer);
                                             setShowOfferModal(true);
                                           }}
-                                          className="p-2 bg-white/5 text-white/40 hover:text-white rounded-lg transition-all"
+                                          className="p-2 bg-blue-600/10 text-blue-500 border border-blue-500/20 hover:bg-blue-600 hover:text-white rounded-lg transition-all"
                                           title="Edit"
                                         >
                                           <Edit2 size={14} />
                                         </button>
                                         <button
                                           onClick={() => handleDeleteOffer(offer.id)}
-                                          className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                                          className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20"
                                           title="Delete"
                                         >
                                           <Trash2 size={14} />
@@ -5049,7 +7206,9 @@ export default function AppDashboard() {
                 <div className="space-y-6 pt-12 border-t border-white/5">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                      <h3 className="text-2xl font-display text-gold">Tours Management</h3>
+                      <h3 className="text-2xl font-display text-gold flex items-center gap-3">
+                        Tours Management
+                      </h3>
                       <p className="text-white/40 text-[10px] uppercase tracking-widest">Manage luxury private tours</p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -5068,7 +7227,7 @@ export default function AppDashboard() {
                           setEditingTour({ title: '', description: '', price: 0, image: '', active: true, slug: '', duration: '', capacity: 0, locations: [] });
                           setShowTourModal(true);
                         }}
-                        className="btn-primary px-6 py-2 flex items-center gap-2"
+                        className="bg-gold text-black hover:bg-gold/80 px-6 py-2 rounded-xl flex items-center gap-2 transition-all"
                       >
                         <Plus size={18} />
                         <span className="text-xs font-bold uppercase tracking-widest">Add Tour</span>
@@ -5076,65 +7235,402 @@ export default function AppDashboard() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {tours.length > 0 ? (
-                      tours.map((tour) => (
-                        <div key={tour.id} className="glass rounded-2xl overflow-hidden border border-white/5 group hover:border-gold/30 transition-all flex flex-col">
-                          <div className="h-40 relative">
-                            <img src={tour.image || 'https://picsum.photos/seed/tour/600/300'} alt={tour.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
-                            <div className="absolute top-4 right-4 flex gap-2">
-                              {tour.active ? (
-                                <span className="bg-green-500 text-white px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest">Active</span>
-                              ) : (
-                                <span className="bg-red-500 text-white px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest">Inactive</span>
-                              )}
-                            </div>
-                            <div className="absolute bottom-4 left-4">
-                              <p className="text-xl font-display">{tour.title}</p>
-                              <div className="flex items-center gap-3 text-[10px] text-white/60 uppercase tracking-widest font-bold">
-                                <span className="flex items-center gap-1"><Clock size={10} /> {tour.duration}</span>
-                                <span className="flex items-center gap-1 font-display text-gold font-normal">From ${tour.price}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex flex-1 items-center gap-4">
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsToursSelectionMode(false);
+                            setSelectedTours([]);
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                            !isToursSelectionMode ? "bg-white/10 text-white" : "text-white/40 hover:text-white"
+                          )}
+                          title="None (Selection Mode OFF)"
+                        >
+                          <CircleX size={14} />
+                          <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">None</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsToursSelectionMode(true);
+                            if (selectedTours.length === filteredTours.length) {
+                              setSelectedTours([]);
+                            }
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                            isToursSelectionMode && selectedTours.length < filteredTours.length ? "bg-gold text-black" : "text-white/40 hover:text-white"
+                          )}
+                          title="Selection Mode ON"
+                        >
+                          <Check size={14} />
+                          <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">Select</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsToursSelectionMode(true);
+                            setSelectedTours(filteredTours.map((t: any) => t.id));
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg transition-all flex items-center gap-2",
+                            isToursSelectionMode && selectedTours.length === filteredTours.length && filteredTours.length > 0 ? "bg-gold text-black" : "text-white/40 hover:text-white"
+                          )}
+                          title="Select All"
+                        >
+                          <CheckCheck size={14} />
+                          <span className="hidden md:inline text-[10px] uppercase font-black tracking-widest">All</span>
+                        </button>
+                      </div>
+
+                      <div className="relative flex-1 w-full sm:max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
+                        <input
+                          type="text"
+                          placeholder="Search luxury tours..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-black/40 border border-white/15 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-gold/50 transition-all"
+                        />
+                        {searchQuery && (
+                          <button
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors"
+                          >
+                            <XCircle size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {selectedTours.length > 0 && (
+                        <div className="flex items-center gap-2 mr-2 animate-in fade-in zoom-in duration-200">
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-gold px-2">
+                            {selectedTours.length} Selected
+                          </span>
+                          <button
+                            onClick={() => executeBulkUpdateToursStatus(selectedTours, true)}
+                            className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
+                            title="Activate Selected"
+                          >
+                            <CheckCircle size={16} />
+                          </button>
+                          <button
+                            onClick={() => executeBulkUpdateToursStatus(selectedTours, false)}
+                            className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white transition-all"
+                            title="Deactivate Selected"
+                          >
+                            <Ban size={16} />
+                          </button>
+                          <button
+                            onClick={handleBulkDuplicateTours}
+                            className="p-2 bg-white/5 text-gold rounded-lg hover:bg-gold hover:text-black transition-all"
+                            title="Duplicate Selected"
+                          >
+                            <Copy size={16} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete({ type: 'bulk-tours', ids: selectedTours })}
+                            className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
+                            title="Delete Selected"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10">
+                        <button
+                          onClick={() => setToursLayout('grid')}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
+                            toursLayout === 'grid'
+                              ? "bg-gold text-black shadow-lg"
+                              : "text-white/40 hover:text-white hover:bg-white/5"
+                          )}
+                          title="Grid View"
+                        >
+                          <LayoutGrid size={14} />
+                        </button>
+                        <button
+                          onClick={() => setToursLayout('list')}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all flex items-center justify-center min-w-[40px]",
+                            toursLayout === 'list'
+                              ? "bg-gold text-black shadow-lg"
+                              : "text-white/40 hover:text-white hover:bg-white/5"
+                          )}
+                          title="List View"
+                        >
+                          <List size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {toursLayout === 'grid' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {filteredTours.length > 0 ? (
+                        filteredTours.map((tour) => {
+                          let isActive = tour.active;
+                          if (tour.availability?.endDate) {
+                            const endDate = new Date(tour.availability.endDate);
+                            if (endDate < new Date(new Date().setHours(0, 0, 0, 0))) {
+                              isActive = false;
+                            }
+                          }
+
+                          // Calculate price range
+                          const prices = tour.fleets?.map((f: any) => Number(f.salePrice || f.standardPrice || f.price || 0)).filter((p: number) => p > 0) || [];
+                          const minPrice = prices.length > 0 ? Math.min(...prices) : tour.price || 0;
+                          const maxPrice = prices.length > 0 ? Math.max(...prices) : tour.price || 0;
+                          const priceDisplay = prices.length > 0 && minPrice !== maxPrice ? `$${minPrice} - $${maxPrice}` : `$${minPrice}`;
+
+                          return (
+                            <div key={tour.id} className={cn("glass rounded-2xl overflow-hidden border transition-all flex flex-col group relative", selectedTours.includes(tour.id) ? "border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "border-white/5 hover:border-gold/30")}>
+                              <div className="relative h-40 group rounded overflow-hidden shadow-lg">
+                                {/* Background image */}
+                                <img
+                                  src={tour.image || "https://picsum.photos/seed/tour/600/300"}
+                                  alt={tour.title}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent backdrop-blur-[1px]" />
+
+                                {/* Top-left: promo tag */}
+                                <div className="absolute top-2 left-3 z-10 flex items-center gap-2 flex-wrap">
+                                  {tour.promoTag && (
+                                    <span className="px-2 py-1 rounded bg-gold text-black text-[8px] font-black uppercase shadow-sm">
+                                      {tour.promoTag}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Top-right: Active/Inactive badge */}
+                                <div className="absolute top-0 right-0 z-20 flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "px-3 py-1 rounded-bl-2xl text-[9px] font-black uppercase tracking-widest shadow-lg",
+                                      isActive ? "bg-green-700 text-white" : "bg-red-700 text-white"
+                                    )}
+                                  >
+                                    {isActive ? "Active" : !tour.active ? "Inactive" : "Expired"}
+                                  </span>
+                                </div>
+
+                                {/* Bottom-left: Title + duration + price */}
+                                <div className="absolute bottom-4 left-4 right-4">
+                                  <p className="text-xl font-display drop-shadow-md">{tour.title}</p>
+                                  <div className="flex items-center gap-3 text-[10px] text-white/70 uppercase tracking-widest font-bold">
+                                    {tour.duration && (
+                                      <span className="flex items-center gap-1">
+                                        <Clock size={10} /> {tour.duration}
+                                      </span>
+                                    )}
+                                    {priceDisplay && (
+                                      <span className="flex items-center gap-1 font-display text-gold font-normal">
+                                        From {priceDisplay}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="p-4 flex-1 flex flex-col">
+                                <p className="text-white/60 text-[10px] line-clamp-2 mb-4 italic">"{tour.shortDescription || tour.description || 'No description available.'}"</p>
+                                <div className="mt-auto flex items-center gap-2">
+                                  {isToursSelectionMode && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (selectedTours.includes(tour.id))
+                                          setSelectedTours((prev) => prev.filter((id) => id !== tour.id));
+                                        else
+                                          setSelectedTours((prev) => [...prev, tour.id]);
+                                      }}
+                                      className={cn(
+                                        "flex-1 py-2 px-2 font-bold rounded-lg transition-all flex items-center justify-center gap-1",
+                                        selectedTours.includes(tour.id) ? "bg-gold text-black" : "bg-white/5 text-white/40 hover:bg-white/10"
+                                      )}
+                                      title={selectedTours.includes(tour.id) ? "Deselect" : "Select"}
+                                    >
+                                      {selectedTours.includes(tour.id) ? <SquareCheck size={16} /> : <Square size={16} />}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleToggleTourStatus(tour.id, tour.active); }}
+                                    className={cn("flex-1 py-2 px-2 font-bold rounded-lg transition-all flex items-center justify-center gap-1", tour.active ? "bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white" : "bg-green-500/10 text-green-500 hover:bg-green-500/50 hover:text-white")}
+                                    title={tour.active ? "Deactivate" : "Activate"}
+                                  >
+                                    {tour.active ? <Ban size={16} /> : <CheckCircle size={16} />}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDuplicateTour(tour)}
+                                    className="flex-1 py-2 px-2 bg-gold/10 text-gold hover:bg-gold/50 hover:text-white font-bold rounded-lg transition-all flex items-center justify-center gap-1"
+                                    title="Duplicate"
+                                  >
+                                    <Copy size={14} />
+                                  </button>
+
+                                  <button
+                                    onClick={() => {
+                                      setEditingTour(tour);
+                                      setShowTourModal(true);
+                                    }}
+                                    className="flex-1 py-2 px-2 bg-blue-600/10 text-blue-500 font-bold hover:bg-blue-500/50 hover:text-white rounded-lg transition-all flex items-center justify-center gap-1"
+                                    title="Edit"
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeleteTour(tour.id)}
+                                    className="flex-1 py-2 px-2 bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white font-bold rounded-lg transition-all flex items-center justify-center gap-1"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="p-4 flex-1 flex flex-col">
-                            <p className="text-white/60 text-[10px] line-clamp-2 mb-4 italic">"{tour.description}"</p>
-                            <div className="mt-auto flex items-center gap-2">
-                              <button
-                                onClick={() => handleDuplicateTour(tour)}
-                                className="flex-1 p-2 bg-white/5 text-white/40 hover:text-gold rounded-lg transition-all"
-                                title="Duplicate"
-                              >
-                                <Copy size={16} />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingTour(tour);
-                                  setShowTourModal(true);
-                                }}
-                                className="flex-1 p-2 bg-white/5 text-white/40 hover:text-white rounded-lg transition-all"
-                                title="Edit"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteTour(tour.id)}
-                                className="flex-1 p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                                title="Delete"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </div>
+                          )
+                        })
+                      ) : (
+                        <div className="col-span-full py-12 text-center bg-white/5 rounded-2xl border border-dashed border-white/10">
+                          <p className="text-white/40 italic">No tours found.</p>
                         </div>
-                      ))
-                    ) : (
-                      <div className="col-span-full py-12 text-center bg-white/5 rounded-2xl border border-dashed border-white/10">
-                        <p className="text-white/40 italic">No tours found.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="glass rounded-[0.5rem] border border-white/5 overflow-hidden">
+                      <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-left border-collapse min-w-[800px]">
+                          <thead>
+                            <tr className="bg-white/5 border-b border-white/5">
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold w-16">Status</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold min-w-[250px]">Tour Details</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold pt-4">Start Place</th>
+                              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gold text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                            {filteredTours.length > 0 ? (
+                              filteredTours.map((tour) => {
+                                let isActive = tour.active;
+                                if (tour.availability?.endDate) {
+                                  const endDate = new Date(tour.availability.endDate);
+                                  if (endDate < new Date(new Date().setHours(0, 0, 0, 0))) {
+                                    isActive = false;
+                                  }
+                                }
+                                const prices = tour.fleets?.map((f: any) => Number(f.salePrice || f.standardPrice || f.price || 0)).filter((p: number) => p > 0) || [];
+                                const minPrice = prices.length > 0 ? Math.min(...prices) : tour.price || 0;
+                                const maxPrice = prices.length > 0 ? Math.max(...prices) : tour.price || 0;
+                                const priceDisplay = prices.length > 0 && minPrice !== maxPrice ? `$${minPrice} - $${maxPrice}` : `$${minPrice}`;
+
+                                return (
+                                  <tr key={`list-tour-${tour.id}`} className={cn("transition-colors group", selectedTours.includes(tour.id) ? "bg-gold/5" : "hover:bg-white/5")}>
+                                    <td className="px-6 py-4">
+                                      <span className={cn(
+                                        "px-2 py-1 rounded text-[8px] font-bold uppercase tracking-widest",
+                                        isActive ? "bg-green-500 text-white" : "bg-red-500 text-white"
+                                      )}>
+                                        {isActive ? 'Active' : (!tour.active ? 'Inactive' : 'Expired')}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-3">
+                                        <img src={tour.image || 'https://picsum.photos/seed/tour/60/60'} alt={tour.title} className="w-12 h-12 rounded-lg object-cover" />
+                                        <div>
+                                          <p className="text-sm font-bold text-white mb-0.5 flex items-center gap-2">
+                                            {tour.title}
+                                            {tour.promoTag && (
+                                              <span className="bg-gold text-black px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest shadow-lg inline-block">
+                                                {tour.promoTag}
+                                              </span>
+                                            )}
+                                          </p>
+                                          <p className="text-[10px] text-white/50 line-clamp-1">"{tour.shortDescription || tour.description || 'No description available.'}"</p>
+                                          <div className="flex gap-3 mt-1 text-[9px] text-white/40 uppercase tracking-widest">
+                                            <span className="flex items-center gap-1"><Clock size={10} /> {tour.duration}</span>
+                                            <span className="flex items-center gap-1 font-display text-gold font-normal">From {priceDisplay}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm font-mono text-white/80">
+                                      {tour.startPlace || 'Not Specified'}
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="flex items-center gap-2 justify-end transition-opacity">
+                                        {isToursSelectionMode && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (selectedTours.includes(tour.id)) setSelectedTours(prev => prev.filter(id => id !== tour.id));
+                                              else setSelectedTours(prev => [...prev, tour.id]);
+                                            }}
+                                            className={cn(
+                                              "p-2 rounded-lg transition-all border",
+                                              selectedTours.includes(tour.id) ? "bg-gold text-black border-gold" : "bg-white/5 text-white/40 hover:text-white border-white/10"
+                                            )}
+                                            title={selectedTours.includes(tour.id) ? "Deselect" : "Select"}
+                                          >
+                                            {selectedTours.includes(tour.id) ? <SquareCheck size={14} /> : <Square size={14} />}
+                                          </button>
+                                        )}
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleToggleTourStatus(tour.id, tour.active); }}
+                                          className={cn("p-2 rounded-lg transition-all border", tour.active ? "bg-red-500/10 text-red-500 hover:bg-red-500/50 hover:text-white border-red-500/20" : "bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white border-green-500/20")}
+                                          title={tour.active ? "Deactivate" : "Activate"}
+                                        >
+                                          {tour.active ? <Ban size={14} /> : <CheckCircle size={14} />}
+                                        </button>
+                                        <button
+                                          onClick={() => handleDuplicateTour(tour)}
+                                          className="p-2 bg-gold/10 text-gold border border-gold/20 hover:bg-gold hover:text-black rounded-lg transition-all"
+                                          title="Duplicate"
+                                        >
+                                          <Copy size={14} />
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setEditingTour(tour);
+                                            setShowTourModal(true);
+                                          }}
+                                          className="p-2 bg-blue-600/10 text-blue-500 border border-blue-500/20 hover:bg-blue-600 hover:text-white rounded-lg transition-all"
+                                          title="Edit"
+                                        >
+                                          <Edit2 size={14} />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteTour(tour.id)}
+                                          className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-500/20"
+                                          title="Delete"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={5} className="py-12 text-center text-white/40 italic">
+                                  No tours found.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -5207,13 +7703,13 @@ export default function AppDashboard() {
                         <div className="p-6">
                           <div className="flex justify-between items-center mb-6">
                             <div className="flex gap-4">
-                              <div className="flex items-center gap-2 text-white/40">
+                              <div className="flex items-center gap-2 text-blue-600">
                                 <Users size={14} />
-                                <span className="text-xs font-bold">{v.pax}</span>
+                                <span className="text-xs font-bold text-white/40">{v.pax}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-white/40">
+                              <div className="flex items-center gap-2 text-gold">
                                 <Luggage size={14} />
-                                <span className="text-xs font-bold">{v.bags}</span>
+                                <span className="text-xs font-bold text-white/40">{v.bags}</span>
                               </div>
                             </div>
                             <div className="text-right">
@@ -6071,6 +8567,17 @@ export default function AppDashboard() {
     );
   });
 
+  const filteredTours = (tours || []).filter((t: any) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      t.title?.toLowerCase().includes(q) ||
+      t.shortDescription?.toLowerCase().includes(q) ||
+      t.description?.toLowerCase().includes(q) ||
+      t.slug?.toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="flex flex-col min-h-screen bg-black text-white overflow-hidden">
       {/* Top Navigation Bar */}
@@ -6078,7 +8585,12 @@ export default function AppDashboard() {
         <div className="p-4 lg:px-8 lg:py-4 flex flex-col gap-4">
           {/* Top Row: Logo & User Actions */}
           <div className="flex items-center justify-between">
-            <Logo className="h-8 lg:h-10" />
+            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+              {/* Heading always visible, smaller on mobile */}
+              <h1 className="text-xs sm:text-sm lg:text-base font-display font-bold tracking-[0.15em] text-white/90 text-center sm:text-left">
+                {isAdmin ? 'Admin Dashboard' : isDriver ? 'Driver Dashboard' : 'Customer Dashboard'}
+              </h1>
+            </div>
 
             <div className="flex items-center gap-4">
               <div className="relative">
@@ -6098,20 +8610,25 @@ export default function AppDashboard() {
               <div className="flex items-center gap-3 pl-4 border-l border-white/10">
                 <div className="text-right hidden sm:block">
                   <p className="text-xs font-bold">{userProfile?.name || 'User'}</p>
-                  <p className="text-[10px] text-white/40 uppercase tracking-widest">{userProfile?.role}</p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                    {userProfile?.role === 'admin' ? 'Administrator' : userProfile?.role === 'driver' ? 'Verified Driver' : 'Valued Customer'}
+                  </p>
                 </div>
-                <div className="w-9 h-9 bg-gold/10 border border-gold/20 rounded-full flex items-center justify-center">
-                  <User size={18} className="text-gold" />
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center
+                    ${isAdmin ? 'bg-red-500/10 border border-red-500/20' :
+                      isDriver ? 'bg-blue-500/10 border border-blue-500/20' :
+                        'bg-gold/10 border border-gold/20'}`}
+                >
+                  {isAdmin ? (
+                    <Shield size={18} className="text-red-600" />
+                  ) : isDriver ? (
+                    <Truck size={18} className="text-blue-600" />
+                  ) : (
+                    <User size={18} className="text-gold" />
+                  )}
                 </div>
               </div>
-
-              <button
-                onClick={handleLogout}
-                className="p-2 text-red-400 hover:text-red-600 transition-colors"
-                title="Logout"
-              >
-                <LogOut size={22} />
-              </button>
             </div>
           </div>
         </div>
@@ -6122,7 +8639,7 @@ export default function AppDashboard() {
         <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto">
           {/* Navigation Tabs - Relocated from Header */}
           <div className="w-full mb-8">
-            <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5 overflow-x-auto no-scrollbar">
+            <nav className="flex items-center w-full bg-white/5 p-1 rounded-2xl border border-white/5">
               {filteredNavItems.map((item) => (
                 <button
                   key={`top-${item.id}`}
@@ -6447,6 +8964,49 @@ export default function AppDashboard() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Pickup Location</label>
+                    <input
+                      type="text"
+                      value={editingBooking?.pickup || ''}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, pickup: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Dropoff Location</label>
+                    <input
+                      type="text"
+                      value={editingBooking?.dropoff || ''}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, dropoff: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Additional Info</label>
+                  <textarea
+                    value={editingBooking?.additionalInfo || ''}
+                    onChange={(e) => setEditingBooking({ ...editingBooking, additionalInfo: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24 resize-none"
+                    placeholder="Add any additional notes here..."
+                  />
+                </div>
+
+                {isAdmin && (
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Admin Notes</label>
+                    <textarea
+                      value={editingBooking?.adminNotes || ''}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, adminNotes: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-20 resize-none"
+                      placeholder="Private admin notes..."
+                    />
+                  </div>
+                )}
+
                 {isAdmin && (
                   <div>
                     <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Status</label>
@@ -6468,14 +9028,6 @@ export default function AppDashboard() {
                 <div className="p-4 bg-white/5 rounded-xl border border-white/5 space-y-3">
                   <p className="text-[8px] uppercase tracking-widest font-bold text-white/30">Fixed Details (View Only)</p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                    <div>
-                      <p className="text-[8px] text-white/40 uppercase font-bold">Pickup</p>
-                      <p className="text-[10px] text-white/70 truncate">{editingBooking?.pickup}</p>
-                    </div>
-                    <div>
-                      <p className="text-[8px] text-white/40 uppercase font-bold">Dropoff</p>
-                      <p className="text-[10px] text-white/70 truncate">{editingBooking?.dropoff || 'N/A'}</p>
-                    </div>
                     <div>
                       <p className="text-[8px] text-white/40 uppercase font-bold">Service</p>
                       <p className="text-[10px] text-white/70 uppercase font-bold text-gold">{editingBooking?.serviceType}</p>
@@ -6534,6 +9086,42 @@ export default function AppDashboard() {
                 {/* Fare Breakdown - Hidden for Drivers */}
                 {(!isDriver || isAdmin) && (
                   <div className="space-y-4">
+                    {/* Tour Specific Details */}
+                    {viewingBooking.type === 'tour' && (
+                      <div className="p-4 bg-cyan-500/5 rounded-2xl border border-cyan-500/20 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-[10px] uppercase tracking-widest font-bold text-cyan-400">Tour Details</h4>
+                          <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded font-bold uppercase tracking-widest">Experience</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-white/40 uppercase tracking-widest font-bold text-[9px]">Package Name</span>
+                          <span className="text-white font-bold">{viewingBooking.tourTitle || 'Custom Tour'}</span>
+                        </div>
+                        {viewingBooking.quantity > 1 && (
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-white/40 uppercase tracking-widest font-bold text-[9px]">Units / Guests</span>
+                            <span className="text-white font-bold">{viewingBooking.quantity}</span>
+                          </div>
+                        )}
+                        {viewingBooking.selectedExtras && !Array.isArray(viewingBooking.selectedExtras) && Object.keys(viewingBooking.selectedExtras).length > 0 && (
+                          <div className="pt-2 border-t border-white/5">
+                            <p className="text-[8px] uppercase tracking-widest text-cyan-400/60 font-bold mb-2">Enhancement Selection</p>
+                            <div className="space-y-1.5">
+                              {Object.entries(viewingBooking.selectedExtras).map(([id, count]) => {
+                                const tour = tours.find(t => t.id === viewingBooking.tourId);
+                                const extra = (tour?.extras || []).find((e: any) => e.id === id);
+                                return (
+                                  <div key={`view-extra-${id}`} className="flex justify-between items-center text-[10px] text-white/70 bg-white/5 p-1.5 rounded-lg">
+                                    <span>• {extra?.name || 'Extra'}</span>
+                                    <span className="text-cyan-400 font-mono font-bold">×{count as number}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
                       <h4 className="text-[10px] uppercase tracking-widest font-bold text-gold mb-2">Fare Breakdown</h4>
                       {viewingBooking.priceBreakdown ? (
@@ -7042,15 +9630,18 @@ export default function AppDashboard() {
                   </button>
                   <button
                     onClick={() => {
-                      if (confirmDelete.type === 'booking') executeDeleteBooking(confirmDelete.id);
-                      else if (confirmDelete.type === 'user') executeDeleteUser(confirmDelete.id);
-                      else if (confirmDelete.type === 'vehicle') executeDeleteVehicle(confirmDelete.id);
-                      else if (confirmDelete.type === 'coupon') executeDeleteCoupon(confirmDelete.id);
-                      else if (confirmDelete.type === 'extra') executeDeleteExtra(confirmDelete.id);
-                      else if (confirmDelete.type === 'page') executeDeletePage(confirmDelete.id);
-                      else if (confirmDelete.type === 'blog') executeDeleteBlog(confirmDelete.id);
-                      else if ((confirmDelete.type as string) === 'offer') executeDeleteOffer(confirmDelete.id);
-                      else if ((confirmDelete.type as string) === 'tour') executeDeleteTour(confirmDelete.id);
+                      if (confirmDelete.type === 'booking') executeDeleteBooking(confirmDelete.id || '');
+                      else if (confirmDelete.type === 'user') executeDeleteUser(confirmDelete.id || '');
+                      else if (confirmDelete.type === 'vehicle') executeDeleteVehicle(confirmDelete.id || '');
+                      else if (confirmDelete.type === 'coupon') executeDeleteCoupon(confirmDelete.id || '');
+                      else if (confirmDelete.type === 'extra') executeDeleteExtra(confirmDelete.id || '');
+                      else if (confirmDelete.type === 'page') executeDeletePage(confirmDelete.id || '');
+                      else if (confirmDelete.type === 'blog') executeDeleteBlog(confirmDelete.id || '');
+                      else if ((confirmDelete.type as string) === 'offer') executeDeleteOffer(confirmDelete.id || '');
+                      else if ((confirmDelete.type as string) === 'tour') executeDeleteTour(confirmDelete.id || '');
+                      else if ((confirmDelete.type as string) === 'bulk-tours') executeBulkDeleteTours(confirmDelete.ids || []);
+                      else if ((confirmDelete.type as string) === 'bulk-offers') executeBulkDeleteOffers(confirmDelete.ids || []);
+                      else if ((confirmDelete.type as string) === 'bulk-bookings') executeBulkDeleteBookings(confirmDelete.ids || []);
                     }}
                     className="flex-1 bg-red-500 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-600 transition-all"
                   >
@@ -8081,7 +10672,6 @@ export default function AppDashboard() {
                             title="Duplicate Fleet"
                           >
                             <Copy size={12} />
-                            <span className="text-[8px] font-bold uppercase tracking-widest">Duplicate</span>
                           </button>
                           <button
                             onClick={() => {
@@ -8092,7 +10682,6 @@ export default function AppDashboard() {
                             title="Delete Fleet"
                           >
                             <Trash2 size={12} />
-                            <span className="text-[8px] font-bold uppercase tracking-widest">Delete</span>
                           </button>
                         </div>
 
@@ -8129,10 +10718,10 @@ export default function AppDashboard() {
                             <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Passengers</label>
                             <input
                               type="text"
-                              value={fleet.capacity}
+                              value={fleet.passengers || ''}
                               onChange={(e) => {
                                 const newFleets = [...editingOffer.fleets];
-                                newFleets[fIdx].capacity = e.target.value;
+                                newFleets[fIdx].passengers = e.target.value;
                                 setEditingOffer({ ...editingOffer, fleets: newFleets });
                               }}
                               className="w-full bg-black/20 border-b border-white/10 px-0 py-2 text-sm outline-none focus:border-gold transition-all"
@@ -8143,7 +10732,7 @@ export default function AppDashboard() {
                             <label className="text-[9px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Luggage</label>
                             <input
                               type="text"
-                              value={fleet.luggage}
+                              value={fleet.luggage || ''}
                               onChange={(e) => {
                                 const newFleets = [...editingOffer.fleets];
                                 newFleets[fIdx].luggage = e.target.value;
@@ -8259,139 +10848,513 @@ export default function AppDashboard() {
         )}
 
         {/* Tour Modal */}
-        {showTourModal && (
+        {showTourModal && editingTour && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6"
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
+              initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="w-full max-w-xl glass p-8 rounded-xl border border-gold/20 max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-5xl glass-heavy p-0 rounded-2xl border border-gold/20 overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-display text-gold">
-                  {editingTour?.id ? 'Edit Tour' : 'Add Luxury Tour'}
-                </h3>
-                <button onClick={() => setShowTourModal(false)} className="text-white/40 hover:text-white">
+              <div className="p-6 border-b border-white/5 flex justify-between items-center bg-black/50">
+                <div>
+                  <h3 className="text-xl font-display text-gold">
+                    {editingTour.id ? 'Edit Luxury Tour' : 'Create New Collection'}
+                  </h3>
+                  <p className="text-[8px] uppercase tracking-[0.3em] text-white/30 font-bold mt-1">Refined Sightseeing Management</p>
+                </div>
+                <button onClick={() => setShowTourModal(false)} className="text-white/40 hover:text-white bg-white/5 p-2 rounded-full transition-all">
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Tour Title</label>
-                    <input
-                      type="text"
-                      value={editingTour?.title || ''}
-                      onChange={(e) => {
-                        const title = e.target.value;
-                        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-                        setEditingTour({ ...editingTour, title, slug: editingTour.id ? editingTour.slug : slug });
-                      }}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                      placeholder="Great Ocean Road"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Duration</label>
-                    <input
-                      type="text"
-                      value={editingTour?.duration || ''}
-                      onChange={(e) => setEditingTour({ ...editingTour, duration: e.target.value })}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                      placeholder="10-12 Hours"
-                    />
-                  </div>
-                </div>
+              {/* Tabs Navigation */}
+              <div className="flex bg-black/30 border-b border-white/5 px-6">
+                {[
+                  { id: 'general', label: 'General', icon: Info },
+                  { id: 'content', label: 'Content', icon: LayoutGrid },
+                  { id: 'pricing', label: 'Pricing & Fleets', icon: DollarSign },
+                  { id: 'itinerary', label: 'Itinerary', icon: MapPin },
+                  { id: 'marketing', label: 'Marketing', icon: Tag }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setTourActiveTab(tab.id as any)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 text-[10px] uppercase font-bold tracking-widest border-b-2 transition-all shrink-0",
+                      tourActiveTab === tab.id ? "text-gold border-gold bg-gold/5" : "text-white/30 border-transparent hover:text-white/60"
+                    )}
+                  >
+                    <tab.icon size={14} />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Starting Price ($)</label>
-                    <input
-                      type="number"
-                      value={editingTour?.price || ''}
-                      onChange={(e) => setEditingTour({ ...editingTour, price: e.target.value })}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                      placeholder="1048"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Max Capacity</label>
-                    <input
-                      type="number"
-                      value={editingTour?.capacity || ''}
-                      onChange={(e) => setEditingTour({ ...editingTour, capacity: e.target.value })}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                      placeholder="7"
-                    />
-                  </div>
-                </div>
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-[#020202]">
+                <div className="max-w-4xl mx-auto space-y-10">
 
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Locations (comma separated)</label>
-                  <input
-                    type="text"
-                    value={Array.isArray(editingTour?.locations) ? editingTour.locations.join(', ') : editingTour?.locations || ''}
-                    onChange={(e) => setEditingTour({ ...editingTour, locations: e.target.value })}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                    placeholder="12 Apostles, Apollo Bay, Lorne"
-                  />
-                </div>
+                  {tourActiveTab === 'general' && (
+                    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Tour Name</label>
+                          <input
+                            type="text"
+                            value={editingTour.title || ''}
+                            onChange={(e) => setEditingTour({ ...editingTour, title: e.target.value })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm outline-none focus:border-gold transition-all"
+                            placeholder="Great Ocean Road Private Tour"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Slug (Custom URL)</label>
+                          <input
+                            type="text"
+                            value={editingTour.slug || ''}
+                            onChange={(e) => setEditingTour({ ...editingTour, slug: e.target.value })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm outline-none focus:border-gold transition-all font-mono text-[10px]"
+                            placeholder="great-ocean-road-private"
+                          />
+                        </div>
+                      </div>
 
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Tour Image URL</label>
-                  <input
-                    type="text"
-                    value={editingTour?.image || ''}
-                    onChange={(e) => setEditingTour({ ...editingTour, image: e.target.value })}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                    placeholder="https://..."
-                  />
-                </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Featured Image URL (Display Header)</label>
+                        <div className="relative group">
+                          <input
+                            type="text"
+                            value={editingTour.image || ''}
+                            onChange={(e) => setEditingTour({ ...editingTour, image: e.target.value })}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-[10px] font-mono outline-none focus:border-gold transition-all"
+                            placeholder="https://images.unsplash.com/photo..."
+                          />
+                          {editingTour.image && (
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg overflow-hidden border border-white/20">
+                              <img src={editingTour.image} className="w-full h-full object-cover" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
 
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Description</label>
-                  <textarea
-                    value={editingTour?.description || ''}
-                    onChange={(e) => setEditingTour({ ...editingTour, description: e.target.value })}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all h-24"
-                    placeholder="Experience one of the world's most scenic coastal drives..."
-                  />
-                </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Duration</label>
+                          <input type="text" value={editingTour.duration || ''} onChange={(e) => setEditingTour({ ...editingTour, duration: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm" placeholder="12 Hours" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Max People</label>
+                          <input type="number" value={editingTour.maxPeople || ''} onChange={(e) => setEditingTour({ ...editingTour, maxPeople: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm" placeholder="7" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Age Range</label>
+                          <input type="text" value={editingTour.ageRange || ''} onChange={(e) => setEditingTour({ ...editingTour, ageRange: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm" placeholder="Any Age" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Start Place</label>
+                          <input type="text" value={editingTour.startPlace || ''} onChange={(e) => setEditingTour({ ...editingTour, startPlace: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm" placeholder="Melbourne CBD" />
+                        </div>
+                      </div>
 
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-3 cursor-pointer group">
-                    <div className={cn("w-5 h-5 rounded border flex items-center justify-center transition-all", editingTour?.active ? "bg-gold border-gold" : "border-white/20 group-hover:border-gold")}>
-                      <input
-                        type="checkbox"
-                        className="hidden"
-                        checked={editingTour?.active || false}
-                        onChange={(e) => setEditingTour({ ...editingTour, active: e.target.checked })}
-                      />
-                      {editingTour?.active && <CheckCircle size={14} className="text-black" />}
+                      <div className="p-6 bg-gold/5 border border-gold/10 rounded-2xl flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-bold text-gold uppercase tracking-widest">Active Status</h4>
+                          <p className="text-[10px] text-white/40 mt-1">Determine if this tour is visible to customers in their dashboard.</p>
+                        </div>
+                        <button
+                          onClick={() => setEditingTour({ ...editingTour, active: !editingTour.active })}
+                          className={cn("w-12 h-6 rounded-full transition-all relative", editingTour.active ? "bg-gold" : "bg-white/10")}
+                        >
+                          <div className={cn("absolute top-1 w-4 h-4 rounded-full bg-white transition-all", editingTour.active ? "right-1" : "left-1")} />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Availability (Start Date)</label>
+                          <input type="date" value={editingTour.availability?.startDate || ''} onChange={(e) => setEditingTour({ ...editingTour, availability: { ...editingTour.availability, startDate: e.target.value } })} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm text-white/60 outline-none" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Availability (End Date)</label>
+                          <input type="date" value={editingTour.availability?.endDate || ''} onChange={(e) => setEditingTour({ ...editingTour, availability: { ...editingTour.availability, endDate: e.target.value } })} className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm text-white/60 outline-none" />
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Active Tour</span>
-                  </label>
-                </div>
+                  )}
 
-                <div className="pt-4 flex gap-4">
-                  <button
-                    onClick={() => setShowTourModal(false)}
-                    className="flex-1 py-3 text-xs font-bold uppercase border border-white/20 rounded-xl text-white/70 hover:text-white hover:border-white/40 transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleUpdateTour(editingTour.id || 'new', editingTour)}
-                    className="flex-1 bg-gold text-black py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white transition-all"
-                  >
-                    {editingTour?.id ? 'Save Changes' : 'Create Tour'}
-                  </button>
+                  {tourActiveTab === 'content' && (
+                    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Short Summary (Featured Excerpt)</label>
+                        <textarea
+                          value={editingTour.shortDescription || ''}
+                          onChange={(e) => setEditingTour({ ...editingTour, shortDescription: e.target.value })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm outline-none focus:border-gold transition-all h-24 resize-none"
+                          placeholder="Brief 1-2 sentence overview..."
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Full Experience Details</label>
+                        <textarea
+                          value={editingTour.fullDescription || ''}
+                          onChange={(e) => setEditingTour({ ...editingTour, fullDescription: e.target.value })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-sm outline-none focus:border-gold transition-all h-48 resize-none"
+                          placeholder="Comprehensive description of the tour..."
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block flex items-center justify-between">
+                            Inclusions
+                            <button onClick={() => setEditingTour({ ...editingTour, inclusions: [...(editingTour.inclusions || []), ""] })} className="text-gold hover:text-white transition-colors"><Plus size={14} /></button>
+                          </label>
+                          <div className="space-y-2">
+                            {(editingTour.inclusions || []).map((inc: string, idx: number) => (
+                              <div key={`inc-${idx}`} className="flex items-center gap-2">
+                                <input type="text" value={inc} onChange={(e) => {
+                                  const n = [...editingTour.inclusions];
+                                  n[idx] = e.target.value;
+                                  setEditingTour({ ...editingTour, inclusions: n });
+                                }} className="flex-1 bg-white/5 border border-white/5 rounded-lg px-4 py-2 text-xs" />
+                                <button onClick={() => setEditingTour({ ...editingTour, inclusions: editingTour.inclusions.filter((_: any, i: any) => i !== idx) })} className="text-white/20 hover:text-red-500"><Trash2 size={14} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block flex items-center justify-between">
+                            Exclusions
+                            <button onClick={() => setEditingTour({ ...editingTour, exclusions: [...(editingTour.exclusions || []), ""] })} className="text-gold hover:text-white transition-colors"><Plus size={14} /></button>
+                          </label>
+                          <div className="space-y-2">
+                            {(editingTour.exclusions || []).map((exc: string, idx: number) => (
+                              <div key={`exc-${idx}`} className="flex items-center gap-2">
+                                <input type="text" value={exc} onChange={(e) => {
+                                  const n = [...editingTour.exclusions];
+                                  n[idx] = e.target.value;
+                                  setEditingTour({ ...editingTour, exclusions: n });
+                                }} className="flex-1 bg-white/5 border border-white/5 rounded-lg px-4 py-2 text-xs" />
+                                <button onClick={() => setEditingTour({ ...editingTour, exclusions: editingTour.exclusions.filter((_: any, i: any) => i !== idx) })} className="text-white/20 hover:text-red-500"><Trash2 size={14} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block flex items-center justify-between">
+                            Highlights & Activities
+                            <button onClick={() => setEditingTour({ ...editingTour, activities: [...(editingTour.activities || []), ""] })} className="text-gold hover:text-white transition-colors"><Plus size={14} /></button>
+                          </label>
+                          <div className="space-y-2">
+                            {(editingTour.activities || []).map((act: string, idx: number) => (
+                              <div key={`act-${idx}-${act.slice(0, 5)}`} className="flex items-center gap-2">
+                                <input type="text" value={act} onChange={(e) => {
+                                  const n = [...editingTour.activities];
+                                  n[idx] = e.target.value;
+                                  setEditingTour({ ...editingTour, activities: n });
+                                }} className="flex-1 bg-white/5 border border-white/5 rounded-lg px-4 py-2 text-xs" />
+                                <button onClick={() => setEditingTour({ ...editingTour, activities: editingTour.activities.filter((_: any, i: any) => i !== idx) })} className="text-white/20 hover:text-red-500"><Trash2 size={14} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block flex items-center justify-between">
+                            Places To Visit
+                            <button onClick={() => setEditingTour({ ...editingTour, placesToVisit: [...(editingTour.placesToVisit || []), ""] })} className="text-gold hover:text-white transition-colors"><Plus size={14} /></button>
+                          </label>
+                          <div className="space-y-2">
+                            {(editingTour.placesToVisit || []).map((pl: string, idx: number) => (
+                              <div key={`pl-${idx}-${pl.slice(0, 5)}`} className="flex items-center gap-2">
+                                <input type="text" value={pl} onChange={(e) => {
+                                  const n = [...editingTour.placesToVisit];
+                                  n[idx] = e.target.value;
+                                  setEditingTour({ ...editingTour, placesToVisit: n });
+                                }} className="flex-1 bg-white/5 border border-white/5 rounded-lg px-4 py-2 text-xs" />
+                                <button onClick={() => setEditingTour({ ...editingTour, placesToVisit: editingTour.placesToVisit.filter((_: any, i: any) => i !== idx) })} className="text-white/20 hover:text-red-500"><Trash2 size={14} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tourActiveTab === 'pricing' && (
+                    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <div>
+                        <div className="flex justify-between items-center mb-6">
+                          <h4 className="text-xs font-bold text-gold uppercase tracking-widest">Fleet Specific Pricing</h4>
+                          <button onClick={() => setEditingTour({ ...editingTour, fleets: [...(editingTour.fleets || []), { id: Date.now().toString(36), name: '', category: 'luxury', standardPrice: 0, salePrice: 0 }] })} className="btn-primary px-4 py-2 text-[8px]">
+                            Add Custom Vehicle
+                          </button>
+                        </div>
+                        <div className="space-y-4">
+                          {(editingTour.fleets || []).map((f: any, idx: number) => (
+                            <div key={f.id || idx} className="bg-white/5 border border-white/10 rounded-2xl p-6 relative group/row hover:border-gold/30 transition-all">
+                              <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                                <button onClick={() => { const n = [...editingTour.fleets]; n.splice(idx + 1, 0, { ...f, id: Date.now().toString(36) }); setEditingTour({ ...editingTour, fleets: n }); }} className="text-white/20 hover:text-gold transition-colors">
+                                  <Copy size={16} />
+                                </button>
+                                <button onClick={() => setEditingTour({ ...editingTour, fleets: editingTour.fleets.filter((_: any, i: any) => i !== idx) })} className="text-white/20 hover:text-red-500 transition-colors">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-4">
+                                <div className="md:col-span-2">
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Vehicle Name / Custom Identity</label>
+                                  <div className="flex gap-2">
+                                    <div className="flex-1 relative">
+                                      <input
+                                        type="text"
+                                        value={f.name}
+                                        onChange={(e) => {
+                                          const n = [...editingTour.fleets]; n[idx].name = e.target.value;
+                                          setEditingTour({ ...editingTour, fleets: n });
+                                        }}
+                                        className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-xs focus:border-gold outline-none"
+                                        placeholder="e.g. Vintage Limousine"
+                                      />
+                                      <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
+                                        <ChevronDown size={12} />
+                                      </div>
+                                    </div>
+                                    <select
+                                      onChange={(e) => {
+                                        const n = [...editingTour.fleets];
+                                        const v = fleet.find(item => item.name === e.target.value);
+                                        if (v) {
+                                          n[idx].name = v.name;
+                                          n[idx].image = v.img;
+                                          n[idx].category = v.category || 'luxury';
+                                        }
+                                        setEditingTour({ ...editingTour, fleets: n });
+                                      }}
+                                      className="w-12 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-[8px] custom-select"
+                                    >
+                                      <option value="">+</option>
+                                      {fleet.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+                                    </select>
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Category</label>
+                                  <select
+                                    value={f.category || 'luxury'}
+                                    onChange={(e) => {
+                                      const n = [...editingTour.fleets]; n[idx].category = e.target.value;
+                                      setEditingTour({ ...editingTour, fleets: n });
+                                    }}
+                                    className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-[10px] custom-select focus:border-gold outline-none"
+                                  >
+                                    <option value="luxury">Luxury Estate</option>
+                                    <option value="suv">Executive SUV</option>
+                                    <option value="sedan">VIP Sedan</option>
+                                    <option value="van">People Mover</option>
+                                    <option value="classic">Classic / Vintage</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Passengers</label>
+                                  <input type="text" value={f.passengers || ''} onChange={(e) => { const n = [...editingTour.fleets]; n[idx].passengers = e.target.value; setEditingTour({ ...editingTour, fleets: n }); }} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-xs" placeholder="e.g. 3 Guests" />
+                                </div>
+                                <div>
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Luggage</label>
+                                  <input type="text" value={f.luggage || ''} onChange={(e) => { const n = [...editingTour.fleets]; n[idx].luggage = e.target.value; setEditingTour({ ...editingTour, fleets: n }); }} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-xs" placeholder="e.g. 2 Large" />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                                <div>
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Std Price ($)</label>
+                                  <input type="number" value={f.standardPrice} onChange={(e) => { const n = [...editingTour.fleets]; n[idx].standardPrice = e.target.value; setEditingTour({ ...editingTour, fleets: n }); }} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-xs" />
+                                </div>
+                                <div>
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Sale Price ($)</label>
+                                  <input type="number" value={f.salePrice} onChange={(e) => { const n = [...editingTour.fleets]; n[idx].salePrice = e.target.value; setEditingTour({ ...editingTour, fleets: n }); }} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-xs" />
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Additional Info</label>
+                                  <input type="text" value={f.additionalInfo || ''} onChange={(e) => { const n = [...editingTour.fleets]; n[idx].additionalInfo = e.target.value; setEditingTour({ ...editingTour, fleets: n }); }} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-xs" placeholder="e.g. Free Wifi, Water included" />
+                                </div>
+                                <div className="md:col-span-4">
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Image URL (Override)</label>
+                                  <input type="text" value={f.image || ''} onChange={(e) => { const n = [...editingTour.fleets]; n[idx].image = e.target.value; setEditingTour({ ...editingTour, fleets: n }); }} className="w-full bg-black border border-white/10 rounded-lg px-4 py-2 text-[10px] font-mono text-white/30" placeholder="https://..." />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/5 pt-12">
+                        <div className="flex justify-between items-center mb-6">
+                          <h4 className="text-xs font-bold text-gold uppercase tracking-widest">Optional Tour Extras</h4>
+                          <button onClick={() => setEditingTour({ ...editingTour, extras: [...(editingTour.extras || []), { id: Date.now().toString(36), name: '', description: '', price: 0, availableCount: 1 }] })} className="btn-primary px-4 py-2 text-[8px]">
+                            Add Extra Service
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {(editingTour.extras || []).map((e: any, idx: number) => (
+                            <div key={e.id || idx} className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group/extra">
+                              <button onClick={() => setEditingTour({ ...editingTour, extras: editingTour.extras.filter((_: any, i: any) => i !== idx) })} className="absolute top-4 right-4 text-white/20 hover:text-red-500 opacity-0 group-hover/extra:opacity-100 transition-all">
+                                <Trash2 size={14} />
+                              </button>
+                              <div className="space-y-4">
+                                <input type="text" value={e.name} onChange={(ev) => { const n = [...editingTour.extras]; n[idx].name = ev.target.value; setEditingTour({ ...editingTour, extras: n }); }} className="w-full bg-transparent border-b border-white/10 text-xs font-bold py-1 focus:border-gold outline-none" placeholder="Extra Name" />
+                                <input type="text" value={e.description} onChange={(ev) => { const n = [...editingTour.extras]; n[idx].description = ev.target.value; setEditingTour({ ...editingTour, extras: n }); }} className="w-full bg-transparent border-b border-white/5 text-[10px] text-white/40 py-1 focus:border-gold outline-none" placeholder="Short Description" />
+                                <div className="flex gap-4">
+                                  <div className="flex-1">
+                                    <label className="text-[8px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Price ($)</label>
+                                    <input type="number" value={e.price} onChange={(ev) => { const n = [...editingTour.extras]; n[idx].price = ev.target.value; setEditingTour({ ...editingTour, extras: n }); }} className="w-full bg-black border border-white/5 rounded px-2 py-1 text-[10px]" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <label className="text-[8px] uppercase tracking-widest font-bold text-white/20 mb-1 block">Available</label>
+                                    <input type="number" value={e.availableCount} onChange={(ev) => { const n = [...editingTour.extras]; n[idx].availableCount = ev.target.value; setEditingTour({ ...editingTour, extras: n }); }} className="w-full bg-black border border-white/5 rounded px-2 py-1 text-[10px]" />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tourActiveTab === 'itinerary' && (
+                    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <div className="flex justify-between items-center bg-white/5 p-6 rounded-2xl border border-gold/10">
+                        <div>
+                          <h4 className="text-xs font-bold text-gold uppercase tracking-widest">Itinerary Builder</h4>
+                          <p className="text-[10px] text-white/40 mt-1">Structure the tour sequence day-by-day or step-by-step.</p>
+                        </div>
+                        <button onClick={() => setEditingTour({ ...editingTour, itinerary: [...(editingTour.itinerary || []), { id: Date.now().toString(36), name: '', details: '', order: (editingTour.itinerary || []).length }] })} className="btn-primary px-6 py-2 text-[10px]">
+                          Add New Step
+                        </button>
+                      </div>
+
+                      <div className="space-y-6 relative before:absolute before:left-8 before:top-0 before:bottom-0 before:w-px before:bg-gradient-to-b before:from-gold/50 before:via-gold/10 before:to-transparent">
+                        {(editingTour.itinerary || []).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)).map((step: any, idx: number) => (
+                          <div key={step.id || idx} className="relative pl-16 group/step">
+                            <div className="absolute left-6 top-1 w-4 h-4 rounded-full bg-gold/20 border-2 border-gold flex items-center justify-center z-10">
+                              <div className="w-1.5 h-1.5 rounded-full bg-gold" />
+                            </div>
+                            <div className="bg-white/5 border border-white/5 rounded-2xl p-6 hover:border-gold/20 transition-all">
+                              <div className="flex justify-between items-start mb-4">
+                                <div className="flex-1">
+                                  <input type="text" value={step.name} onChange={(e) => { const n = [...editingTour.itinerary]; n[idx].name = e.target.value; setEditingTour({ ...editingTour, itinerary: n }); }} className="w-full bg-transparent border-b border-white/10 text-sm font-bold py-1 focus:border-gold outline-none mb-4" placeholder="Day Title or Step Name" />
+                                  <textarea value={step.details} onChange={(e) => { const n = [...editingTour.itinerary]; n[idx].details = e.target.value; setEditingTour({ ...editingTour, itinerary: n }); }} className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-xs h-32 resize-none outline-none focus:border-gold" placeholder="Experience details (HTML supported)..." />
+                                </div>
+                                <div className="flex flex-col gap-2 ml-6">
+                                  <button onClick={() => { const n = [...editingTour.itinerary]; n.splice(idx + 1, 0, { ...step, id: Date.now().toString(36), order: String(Number(step.order) + 1) }); setEditingTour({ ...editingTour, itinerary: n }); }} className="text-white/20 hover:text-gold"><Copy size={16} /></button>
+                                  <button onClick={() => setEditingTour({ ...editingTour, itinerary: editingTour.itinerary.filter((_: any, i: any) => i !== idx) })} className="text-white/20 hover:text-red-500"><Trash2 size={16} /></button>
+                                  <input type="number" value={step.order} onChange={(e) => { const n = [...editingTour.itinerary]; n[idx].order = e.target.value; setEditingTour({ ...editingTour, itinerary: n }); }} className="w-10 bg-black/50 border border-white/10 rounded h-10 flex items-center justify-center text-[10px] text-center font-bold" />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="text-[8px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Step Image URL (Optional)</label>
+                                  <input type="text" value={step.image || ''} onChange={(e) => { const n = [...editingTour.itinerary]; n[idx].image = e.target.value; setEditingTour({ ...editingTour, itinerary: n }); }} className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-mono text-white/30" placeholder="https://..." />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {tourActiveTab === 'marketing' && (
+                    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                        <div className="space-y-8">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Promo Tag (Ribbon)</label>
+                            <input type="text" value={editingTour.promoTag || ''} onChange={(e) => setEditingTour({ ...editingTour, promoTag: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-gold outline-none" placeholder="e.g. Popular, Best Value, 20% OFF" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Category</label>
+                            <select value={editingTour.category || ''} onChange={(e) => setEditingTour({ ...editingTour, category: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm custom-select focus:border-gold outline-none">
+                              <option value="">Select Category</option>
+                              <option value="luxury">Luxury Estate</option>
+                              <option value="wine">Wine & Dine</option>
+                              <option value="sightseeing">Sightseeing</option>
+                              <option value="private">Private VIP</option>
+                              <option value="nature">Nature & Wild</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Gallery Images (One per line)</label>
+                            <textarea
+                              value={Array.isArray(editingTour.gallery) ? editingTour.gallery.join('\n') : (editingTour.gallery || '')}
+                              onChange={(e) => setEditingTour({ ...editingTour, gallery: e.target.value.split('\n').filter(s => s.trim() !== '') })}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[10px] font-mono h-40 resize-none focus:border-gold outline-none"
+                              placeholder="https://image1.jpg&#10;https://image2.jpg"
+                            />
+                            {editingTour.gallery && editingTour.gallery.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {editingTour.gallery.map((img: string, i: number) => (
+                                  <div key={i} className="w-12 h-12 rounded bg-black border border-white/10 overflow-hidden relative" title={img}>
+                                    {img.startsWith('http') ? (
+                                      <img src={img} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-[8px] text-white/20 font-bold overflow-hidden px-1 break-all">Err</div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-6">
+                          <h4 className="text-xs font-bold text-gold uppercase tracking-widest flex items-center justify-between">
+                            Tour FAQs
+                            <button onClick={() => setEditingTour({ ...editingTour, faqs: [...(editingTour.faqs || []), { id: Date.now().toString(36), question: '', answer: '' }] })} className="text-gold hover:text-white"><Plus size={16} /></button>
+                          </h4>
+                          <div className="space-y-4">
+                            {(editingTour.faqs || []).map((faq: any, idx: number) => (
+                              <div key={faq.id || `faq-${idx}`} className="bg-white/5 border border-white/5 rounded-2xl p-4 relative">
+                                <button onClick={() => setEditingTour({ ...editingTour, faqs: editingTour.faqs.filter((_: any, i: any) => i !== idx) })} className="absolute top-2 right-2 text-white/10 hover:text-red-500 transition-all"><X size={14} /></button>
+                                <input type="text" value={faq.question} onChange={(e) => { const n = [...editingTour.faqs]; n[idx].question = e.target.value; setEditingTour({ ...editingTour, faqs: n }); }} className="w-full bg-transparent border-b border-white/10 text-xs font-bold py-1 mb-2 outline-none" placeholder="Question" />
+                                <textarea value={faq.answer} onChange={(e) => { const n = [...editingTour.faqs]; n[idx].answer = e.target.value; setEditingTour({ ...editingTour, faqs: n }); }} className="w-full bg-black/40 border border-white/5 rounded p-2 text-[10px] h-20 resize-none outline-none" placeholder="Detailed answer..." />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/5 pt-10">
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3 block">Mandatory Customer Note (Booking Requirements)</label>
+                        <textarea value={editingTour.customerNote || ''} onChange={(e) => setEditingTour({ ...editingTour, customerNote: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs h-24 resize-none outline-none focus:border-gold transition-all" placeholder="e.g. Please bring comfortable walking shoes and a windbreaker." />
+                      </div>
+                    </div>
+                  )}
+
                 </div>
+              </div>
+
+              <div className="p-8 border-t border-white/5 bg-black/50 flex gap-4">
+                <button
+                  onClick={() => setShowTourModal(false)}
+                  className="flex-1 py-4 text-[10px] font-bold uppercase tracking-[0.2em] border border-white/10 rounded-xl text-white/40 hover:text-white hover:bg-white/5 transition-all"
+                >
+                  Discard Changes
+                </button>
+                <button
+                  onClick={() => handleUpdateTour(editingTour.id || 'new', editingTour)}
+                  className="flex-[2] bg-gold text-black py-4 rounded-xl text-[10px] font-bold uppercase tracking-[0.2em] hover:bg-white transition-all shadow-[0_0_20px_rgba(212,175,55,0.2)]"
+                >
+                  {editingTour.id ? 'Authorize & Sync Changes' : 'Initialize Luxury Tour'}
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -9009,7 +11972,7 @@ export default function AppDashboard() {
                     }
                   }}
                   className={cn(
-                    "relative py-12 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all duration-300",
+                    "relative py-8 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all duration-300", // reduced py-12 → py-8
                     dragActive
                       ? "border-gold bg-gold/5 scale-[1.02]"
                       : "border-white/10 bg-white/5 hover:border-gold/30"
@@ -9025,14 +11988,16 @@ export default function AppDashboard() {
                       }
                     }}
                   />
-                  <div className={cn(
-                    "w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-transform duration-500",
-                    dragActive ? "bg-gold text-black scale-110 rotate-12" : "bg-white/10 text-gold"
-                  )}>
+                  <div
+                    className={cn(
+                      "w-12 h-12 rounded-full flex items-center justify-center mb-3 transition-transform duration-500", // reduced w-16 h-16 → w-12 h-12
+                      dragActive ? "bg-gold text-black scale-110 rotate-12" : "bg-white/10 text-gold"
+                    )}
+                  >
                     {isUploadingCsv ? (
-                      <RefreshCw size={32} className="animate-spin" />
+                      <RefreshCw size={24} className="animate-spin" />
                     ) : (
-                      <Upload size={32} />
+                      <Upload size={24} />
                     )}
                   </div>
                   <p className="text-sm font-bold text-white mb-1">
@@ -9045,17 +12010,26 @@ export default function AppDashboard() {
 
                 {/* Format Sample */}
                 <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Info size={14} className="text-gold" />
-                    <span className="text-[10px] uppercase tracking-widest font-black text-white/60">Required CSV Format</span>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Info size={14} className="text-gold" />
+                      <span className="text-[10px] uppercase tracking-widest font-black text-white/60">Required CSV Format</span>
+                    </div>
+                    <a
+                      href={csvImportType === 'offers' ? '/assets/csv/sample-offers.csv' : '/assets/csv/sample-tours.csv'}
+                      download
+                      className="bg-gold/10 hover:bg-gold hover:text-black text-gold px-3 py-1.5 rounded text-[9px] uppercase tracking-widest font-black transition-all flex items-center gap-1.5"
+                    >
+                      <Download size={12} /> Download Sample CSV
+                    </a>
                   </div>
                   <div className="overflow-x-auto custom-scrollbar border border-white/10 rounded-xl bg-black/40">
                     <table className="w-full border-collapse text-[9px] text-left">
                       <thead>
                         <tr className="bg-gold/10 border-b border-gold/20">
                           {(csvImportType === 'offers'
-                            ? ['title', 'description', 'discountType', 'discountValue', 'image', 'tags', 'fleets_data']
-                            : ['title', 'description', 'price', 'duration', 'cap', 'image', 'locations']
+                            ? ['title', 'description', 'image', 'active', 'tags', 'discounttype', 'discountvalue', 'fleets_data']
+                            : ['title', 'image', 'duration', 'maxPeople', 'ageRange', 'startPlace', 'active', 'availabilityStartDate', 'availabilityEndDate', 'shortDescription', 'fullDescription', 'gallery', 'inclusions', 'exclusions', 'activities', 'placesToVisit', 'tags', 'fleets', 'extras', 'itinerary', 'faqs', 'promoTag', 'category', 'customerNote']
                           ).map((h) => (
                             <th key={h} className="px-3 py-2 text-gold font-black uppercase tracking-widest border-r border-gold/10 last:border-0 whitespace-nowrap">
                               {h}
@@ -9066,8 +12040,8 @@ export default function AppDashboard() {
                       <tbody>
                         <tr className="bg-white/[0.02]">
                           {(csvImportType === 'offers'
-                            ? ['"Airport Special"', '"Direct to CBD"', 'percentage', '15', 'https://...', '"Featured|Picked"', '"Sedan|img1|..."']
-                            : ['"Philly Tour"', '"Historic walk"', '149', '3 Hours', '12', 'https://...', '"Hall|Bell|Park"']
+                            ? ['Autumn Special', 'Experience our autumn special.', 'https://...', 'true', 'Seasonal|Featured', 'percentage', '25', 'Sedan|url|Desc|3|2|150|Free Wi-Fi']
+                            : ['Wine Tour', 'https://...', '8 Hours', '6', 'Adults', 'CBD', 'true', '2024-01-01', '2024-12-31', 'Short summary.', 'Long text...', 'url1|url2', 'Lunch|Tasting', 'Tips', 'Tasting', 'Valley', 'Luxury', 'Sedan|url|3|2|150|120|Info', 'Photos|Pro|150|10', 'Stop 1|img|desc', 'Q|A', 'Best Seller', 'Wine', 'Note']
                           ).map((v, i) => (
                             <td key={i} className="px-3 py-2 text-white/50 font-mono border-r border-white/5 last:border-0 whitespace-nowrap italic">
                               {v}
@@ -9078,7 +12052,7 @@ export default function AppDashboard() {
                     </table>
                   </div>
                   <p className="text-[9px] text-white/30 mt-3 italic text-left">
-                    * For {csvImportType === 'offers' ? "fleets_data, use ';' between fleets and '|' between fleet details (Type|Img|Desc|Pass|Lug|Price)." : "locations, use '|' to separate multiple stops."}
+                    * Use ';' for major separations (e.g. lists of fleets or extras) and '|' for internal attributes. Review the sample CSV for exact formatting.
                   </p>
                 </div>
               </div>
@@ -9086,133 +12060,683 @@ export default function AppDashboard() {
           </motion.div>
         )}
 
-        {showAddChartModal && (
+        {/* Bar Setup Modal */}
+        {showBarModal && editingBarIndex !== null && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-            onClick={() => setShowAddChartModal(false)}
+            className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[900] flex items-center justify-center p-4"
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl w-full max-w-md space-y-6 shadow-2xl relative"
-              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-4xl glass rounded-[40px] border border-gold/20 overflow-hidden shadow-[0_0_100px_rgba(212,175,55,0.1)] flex flex-col max-h-[90vh]"
             >
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-xl font-display text-gold">Add Custom Insight</h3>
-                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Configure your data visualization</p>
+              {/* Header */}
+              <div className="p-8 border-b border-white/5 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gold/10 flex items-center justify-center border border-gold/20 shadow-inner">
+                    <Layout size={24} className="text-gold" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-display text-gold tracking-tight">Bar Setup</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest font-black">Configure your global notification bar</p>
+                  </div>
                 </div>
                 <button
-                  onClick={() => setShowAddChartModal(false)}
-                  className="p-2 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors"
+                  onClick={() => { setShowBarModal(false); setEditingBarIndex(null); }}
+                  className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-white transition-all group"
                 >
-                  <XCircle size={24} />
+                  <X size={20} className="group-hover:rotate-90 transition-transform duration-500" />
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Chart Title</label>
-                  <input
-                    type="text"
-                    value={newChartConfig.title}
-                    onChange={(e) => setNewChartConfig({ ...newChartConfig, title: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-gold transition-all"
-                    placeholder="e.g., Performance Metrics"
-                  />
-                </div>
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-12">
+                {(() => {
+                  const bar = floatingSettings.bars[editingBarIndex];
+                  const updateBar = (updates: any) => {
+                    setFloatingSettings((prev: any) => {
+                      const newBars = [...(prev.bars || [])];
+                      newBars[editingBarIndex] = { ...newBars[editingBarIndex], ...updates };
+                      return { ...prev, bars: newBars };
+                    });
+                  };
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Chart Type</label>
-                    <select
-                      value={newChartConfig.type}
-                      onChange={(e) => {
-                        const type = e.target.value;
-                        let updates: any = { type };
-                        if (type === 'pie-roles') {
-                          updates.type = 'pie';
-                          updates.dataSource = 'roleData';
-                          updates.dataKey = 'value';
-                        } else if (type === 'pie') {
-                          updates.dataSource = 'statusData';
-                          updates.dataKey = 'value';
-                        }
-                        setNewChartConfig({ ...newChartConfig, ...updates });
-                      }}
-                      className="custom-select w-full"
-                    >
-                      <option value="line">Line Chart</option>
-                      <option value="area">Area Chart</option>
-                      <option value="bar">Bar Chart</option>
-                      <option value="pie">Pie Chart (Status)</option>
-                      <option value="pie-roles">Pie Chart (User Roles)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Data Source</label>
-                    <select
-                      value={newChartConfig.dataKey}
-                      onChange={(e) => setNewChartConfig({ ...newChartConfig, dataKey: e.target.value, dataSource: e.target.value === 'roles' ? 'roleData' : 'revenueData' })}
-                      className="custom-select w-full"
-                      disabled={newChartConfig.type === 'pie'}
-                    >
-                      <option value="revenue">Revenue</option>
-                      <option value="bookings">Booking Count</option>
-                      <option value="roles">User Roles</option>
-                    </select>
-                  </div>
-                </div>
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                      {/* Left: Identity & Content */}
+                      <div className="space-y-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Bar Identity</label>
+                          <input
+                            type="text"
+                            value={bar.name || ''}
+                            onChange={(e) => updateBar({ name: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-white/10 outline-none focus:border-gold/50 shadow-inner transition-all"
+                            placeholder="e.g. Summer Sale 2024"
+                          />
+                        </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1 block">Chart Width</label>
-                    <select
-                      value={newChartConfig.width}
-                      onChange={(e) => setNewChartConfig({ ...newChartConfig, width: e.target.value })}
-                      className="custom-select w-full"
-                    >
-                      <option value="small">Small (1/3)</option>
-                      <option value="medium">Medium (2/3)</option>
-                      <option value="large">Full Width</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Brand Color</label>
-                    <div className="flex gap-2">
-                      {['#D4AF37', '#60A5FA', '#4ADE80', '#F87171', '#C084FC'].map((c) => (
-                        <button
-                          key={c}
-                          onClick={() => setNewChartConfig({ ...newChartConfig, color: c })}
-                          className={cn(
-                            "w-8 h-8 rounded-full border-2 transition-all",
-                            newChartConfig.color === c ? "border-white scale-110" : "border-transparent"
-                          )}
-                          style={{ backgroundColor: c }}
-                        />
-                      ))}
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Display Content (HTML Supported)</label>
+                          <textarea
+                            rows={4}
+                            value={bar.content || ''}
+                            onChange={(e) => updateBar({ content: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-white/10 outline-none focus:border-gold/50 shadow-inner transition-all font-mono"
+                            placeholder="<span class='text-gold'>LIMITED:</span> 20% OFF ALL BOOKINGS!"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Promo Code</label>
+                            <input
+                              type="text"
+                              value={bar.promoCode || ''}
+                              onChange={(e) => updateBar({ promoCode: e.target.value })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-white/10 outline-none focus:border-gold/50 shadow-inner transition-all"
+                              placeholder="AUTUMN25"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">CTA Text</label>
+                            <input
+                              type="text"
+                              value={bar.ctaText || ''}
+                              onChange={(e) => updateBar({ ctaText: e.target.value })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-white/10 outline-none focus:border-gold/50 shadow-inner transition-all"
+                              placeholder="Book Now"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">CTA Link</label>
+                            <input
+                              type="text"
+                              value={bar.ctaLink || ''}
+                              onChange={(e) => updateBar({ ctaLink: e.target.value })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white placeholder:text-white/10 outline-none focus:border-gold/50 shadow-inner transition-all"
+                              placeholder="/offers or https://..."
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Position & Animation</label>
+                          <div className="grid grid-cols-2 gap-4">
+                            <select
+                              value={bar.position || 'top'}
+                              onChange={(e) => updateBar({ position: e.target.value })}
+                              className="custom-select w-full"
+                            >
+                              <option value="top">Top Header Row</option>
+                              <option value="bottom">Bottom Reveal</option>
+                            </select>
+                            <select
+                              value={bar.animation || 'marquee'}
+                              onChange={(e) => updateBar({ animation: e.target.value })}
+                              className="custom-select w-full"
+                            >
+                              <option value="slide">Static Slide</option>
+                              <option value="marquee">Scrolling Marquee</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Styling & Logic */}
+                      <div className="space-y-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-4 block">Visual Configuration</label>
+                          <div className="p-6 bg-white/5 rounded-3xl border border-white/10 space-y-6">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-white/40">Background Style</span>
+                              <div className="flex gap-2">
+                                {['solid', 'gradient'].map(type => (
+                                  <button
+                                    key={type}
+                                    onClick={() => updateBar({ bgType: type })}
+                                    className={cn(
+                                      "px-3 py-1 rounded-full text-[8px] uppercase font-black border transition-all",
+                                      bar.bgType === type ? "bg-gold border-gold text-black" : "border-white/10 text-white/40"
+                                    )}
+                                  >
+                                    {type}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {bar.bgType === 'gradient' ? (
+                              <div className="space-y-2">
+                                <span className="text-[8px] uppercase font-bold text-white/20 ml-1">Gradient CSS</span>
+                                <input
+                                  type="text"
+                                  value={bar.bgGradient || ''}
+                                  onChange={(e) => updateBar({ bgGradient: e.target.value })}
+                                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-mono text-gold outline-none focus:border-gold/50"
+                                  placeholder="linear-gradient(...)"
+                                />
+                                <div className="h-6 w-full rounded-xl border border-white/10 mt-1" style={{ backgroundImage: bar.bgGradient || 'linear-gradient(90deg, #D4AF37, #F1D483)' }} />
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between">
+                                <span className="text-[8px] uppercase font-bold text-white/20">Fill Color</span>
+                                <input
+                                  type="color"
+                                  value={bar.bgColor || '#D4AF37'}
+                                  onChange={(e) => updateBar({ bgColor: e.target.value })}
+                                  className="w-12 h-6 bg-transparent border-none cursor-pointer"
+                                />
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="flex flex-col gap-2">
+                                <span className="text-[8px] uppercase font-bold text-white/20 text-center">Text</span>
+                                <input
+                                  type="color"
+                                  value={bar.textColor || '#000000'}
+                                  onChange={(e) => updateBar({ textColor: e.target.value })}
+                                  className="w-full h-8 bg-transparent border-none cursor-pointer"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                <span className="text-[8px] uppercase font-bold text-white/20 text-center">Promo</span>
+                                <input
+                                  type="color"
+                                  value={bar.promoColor || '#000000'}
+                                  onChange={(e) => updateBar({ promoColor: e.target.value })}
+                                  className="w-full h-8 bg-transparent border-none cursor-pointer"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Active Duration (Validation)</label>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <span className="text-[8px] uppercase font-bold text-white/20 block ml-1">Starts</span>
+                              <input
+                                type="date"
+                                min={new Date().toISOString().split('T')[0]}
+                                value={bar.startDate || ''}
+                                onChange={(e) => updateBar({ startDate: e.target.value })}
+                                className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-xs text-white outline-none focus:border-gold/50"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[8px] uppercase font-bold text-white/20 block ml-1">Ends</span>
+                              <input
+                                type="date"
+                                min={bar.startDate || new Date().toISOString().split('T')[0]}
+                                value={bar.endDate || ''}
+                                onChange={(e) => updateBar({ endDate: e.target.value })}
+                                className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-xs text-white outline-none focus:border-gold/50"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Visibility & Timing Rules</label>
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1">
+                                <span className="text-[8px] uppercase font-bold text-white/20 block ml-1">Entry Delay (ms)</span>
+                                <input
+                                  type="number"
+                                  step="500"
+                                  min="0"
+                                  value={bar.delay || 0}
+                                  onChange={(e) => updateBar({ delay: parseInt(e.target.value) })}
+                                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-xs text-white outline-none focus:border-gold/50"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[8px] uppercase font-bold text-white/20 block ml-1">Auto Close (ms)</span>
+                                <input
+                                  type="number"
+                                  step="1000"
+                                  min="0"
+                                  value={bar.autoCloseTime || 0}
+                                  onChange={(e) => updateBar({ autoCloseTime: parseInt(e.target.value) })}
+                                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-xs text-white outline-none focus:border-gold/50"
+                                />
+                              </div>
+                            </div>
+
+                            <select
+                              value={bar.displayCondition || 'all'}
+                              onChange={(e) => updateBar({ displayCondition: e.target.value })}
+                              className="custom-select w-full"
+                            >
+                              <option value="all">Everywhere</option>
+                              <option value="landing">Homepage Only</option>
+                              <option value="specific">Specific Pages Only</option>
+                              <option value="except">Except Specific Pages</option>
+                            </select>
+
+                            {bar.displayCondition === 'specific' && (
+                              <input
+                                type="text"
+                                value={bar.specificPages?.join(', ') || ''}
+                                onChange={(e) => updateBar({ specificPages: e.target.value.split(',').map(s => s.trim()) })}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white/60 focus:border-gold outline-none"
+                                placeholder="/fleet, /offers, /pricing"
+                              />
+                            )}
+                            {bar.displayCondition === 'except' && (
+                              <input
+                                type="text"
+                                value={bar.exceptPages?.join(', ') || ''}
+                                onChange={(e) => updateBar({ exceptPages: e.target.value.split(',').map(s => s.trim()) })}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white/60 focus:border-gold outline-none"
+                                placeholder="/checkout, /booking"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
 
-              <div className="pt-4">
+              {/* Footer Actions */}
+              <div className="p-8 border-t border-white/5 bg-black/40 flex justify-end gap-4 shrink-0">
+                <button
+                  onClick={() => { setShowBarModal(false); setEditingBarIndex(null); }}
+                  className="px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  Discard Changes
+                </button>
                 <button
                   onClick={() => {
-                    if (!newChartConfig.title) return;
-                    const newId = `chart-${Date.now()}`;
-                    setDashboardCharts(prev => [...prev, { ...newChartConfig, id: newId }]);
-                    setShowAddChartModal(false);
-                    setNewChartConfig({ title: '', type: 'line', dataKey: 'revenue', dataSource: 'revenueData', color: '#D4AF37', width: 'medium' });
+                    handleUpdateFloatingSettings(floatingSettings);
+                    setShowBarModal(false);
+                    setEditingBarIndex(null);
                   }}
-                  className="w-full btn-primary py-4 flex items-center justify-center gap-2"
+                  className="px-10 py-3 bg-gold text-black rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(212,175,55,0.3)] flex items-center gap-2"
                 >
-                  <Plus size={18} />
-                  <span className="text-sm font-bold uppercase tracking-widest">Add to Dashboard</span>
+                  {isSavingFloatingSettings ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save All Settings
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Popup Setup Modal */}
+        {showPopupModal && editingPopupIndex !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[900] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-4xl glass rounded-[40px] border border-white/5 overflow-hidden shadow-[0_0_100px_rgba(168,85,247,0.1)] flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="p-8 border-b border-white/5 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gold/10 flex items-center justify-center border border-gold/20 shadow-inner">
+                    <MessageSquare size={24} className="text-gold" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-display text-white tracking-tight">Popup Setup</h3>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest font-black">Targeted engagement modal</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setShowPopupModal(false); setEditingPopupIndex(null); }}
+                  className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-white transition-all group"
+                >
+                  <X size={20} className="group-hover:rotate-90 transition-transform duration-500" />
+                </button>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-12">
+                {(() => {
+                  const popup = floatingSettings.popups[editingPopupIndex];
+                  const updatePopup = (updates: any) => {
+                    setFloatingSettings((prev: any) => {
+                      const newPopups = [...(prev.popups || [])];
+                      newPopups[editingPopupIndex] = { ...newPopups[editingPopupIndex], ...updates };
+                      return { ...prev, popups: newPopups };
+                    });
+                  };
+
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12 text-left">
+                      {/* Left: Content & Structure */}
+                      <div className="space-y-8">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Popup Type</label>
+                            <select
+                              value={popup.type || 'sales'}
+                              onChange={(e) => updatePopup({ type: e.target.value })}
+                              className="custom-select w-full"
+                            >
+                              <option value="sales">Sales & Offers</option>
+                              <option value="news">Recent News</option>
+                              <option value="instruction">Instructions</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Position</label>
+                            <select
+                              value={popup.position || 'center'}
+                              onChange={(e) => updatePopup({ position: e.target.value })}
+                              className="custom-select w-full"
+                            >
+                              <option value="center">Screen Center</option>
+                              <option value="bottom-right">Bottom Right</option>
+                              <option value="bottom-left">Bottom Left</option>
+                              <option value="top-right">Top Right</option>
+                              <option value="top-left">Top Left</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Main Title</label>
+                          <input
+                            type="text"
+                            value={popup.title || ''}
+                            onChange={(e) => updatePopup({ title: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                            placeholder="Big Sale Headline"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Subtitle / Caption</label>
+                          <input
+                            type="text"
+                            value={popup.subtitle || ''}
+                            onChange={(e) => updatePopup({ subtitle: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                            placeholder="Short and catchy..."
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Description / Details</label>
+                          <textarea
+                            rows={3}
+                            value={popup.details || ''}
+                            onChange={(e) => updatePopup({ details: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                            placeholder="Detailed message or instruction..."
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Promo Code</label>
+                            <input
+                              type="text"
+                              value={popup.promoCode || ''}
+                              onChange={(e) => updatePopup({ promoCode: e.target.value })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                              placeholder="OFF50"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Entry Delay (ms)</label>
+                            <input
+                              type="number"
+                              step="500"
+                              min="0"
+                              value={popup.delay || 2000}
+                              onChange={(e) => updatePopup({ delay: parseInt(e.target.value) })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Auto Close (ms)</label>
+                            <input
+                              type="number"
+                              step="1000"
+                              min="0"
+                              value={popup.autoCloseTime || 0}
+                              onChange={(e) => updatePopup({ autoCloseTime: parseInt(e.target.value) })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                              placeholder="0 (Off)"
+                            />
+                            <p className="text-[8px] text-white/30 mt-1 italic">0 meant disabled</p>
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Width (px)</label>
+                            <input
+                              type="number"
+                              step="10"
+                              min="200"
+                              value={popup.width || 400}
+                              onChange={(e) => updatePopup({ width: parseInt(e.target.value) })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Max Height (px)</label>
+                            <input
+                              type="number"
+                              step="10"
+                              min="200"
+                              value={popup.height || 600}
+                              onChange={(e) => updatePopup({ height: parseInt(e.target.value) })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none focus:border-gold/50"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Custom HTML Area (Optional)</label>
+                          <textarea
+                            rows={2}
+                            value={popup.htmlContent || ''}
+                            onChange={(e) => updatePopup({ htmlContent: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-[10px] font-mono text-white/60 outline-none focus:border-gold/50"
+                            placeholder="Add generic HTML content..."
+                          />
+                        </div>
+                      </div>
+
+                      {/* Right: Style & Behavior */}
+                      <div className="space-y-8">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">CTA Action</label>
+                          <div className="grid grid-cols-2 gap-4">
+                            <input
+                              type="text"
+                              value={popup.ctaText || ''}
+                              onChange={(e) => updatePopup({ ctaText: e.target.value })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white outline-none focus:border-gold/50"
+                              placeholder="Button Text"
+                            />
+                            <input
+                              type="text"
+                              value={popup.ctaLink || ''}
+                              onChange={(e) => updatePopup({ ctaLink: e.target.value })}
+                              className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white outline-none focus:border-gold/50"
+                              placeholder="/offers"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-4 block">Visual Style</label>
+                          <div className="p-6 bg-white/5 rounded-3xl border border-white/10 space-y-6">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-white/40">Background</span>
+                              <div className="flex gap-2">
+                                {['solid', 'gradient'].map(type => (
+                                  <button
+                                    key={type}
+                                    onClick={() => updatePopup({ bgType: type })}
+                                    className={cn(
+                                      "px-3 py-1 rounded-full text-[8px] uppercase font-black border transition-all",
+                                      popup.bgType === type ? "bg-gold border-gold text-black" : "border-white/10 text-white/40"
+                                    )}
+                                  >
+                                    {type}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {popup.bgType === 'gradient' ? (
+                              <div className="space-y-2">
+                                <span className="text-[8px] uppercase font-bold text-white/20 ml-1">Gradient CSS</span>
+                                <input
+                                  type="text"
+                                  value={popup.bgGradient || ''}
+                                  onChange={(e) => updatePopup({ bgGradient: e.target.value })}
+                                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-mono text-gold outline-none focus:border-gold/50"
+                                  placeholder="linear-gradient(...)"
+                                />
+                                <div className="h-6 w-full rounded-xl border border-white/10 mt-1" style={{ backgroundImage: popup.bgGradient || 'linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)' }} />
+                              </div>
+                            ) : (
+                              <div className="flex justify-between items-center">
+                                <span className="text-[8px] uppercase font-bold text-white/20">Source Color</span>
+                                <input
+                                  type="color"
+                                  value={popup.bgColor || '#1a1a1a'}
+                                  onChange={(e) => updatePopup({ bgColor: e.target.value })}
+                                  className="w-10 h-6 bg-transparent border-none cursor-pointer"
+                                />
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="flex flex-col gap-2">
+                                <span className="text-[8px] uppercase font-bold text-white/20">Text Color</span>
+                                <input
+                                  type="color"
+                                  value={popup.textColor || '#FFFFFF'}
+                                  onChange={(e) => updatePopup({ textColor: e.target.value })}
+                                  className="w-full h-8 bg-transparent border-none cursor-pointer"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                <span className="text-[8px] uppercase font-bold text-white/20">Accent/Button</span>
+                                <input
+                                  type="color"
+                                  value={popup.accentColor || '#D4AF37'}
+                                  onChange={(e) => updatePopup({ accentColor: e.target.value })}
+                                  className="w-full h-8 bg-transparent border-none cursor-pointer"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Animation & Dates</label>
+                          <div className="space-y-4">
+                            <select
+                              value={popup.animation || 'scale'}
+                              onChange={(e) => updatePopup({ animation: e.target.value })}
+                              className="custom-select w-full"
+                            >
+                              <option value="fade">Simple Fade</option>
+                              <option value="slide">Slide From Bottom</option>
+                              <option value="scale">Bounce Scale</option>
+                              <option value="zoom">Zoom Focus</option>
+                            </select>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1">
+                                <span className="text-[8px] uppercase font-bold text-white/20 block ml-1">Starts</span>
+                                <input
+                                  type="date"
+                                  min={new Date().toISOString().split('T')[0]}
+                                  value={popup.startDate || ''}
+                                  onChange={(e) => updatePopup({ startDate: e.target.value })}
+                                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[8px] uppercase font-bold text-white/20 block ml-1">Ends</span>
+                                <input
+                                  type="date"
+                                  min={popup.startDate || new Date().toISOString().split('T')[0]}
+                                  value={popup.endDate || ''}
+                                  onChange={(e) => updatePopup({ endDate: e.target.value })}
+                                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] uppercase tracking-widest font-black text-gold mb-3 block">Visibility Rules</label>
+                          <select
+                            value={popup.displayCondition || 'all'}
+                            onChange={(e) => updatePopup({ displayCondition: e.target.value })}
+                            className="custom-select w-full mb-4"
+                          >
+                            <option value="all">Everywhere</option>
+                            <option value="specific">Specific Pages Only</option>
+                            <option value="landing">Homepage Only</option>
+                            <option value="except">Except Specific Pages</option>
+                          </select>
+                          {popup.displayCondition === 'specific' && (
+                            <input
+                              type="text"
+                              value={popup.specificPages?.join(', ') || ''}
+                              onChange={(e) => updatePopup({ specificPages: e.target.value.split(',').map(s => s.trim()) })}
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white/60 focus:border-gold outline-none"
+                              placeholder="/fleet, /offers"
+                            />
+                          )}
+                          {popup.displayCondition === 'except' && (
+                            <input
+                              type="text"
+                              value={popup.exceptPages?.join(', ') || ''}
+                              onChange={(e) => updatePopup({ exceptPages: e.target.value.split(',').map(s => s.trim()) })}
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white/60 focus:border-gold outline-none"
+                              placeholder="/checkout, /payment"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Footer */}
+              <div className="p-8 border-t border-white/5 bg-black/40 flex justify-end gap-4 shrink-0">
+                <button
+                  onClick={() => { setShowPopupModal(false); setEditingPopupIndex(null); }}
+                  className="px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  Discard Changes
+                </button>
+                <button
+                  onClick={() => {
+                    handleUpdateFloatingSettings(floatingSettings);
+                    setShowPopupModal(false);
+                    setEditingPopupIndex(null);
+                  }}
+                  className="px-10 py-3 bg-gold text-black rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-[0_0_20px_rgba(212,175,55,0.3)] flex items-center gap-2"
+                >
+                  {isSavingFloatingSettings ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save All Settings
                 </button>
               </div>
             </motion.div>

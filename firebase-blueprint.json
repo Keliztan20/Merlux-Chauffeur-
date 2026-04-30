@@ -227,17 +227,84 @@
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
-        "description": { "type": "string" },
-        "image": { "type": "string" },
-        "price": { "type": "number" },
-        "duration": { "type": "string" },
-        "capacity": { "type": "integer" },
-        "locations": { "type": "array", "items": { "type": "string" } },
-        "active": { "type": "boolean" },
         "slug": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "featuredImage": { "type": "string", "format": "uri" },
+        "gallery": { "type": "array", "items": { "type": "string", "format": "uri" } },
+        "active": { "type": "boolean" },
+        "availability": {
+          "type": "object",
+          "properties": {
+            "startDate": { "type": "string", "format": "date" },
+            "endDate": { "type": "string", "format": "date" }
+          }
+        },
+        "startPlace": { "type": "string" },
+        "duration": { "type": "string" },
+        "maxPeople": { "type": "integer" },
+        "ageRange": { "type": "string" },
+        "shortDescription": { "type": "string" },
+        "fullDescription": { "type": "string" },
+        "inclusions": { "type": "array", "items": { "type": "string" } },
+        "exclusions": { "type": "array", "items": { "type": "string" } },
+        "activities": { "type": "array", "items": { "type": "string" } },
+        "placesToVisit": { "type": "array", "items": { "type": "string" } },
+        "fleets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "image": { "type": "string", "format": "uri" },
+              "passengers": { "type": "integer" },
+              "luggage": { "type": "string" },
+              "standardPrice": { "type": "number" },
+              "salePrice": { "type": "number" },
+              "additionalInfo": { "type": "string" }
+            }
+          }
+        },
+        "extras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "price": { "type": "number" },
+              "availableCount": { "type": "integer" }
+            }
+          }
+        },
+        "itinerary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "image": { "type": "string", "format": "uri" },
+              "details": { "type": "string", "description": "HTML content for the itinerary step." },
+              "order": { "type": "integer" }
+            }
+          }
+        },
+        "faqs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question": { "type": "string" },
+              "answer": { "type": "string" }
+            }
+          }
+        },
+        "promoTag": { "type": "string", "description": "e.g., Popular, Trending, Deal" },
+        "customerNote": { "type": "string" },
+        "category": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["title", "description", "price", "active"]
+      "required": ["title", "slug", "active", "shortDescription"]
     },
     "Media": {
       "title": "Media",
