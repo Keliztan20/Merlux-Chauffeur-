@@ -2,6 +2,7 @@ import React from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import Home from './pages/Home';
 import Booking from './pages/Booking';
 import Fleet from './pages/Fleet';
@@ -137,6 +138,7 @@ export default function App() {
           <AppLayout />
         </Router>
       </SettingsProvider>
+      <SpeedInsights />
     </ErrorBoundary>
   );
 }
