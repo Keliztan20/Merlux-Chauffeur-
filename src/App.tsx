@@ -2,6 +2,7 @@ import React from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import Home from './pages/Home';
 import Booking from './pages/Booking';
 import Fleet from './pages/Fleet';
@@ -50,6 +51,7 @@ function AppLayout() {
 
   return (
     <div className="min-h-screen bg-black text-white font-sans selection:bg-gold selection:text-black flex flex-col">
+      <SpeedInsights />
       <Toaster 
         position={toastPosition as any}
         containerStyle={{
