@@ -5823,7 +5823,7 @@ export default function AppDashboard() {
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 text-center">
                     <p className="text-[7px] uppercase tracking-widest text-white/40 mb-1 font-bold">Standard</p>
                     <p className="text-[10px] font-bold text-gold font-mono">
-                      ${calendarStats.standard.revenue}
+                      ${calendarStats.standard.revenue.toFixed(2)}
                     </p>
                     <p className="text-[8px] text-white/20 font-bold">{calendarStats.standard.count} Rides</p>
                   </div>
