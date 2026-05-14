@@ -230,7 +230,7 @@ async function startServer() {
   // Sitemap Generator
   app.get('/sitemap.xml', async (req, res) => {
     try {
-      const pagesSnap = await dbAdmin.collection('pages').where('noindex', '!=', true).get();
+      const pagesSnap = await dbAdmin.collection('pages').get();
       const blogsSnap = await dbAdmin.collection('blogs').get();
 
       const baseUrl = process.env.APP_URL || 'https://merlux.au';
@@ -247,14 +247,16 @@ async function startServer() {
 
       pagesSnap.forEach(doc => {
         const data = doc.data();
-        if (data.includeInSitemap !== false) {
+        if (data.noindex !== true && data.includeInSitemap !== false) {
           xml += `\n  <url><loc>${baseUrl}/${data.slug}</loc><priority>0.6</priority></url>`;
         }
       });
 
       blogsSnap.forEach(doc => {
         const data = doc.data();
-        xml += `\n  <url><loc>${baseUrl}/blog/${data.slug}</loc><priority>0.5</priority></url>`;
+        if (data.slug) {
+          xml += `\n  <url><loc>${baseUrl}/blog/${data.slug}</loc><priority>0.5</priority></url>`;
+        }
       });
 
       xml += '\n</urlset>';
@@ -262,6 +264,7 @@ async function startServer() {
       res.header('Content-Type', 'application/xml');
       res.send(xml);
     } catch (error) {
+      console.error('Sitemap generation error:', error);
       res.status(500).send('Error generating sitemap');
     }
   });
