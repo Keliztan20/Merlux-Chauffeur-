@@ -30,7 +30,7 @@ export default function Logo({ className, variant = 'navbar' }: LogoProps) {
   return (
     <Link to="/" className={cn("flex items-center gap-2", className)}>
       <img 
-        src={logoUrl || "/assets/images/Logo.webp"} 
+        src={logoUrl || "/assets/Logo.webp"} 
         alt="Merlux Chauffeur" 
         className={cn(
           "object-contain",
