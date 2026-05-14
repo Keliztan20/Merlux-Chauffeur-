@@ -233,7 +233,7 @@ async function startServer() {
       const pagesSnap = await dbAdmin.collection('pages').where('noindex', '!=', true).get();
       const blogsSnap = await dbAdmin.collection('blogs').get();
 
-      const baseUrl = process.env.APP_URL || 'https://merlux.com.au';
+      const baseUrl = process.env.APP_URL || 'https://merlux.au';
 
       let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -268,7 +268,7 @@ async function startServer() {
 
   // Robots.txt
   app.get('/robots.txt', (req, res) => {
-    const baseUrl = process.env.APP_URL || 'https://merlux.com.au';
+    const baseUrl = process.env.APP_URL || 'https://merlux.au';
     res.header('Content-Type', 'text/plain');
     res.send(`User-agent: *
 Allow: /
