@@ -2,8 +2,6 @@ import React from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { SpeedInsights } from '@vercel/speed-insights/react';
-import { Analytics } from '@vercel/analytics/react';
 import Home from './pages/Home';
 import Booking from './pages/Booking';
 import Fleet from './pages/Fleet';
@@ -94,7 +92,6 @@ function AppLayout() {
           },
         }}
       />
-      <SpeedInsights />
       <FloatingElements />
       <header className="sticky top-0 z-50 w-full pointer-events-none">
         <div className="pointer-events-auto">
@@ -140,7 +137,6 @@ export default function App() {
           <AppLayout />
         </Router>
       </SettingsProvider>
-      <Analytics />
     </ErrorBoundary>
   );
 }
