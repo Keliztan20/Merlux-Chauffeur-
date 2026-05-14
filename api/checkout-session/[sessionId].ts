@@ -1,6 +1,8 @@
-import { stripe } from '../_init.ts';
+import Stripe from 'stripe';
 
-export default async (req: any, res: any) => {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
+
+export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
@@ -18,4 +20,4 @@ export default async (req: any, res: any) => {
     console.error('Checkout session retrieve error:', error);
     return res.status(500).json({ error: error?.message || 'Internal Server Error' });
   }
-};
+}

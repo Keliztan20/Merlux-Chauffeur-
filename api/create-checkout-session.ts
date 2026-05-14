@@ -1,14 +1,18 @@
-import { stripe, getAppUrl, isStripeConfigured } from './_init.ts';
+import Stripe from 'stripe';
 
-export default async (req: any, res: any) => {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
+
+const getAppUrl = () => process.env.APP_URL || 'http://localhost:3000';
+
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
-    const { bookingData, vehicleName, cancelUrl } = req.body;
+    const { bookingData, vehicleName, cancelUrl } = req.body ?? {};
 
-    if (!isStripeConfigured()) {
+    if (!process.env.STRIPE_SECRET_KEY) {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY is not set' });
     }
 
@@ -27,7 +31,7 @@ export default async (req: any, res: any) => {
               name: `Chauffeur Service: ${vehicleName || 'Booking'}`,
               description,
             },
-            unit_amount: Math.round((Number(bookingData?.price) || 0) * 100),
+            unit_amount: Math.max(0, Math.round((Number(bookingData?.price) || 0) * 100)),
           },
           quantity: 1,
         },
@@ -48,4 +52,4 @@ export default async (req: any, res: any) => {
     console.error('Stripe Error:', error);
     return res.status(500).json({ error: error?.message || 'Internal Server Error' });
   }
-};
+}

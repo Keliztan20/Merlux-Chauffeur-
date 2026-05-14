@@ -6,8 +6,14 @@ import Stripe from 'stripe';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const configPath = path.join(__dirname, '../firebase-applet-config.json');
-const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+let firebaseConfig = { projectId: '', firestoreDatabaseId: '' };
+
+try {
+  firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+} catch (error: any) {
+  console.error('Failed to load firebase-applet-config.json:', error?.message || error);
+}
 
 if (!admin.apps.length) {
   delete process.env.FIREBASE_CONFIG;
