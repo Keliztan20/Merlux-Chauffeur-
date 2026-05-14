@@ -387,7 +387,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
     });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath, { index: false }));
+    app.use(express.static(distPath));
 
     app.get('*', async (req, res) => {
       try {
