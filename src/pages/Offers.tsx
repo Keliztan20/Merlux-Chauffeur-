@@ -169,6 +169,15 @@ export default function Offers() {
     }
   }, [slug, offers, selectedPackage]);
 
+  // Set page title based on selected offer
+  useEffect(() => {
+    if (selectedPackage) {
+      document.title = `${selectedPackage.title} | Merlux Chauffeur`;
+    } else {
+      document.title = 'Exclusive Travel Packages | Merlux Chauffeur';
+    }
+  }, [selectedPackage]);
+
   const autocompleteOptions = useMemo(() => {
     const options: any = {
       types: ['address']

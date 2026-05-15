@@ -260,6 +260,15 @@ export default function Tours() {
     }
   }, [slug, tours, selectedTour]);
 
+  // Set page title based on selected tour
+  useEffect(() => {
+    if (selectedTour) {
+      document.title = `${selectedTour.title} | Merlux Chauffeur`;
+    } else {
+      document.title = 'Private Tours | Merlux Chauffeur';
+    }
+  }, [selectedTour]);
+
   const handleTourSelect = (tour: any) => {
     setSelectedTour(tour);
     setMainImage(tour.image || tour.featuredImage);
