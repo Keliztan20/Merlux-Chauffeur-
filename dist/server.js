@@ -185,8 +185,10 @@ async function startServer() {
   });
   app.get("/sitemap.xml", async (req, res) => {
     try {
-      const pagesSnap = await dbAdmin.collection("pages").where("noindex", "!=", true).get();
+      const pagesSnap = await dbAdmin.collection("pages").get();
       const blogsSnap = await dbAdmin.collection("blogs").get();
+      const offersSnap = await dbAdmin.collection("offers").get();
+      const toursSnap = await dbAdmin.collection("tours").get();
       const baseUrl = process.env.APP_URL || "https://merlux.au";
       let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -194,20 +196,39 @@ async function startServer() {
   <url><loc>${baseUrl}/booking</loc><priority>0.8</priority></url>
   <url><loc>${baseUrl}/fleet</loc><priority>0.8</priority></url>
   <url><loc>${baseUrl}/services</loc><priority>0.8</priority></url>
+  <url><loc>${baseUrl}/offers</loc><priority>0.8</priority></url>
+  <url><loc>${baseUrl}/tours</loc><priority>0.8</priority></url>
+  <url><loc>${baseUrl}/faq</loc><priority>0.7</priority></url>
   <url><loc>${baseUrl}/about</loc><priority>0.7</priority></url>
   <url><loc>${baseUrl}/contact</loc><priority>0.7</priority></url>
   <url><loc>${baseUrl}/blog</loc><priority>0.7</priority></url>`;
       pagesSnap.forEach((doc) => {
         const data = doc.data();
-        if (data.includeInSitemap !== false) {
+        if (data.noindex !== true && data.includeInSitemap !== false) {
           xml += `
   <url><loc>${baseUrl}/${data.slug}</loc><priority>0.6</priority></url>`;
         }
       });
+      offersSnap.forEach((doc) => {
+        const data = doc.data();
+        if (data.slug && data.active !== false && data.noindex !== true && data.includeInSitemap !== false) {
+          xml += `
+  <url><loc>${baseUrl}/offers/${data.slug}</loc><priority>0.6</priority></url>`;
+        }
+      });
+      toursSnap.forEach((doc) => {
+        const data = doc.data();
+        if (data.slug && data.active !== false && data.noindex !== true && data.includeInSitemap !== false) {
+          xml += `
+  <url><loc>${baseUrl}/tours/${data.slug}</loc><priority>0.6</priority></url>`;
+        }
+      });
       blogsSnap.forEach((doc) => {
         const data = doc.data();
-        xml += `
+        if (data.slug) {
+          xml += `
   <url><loc>${baseUrl}/blog/${data.slug}</loc><priority>0.5</priority></url>`;
+        }
       });
       xml += "\n</urlset>";
       res.header("Content-Type", "application/xml");
