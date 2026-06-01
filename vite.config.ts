@@ -28,10 +28,14 @@ export default defineConfig(({ mode }) => {
         // ✅ merge everything here
         external: ["react-helmet-async"],
         output: {
-          manualChunks: {
-            vendor: ["react", "react-dom"],
-            emailService: ["src/services/emailService.ts"],
-            smsService: ["src/services/smsService.ts"],
+          manualChunks(id) {
+            if (id.includes("node_modules")) {
+              return "vendor";
+            }
+            if (id.includes("src/services/")) {
+              const name = path.basename(id, ".ts");
+              return name; // auto-splits each service file
+            }
           },
         },
       },
