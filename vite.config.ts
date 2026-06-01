@@ -23,19 +23,14 @@ export default defineConfig(({ mode }) => {
       hmr: process.env.DISABLE_HMR !== "true",
     },
     build: {
-      chunkSizeWarningLimit: 1500,
+      chunkSizeWarningLimit: 2600,
       rollupOptions: {
         // ✅ merge everything here
-        external: ["react-helmet-async"],
         output: {
-          manualChunks(id) {
-            if (id.includes("node_modules")) {
-              return "vendor";
-            }
-            if (id.includes("src/services/")) {
-              const name = path.basename(id, ".ts");
-              return name; // auto-splits each service file
-            }
+          manualChunks: {
+            vendor: ["react", "react-dom"],
+            emailService: [path.resolve(__dirname, "src/services/emailService.ts")],
+            smsService: [path.resolve(__dirname, "src/services/smsService.ts")],
           },
         },
       },
