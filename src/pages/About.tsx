@@ -1,5 +1,6 @@
 import { motion } from 'motion/react';
 import { Shield, Clock, Award, Star, Compass, Target } from 'lucide-react';
+import SEO from '../components/SEO';
 
 export default function About() {
   const values = [
@@ -22,6 +23,10 @@ export default function About() {
 
   return (
     <div className="bg-black min-h-screen text-white font-sans overflow-x-hidden">
+      <SEO 
+        title="About Our Luxury Chauffeur Service"
+        description="Merlux Chauffeur Services: A legacy of distinction in Melbourne luxury travel since 2008. Discover our story and commitment to excellence."
+      />
       {/* Hero Section */}
       <section className="relative h-[50vh] flex items-center justify-center overflow-hidden pt-10">
         <div className="absolute inset-0 z-0">

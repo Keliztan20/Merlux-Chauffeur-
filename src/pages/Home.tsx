@@ -7,11 +7,13 @@ import {
   Map as MapIcon, UserCheck, Users, CircleArrowOutUpRight
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { cn } from '../lib/utils';
+import { cn, formatDate } from '../lib/utils';
 import { useSettings } from '../lib/SettingsContext';
-import { collection, getDocs, query, limit, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { emailService } from '../services/emailService';
 import * as Icons from 'lucide-react';
+import SEO from '../components/SEO';
 
 const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
   e.currentTarget.src = "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=2070&auto=format&fit=crop";
@@ -89,20 +91,108 @@ export default function Home() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleContactSubmit = (e: FormEvent) => {
+  const handleContactSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsSubmitting(false);
+
+    try {
+      // 1. Save to Firestore (messages collection - visible in Admin Dashboard under "Inquiries")
+      await addDoc(collection(db, 'messages'), {
+        name: contactForm.name,
+        email: contactForm.email,
+        subject: 'General Inquiry via Homepage Form',
+        message: contactForm.message,
+        status: 'new',
+        createdAt: serverTimestamp(),
+        type: 'inquiry'
+      });
+
+      // 2. Dispatch inquiry emails to the Contact Email and the Customer
+      try {
+        const targetEmail = contact.email || contact.bookingEmail || 'bookings@merlux.com.au';
+        
+        // Admin notification email html
+        const adminEmailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e4e4e7; border-radius: 12px; background-color: #ffffff; color: #09090b;">
+            <div style="text-align: center; border-bottom: 2px solid #dab866; padding-bottom: 20px; margin-bottom: 25px;">
+              <h2 style="color: #dab866; margin: 0; font-size: 24px; letter-spacing: 4px; font-weight: 800;">MERLUX</h2>
+              <p style="color: #71717a; margin: 5px 0 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px;">Luxury Website Inquiry</p>
+            </div>
+            
+            <h3 style="color: #09090b; font-size: 18px; margin-top: 0; font-weight: 600;">General Homepage Inquiry</h3>
+            
+            <div style="background-color: #f4f4f5; border-radius: 8px; padding: 20px; margin-bottom: 25px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <tr>
+                  <td style="padding: 6px 0; color: #71717a; width: 30%; font-weight: 600;">Client Name:</td>
+                  <td style="padding: 6px 0; color: #09090b; font-weight: bold;">${contactForm.name}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #71717a; font-weight: 600;">Client Email:</td>
+                  <td style="padding: 6px 0; color: #dab866; font-weight: bold;"><a href="mailto:${contactForm.email}" style="color: #dab866; text-decoration: none;">${contactForm.email}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #71717a; font-weight: 600;">Received:</td>
+                  <td style="padding: 6px 0; color: #09090b;">${new Date().toLocaleString('en-AU', { timeZone: 'Australia/Melbourne' })} AEST</td>
+                </tr>
+              </table>
+            </div>
+            
+            <div style="border-left: 4px solid #dab866; padding-left: 15px; margin: 20px 0;">
+              <h4 style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #71717a;">Message Content</h4>
+              <p style="margin: 0; line-height: 1.6; font-size: 14px; white-space: pre-wrap; color: #27272a;">${contactForm.message}</p>
+            </div>
+            
+            <p style="font-size: 12px; color: #71717a; margin-top: 25px;">This inquiry is also recorded in the Admin Dashboard 'Inquiries' database table.</p>
+          </div>
+        `;
+
+        // Customer receipt email html
+        const customerReceiptHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e4e4e7; border-radius: 12px; background-color: #ffffff; color: #09090b;">
+            <div style="text-align: center; border-bottom: 2px solid #dab866; padding-bottom: 20px; margin-bottom: 25px;">
+              <h2 style="color: #dab866; margin: 0; font-size: 24px; letter-spacing: 4px; font-weight: 800;">MERLUX</h2>
+              <p style="color: #71717a; margin: 5px 0 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px;">Luxury Chauffeur Services</p>
+            </div>
+            
+            <h3 style="color: #09090b; font-size: 18px; margin-top: 0; font-weight: normal; line-height: 1.4;">Hello <strong>${contactForm.name}</strong>,</h3>
+            
+            <p style="font-size: 14px; line-height: 1.6; color: #27272a;">Thank you for getting in touch with Merlux. We have successfully received your message.</p>
+            <p style="font-size: 14px; line-height: 1.6; color: #27272a;">Our dedicated 24/7 concierge desk is presently reviewing your message. A luxury travel specialist will compile the requested arrangements and contact you shortly.</p>
+            
+            <div style="border-left: 4px solid #dab866; padding-left: 15px; margin: 25px 0; background-color: #fafafa; padding: 15px; border-radius: 4px;">
+              <h4 style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #dab866; font-weight: bold;">Summary of Inquiry</h4>
+              <p style="margin: 0; line-height: 1.6; font-size: 13px; white-space: pre-wrap; color: #4b5563;">${contactForm.message}</p>
+            </div>
+            
+            <p style="font-size: 14px; line-height: 1.6; color: #27272a;">Should you require instantaneous assistance, please do not hesitate to contact our reservation hotline directly.</p>
+            
+            <div style="margin-top: 35px; border-top: 1px solid #e4e4e7; padding-top: 20px; text-align: center; font-size: 12px; color: #71717a;">
+              <p style="margin: 0 0 5px 0; font-weight: bold; color: #09090b;">Merlux Chauffeurs Team</p>
+              <p style="margin: 0;">Hotline: <a href="tel:${contact.phone}" style="color: #dab866; text-decoration: none;">${contact.phone}</a> &bull; Email: <a href="mailto:${targetEmail}" style="color: #dab866; text-decoration: none;">${targetEmail}</a></p>
+            </div>
+          </div>
+        `;
+
+        await emailService.sendEmail(targetEmail, `[Inquiry Received]: General Inquiry from ${contactForm.name}`, adminEmailHtml);
+        await emailService.sendEmail(contactForm.email, `Inquiry Received: Merlux Support`, customerReceiptHtml);
+      } catch (mailErr) {
+        console.error('Email sending failed but database write succeeded:', mailErr);
+      }
+
       setSubmitted(true);
       setContactForm({ name: '', email: '', message: '' });
       setTimeout(() => setSubmitted(false), 5000);
-    }, 1500);
+    } catch (err) {
+      console.error('Firestore save failed:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="relative bg-black text-white overflow-x-hidden">
+      <SEO />
       {/* 1. Hero Section with Image Slider */}
       <section className="relative h-screen flex items-center justify-center overflow-hidden">
         <AnimatePresence mode="wait">
@@ -603,7 +693,7 @@ export default function Home() {
                       <div className="bg-black/65 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
                         <Calendar size={11} className="text-gold" />
                         <p className="text-gold text-[9px] uppercase tracking-widest font-bold">
-                          {blog.createdAt?.toDate ? blog.createdAt.toDate().toLocaleDateString() : blog.date}
+                          {formatDate(blog.createdAt || blog.date)}
                         </p>
                       </div>
                       <div className="bg-black/65 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">

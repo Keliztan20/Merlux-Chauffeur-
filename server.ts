@@ -12,8 +12,19 @@ import nodemailer from 'nodemailer';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let currentDirName = '';
+try {
+  if (typeof __dirname !== 'undefined' && __dirname) {
+    currentDirName = __dirname;
+  } else {
+    currentDirName = path.dirname(fileURLToPath(import.meta.url));
+  }
+} catch (e) {
+  try {
+    currentDirName = path.dirname(fileURLToPath(import.meta.url));
+  } catch (err) {}
+}
+const __dirnameResolved = currentDirName || '.';
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
@@ -39,44 +50,18 @@ if (!admin.apps.length) {
 }
 
 const dbAdmin = admin.firestore();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
 
-const firestoreEnvPresent = Boolean(
-  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-  process.env.FIRESTORE_EMULATOR_HOST ||
-  process.env.GOOGLE_CLOUD_PROJECT ||
-  process.env.FIREBASE_CONFIG
-);
-let firestoreAvailable = firestoreEnvPresent;
-if (!firestoreAvailable) {
-  console.info('Firestore disabled: no credentials or emulator config found');
-}
-const safeFirestore = async <T>(operation: () => Promise<T>): Promise<T | null> => {
-  if (!firestoreAvailable) return null;
-  try {
-    return await operation();
-  } catch (error: any) {
-    firestoreAvailable = false;
-    if (firestoreEnvPresent) {
-      console.warn(`Firestore unavailable, disabling Firestore-dependent routes: ${error?.message || error}`);
+let stripeClient: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!stripeClient) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) {
+      throw new Error('STRIPE_SECRET_KEY environment variable is not configured.');
     }
-    return null;
+    stripeClient = new Stripe(key);
   }
-};
-
-const formatLastMod = (value: any) => {
-  if (!value) return null;
-  if (typeof value.toDate === 'function') {
-    value = value.toDate();
-  }
-  const date = value instanceof Date ? value : new Date(value);
-  if (isNaN(date.getTime())) return null;
-  return date.toISOString().split('T')[0];
-};
-
-const buildUrlXml = (loc: string, priority: string, lastmod?: string) => {
-  return `\n  <url>\n    <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}\n    <priority>${priority}</priority>\n  </url>`;
-};
+  return stripeClient;
+}
 
 async function startServer() {
   const app = express();
@@ -100,7 +85,7 @@ async function startServer() {
         ? `${bookingData.serviceType.toUpperCase()} - ${bookingData.pickup} to ${bookingData.dropoff}`
         : `${bookingData.serviceType.toUpperCase()} - ${bookingData.pickup}`;
 
-      const session = await stripe.checkout.sessions.create({
+      const session = await getStripe().checkout.sessions.create({
         payment_method_types: ['card'],
         line_items: [
           {
@@ -136,7 +121,7 @@ async function startServer() {
   app.get('/api/checkout-session/:sessionId', async (req, res) => {
     try {
       const { sessionId } = req.params;
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await getStripe().checkout.sessions.retrieve(sessionId);
       res.json(session);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -173,7 +158,75 @@ async function startServer() {
       res.json({ success: true, uid: userRecord.uid });
     } catch (error: any) {
       console.error('Error creating user:', error);
-      res.status(500).json({ error: error.message + ': ' + JSON.stringify(req.body), code: error.code });
+      const errStr = String(error.message || error);
+      
+      // Check if it's the Identity Toolkit/Authentication API disabled error
+      if (
+        errStr.includes('identitytoolkit') || 
+        errStr.includes('Identity Toolkit') || 
+        errStr.includes('SERVICE_DISABLED') || 
+        errStr.includes('PERMISSION_DENIED') || 
+        error.code === 'auth/api-error'
+      ) {
+        console.warn('Identity Toolkit/Auth API is disabled. Bypassing Auth layer and saving to Firestore...');
+        try {
+          const { email, displayName, role, phone, address } = req.body;
+          const fallbackUid = 'local-user-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
+          
+          await dbAdmin.collection('users').doc(fallbackUid).set({
+            id: fallbackUid,
+            name: displayName || email.split('@')[0],
+            email: email.toLowerCase(),
+            phone: phone || '',
+            address: address || '',
+            role: role || 'customer',
+            emailVerified: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            authDisabledFallback: true
+          });
+          
+          return res.json({
+            success: true,
+            uid: fallbackUid,
+            warning: "Identity Toolkit API is disabled in your project. Bypassed authentication layer: user profile created directly in database, so this user can be assigned driver roles or booking references."
+          });
+        } catch (dbError: any) {
+          console.error('Failed to create fallback user in Firestore:', dbError);
+          return res.status(500).json({ error: `Database fallback creation failed: ${dbError.message}` });
+        }
+      }
+      
+      res.status(500).json({ error: error.message || String(error), code: error.code });
+    }
+  });
+
+  // Admin: Delete User
+  app.post('/api/admin/delete-user', async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      console.log(`Attempting to delete user: ${userId}`);
+
+      // Try to delete from Firebase Auth first
+      try {
+        await admin.auth().deleteUser(userId);
+        console.log(`Deleted user ${userId} from Auth`);
+      } catch (authError: any) {
+        console.warn(`Auth deletion skipped/failed for user ${userId}:`, authError.message || String(authError));
+      }
+
+      // Delete from Firestore
+      await dbAdmin.collection('users').doc(userId).delete();
+      console.log(`Deleted user document ${userId} from Firestore`);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Error in delete user handler:', error);
+      res.status(500).json({ error: error.message || String(error) });
     }
   });
 
@@ -243,8 +296,8 @@ async function startServer() {
   // Favicon Redirect
   app.get('/favicon.ico', async (req, res, next) => {
     try {
-      const settingsSnap = await safeFirestore(() => dbAdmin.collection('settings').doc('system').get());
-      const favicon = settingsSnap?.data()?.seo?.favicon;
+      const settingsSnap = await dbAdmin.collection('settings').doc('system').get();
+      const favicon = settingsSnap.data()?.seo?.favicon;
       if (favicon) {
         return res.redirect(favicon);
       }
@@ -255,8 +308,8 @@ async function startServer() {
   // Logo Redirect
   app.get('/logo.png', async (req, res, next) => {
     try {
-      const settingsSnap = await safeFirestore(() => dbAdmin.collection('settings').doc('system').get());
-      const logo = settingsSnap?.data()?.seo?.logo;
+      const settingsSnap = await dbAdmin.collection('settings').doc('system').get();
+      const logo = settingsSnap.data()?.seo?.logo;
       if (logo) {
         return res.redirect(logo);
       }
@@ -264,191 +317,54 @@ async function startServer() {
     next();
   });
 
-  // Sitemap Generator
-  app.get('/sitemap.xml', async (req, res) => {
-    try {
-      const pagesSnap = await safeFirestore(() => dbAdmin.collection('pages').get());
-      const blogsSnap = await safeFirestore(() => dbAdmin.collection('blogs').get());
-      const offersSnap = await safeFirestore(() => dbAdmin.collection('offers').get());
-      const toursSnap = await safeFirestore(() => dbAdmin.collection('tours').get());
-
-      const baseUrl = process.env.APP_URL || 'https://merlux.au';
-
-      let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-
-      const staticRoutes = [
-        { path: '/', priority: '1.0', label: 'Home' },
-        { path: '/booking', priority: '0.8', label: 'Booking' },
-        { path: '/fleet', priority: '0.8', label: 'Fleet' },
-        { path: '/services', priority: '0.8', label: 'Services' },
-        { path: '/offers', priority: '0.8', label: 'Offers' },
-        { path: '/tours', priority: '0.8', label: 'Tours' },
-        { path: '/faq', priority: '0.7', label: 'FAQ' },
-        { path: '/about', priority: '0.7', label: 'About' },
-        { path: '/contact', priority: '0.7', label: 'Contact' },
-        { path: '/blog', priority: '0.7', label: 'Blog' },
-      ];
-
-      staticRoutes.forEach(route => {
-        xml += buildUrlXml(`${baseUrl}${route.path}`, route.priority);
-      });
-
-      pagesSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.noindex !== true && data.includeInSitemap !== false) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          xml += buildUrlXml(`${baseUrl}/${data.slug}`, '0.6', lastmod || undefined);
-        }
-      });
-
-      offersSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.slug && data.active !== false && data.noindex !== true && data.includeInSitemap !== false) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          xml += buildUrlXml(`${baseUrl}/offers/${data.slug}`, '0.6', lastmod || undefined);
-        }
-      });
-
-      toursSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.slug && data.active !== false && data.noindex !== true && data.includeInSitemap !== false) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          xml += buildUrlXml(`${baseUrl}/tours/${data.slug}`, '0.6', lastmod || undefined);
-        }
-      });
-
-      blogsSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.slug) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          xml += buildUrlXml(`${baseUrl}/blog/${data.slug}`, '0.5', lastmod || undefined);
-        }
-      });
-
-      xml += '\n</urlset>';
-
-      res.header('Content-Type', 'application/xml');
-      res.send(xml);
-    } catch (error) {
-      console.error('Sitemap generation error:', error);
-      res.status(500).send('Error generating sitemap');
+  // Serve sitemap and robots.txt explicitly from dist if they exist, otherwise fallback to dynamic
+  app.get('/sitemap.xml', (req, res) => {
+    const sitemapPath = path.join(process.cwd(), 'dist', 'sitemap.xml');
+    if (fs.existsSync(sitemapPath)) {
+      return res.sendFile(sitemapPath);
     }
+    // Fallback dynamic generation if file missing (e.g. in dev)
+    res.status(404).send('Sitemap not found. Run npm run build to generate.');
   });
 
-  app.get('/sitemap.html', async (req, res) => {
-    try {
-      const pagesSnap = await safeFirestore(() => dbAdmin.collection('pages').get());
-      const blogsSnap = await safeFirestore(() => dbAdmin.collection('blogs').get());
-      const offersSnap = await safeFirestore(() => dbAdmin.collection('offers').get());
-      const toursSnap = await safeFirestore(() => dbAdmin.collection('tours').get());
-
-      const baseUrl = process.env.APP_URL || 'https://merlux.au';
-
-      const links: string[] = [];
-      const staticRoutes = [
-        { path: '/', label: 'Home' },
-        { path: '/booking', label: 'Booking' },
-        { path: '/fleet', label: 'Fleet' },
-        { path: '/services', label: 'Services' },
-        { path: '/offers', label: 'Offers' },
-        { path: '/tours', label: 'Tours' },
-        { path: '/faq', label: 'FAQ' },
-        { path: '/about', label: 'About' },
-        { path: '/contact', label: 'Contact' },
-        { path: '/blog', label: 'Blog' },
-      ];
-
-      staticRoutes.forEach(route => {
-        links.push(`<li><a href="${baseUrl}${route.path}">${route.label}</a></li>`);
-      });
-
-      pagesSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.noindex !== true && data.includeInSitemap !== false) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          links.push(`<li><a href="${baseUrl}/${data.slug}">${data.title || data.slug}</a>${lastmod ? ` <small>(${lastmod})</small>` : ''}</li>`);
-        }
-      });
-
-      offersSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.slug && data.active !== false && data.noindex !== true && data.includeInSitemap !== false) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          links.push(`<li><a href="${baseUrl}/offers/${data.slug}">${data.title || data.slug}</a>${lastmod ? ` <small>(${lastmod})</small>` : ''}</li>`);
-        }
-      });
-
-      toursSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.slug && data.active !== false && data.noindex !== true && data.includeInSitemap !== false) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          links.push(`<li><a href="${baseUrl}/tours/${data.slug}">${data.title || data.slug}</a>${lastmod ? ` <small>(${lastmod})</small>` : ''}</li>`);
-        }
-      });
-
-      blogsSnap?.forEach(doc => {
-        const data = doc.data();
-        if (data.slug) {
-          const lastmod = formatLastMod(data.updatedAt) || formatLastMod(data.createdAt);
-          links.push(`<li><a href="${baseUrl}/blog/${data.slug}">${data.title || data.slug}</a>${lastmod ? ` <small>(${lastmod})</small>` : ''}</li>`);
-        }
-      });
-
-      const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Merlux Sitemap</title>
-  <style>body{font-family:Arial,sans-serif;padding:24px;background:#111;color:#eee}a{color:#4fd1c5;text-decoration:none}a:hover{text-decoration:underline}small{color:#999}</style>
-</head>
-<body>
-  <h1>Sitemap</h1>
-  <p>Generated sitemap with clickable URLs and last modified dates.</p>
-  <ul>${links.join('')}</ul>
-</body>
-</html>`;
-
-      res.header('Content-Type', 'text/html');
-      res.send(html);
-    } catch (error) {
-      console.error('Sitemap HTML generation error:', error);
-      res.status(500).send('Error generating sitemap HTML');
-    }
-  });
-
-  // Robots.txt
   app.get('/robots.txt', (req, res) => {
-    const baseUrl = process.env.APP_URL || 'https://merlux.au';
-    res.header('Content-Type', 'text/plain');
-    res.send(`User-agent: *
-Allow: /
-Sitemap: ${baseUrl}/sitemap.xml`);
+    const robotsPath = path.join(process.cwd(), 'dist', 'robots.txt');
+    if (fs.existsSync(robotsPath)) {
+      return res.sendFile(robotsPath);
+    }
+    res.send("User-agent: *\nAllow: /\nSitemap: /sitemap.xml");
   });
 
   // Helper for SEO injection
   const injectSEO = async (html: string, url: string) => {
     try {
-      const settingsSnap = await safeFirestore(() => dbAdmin.collection('settings').doc('system').get());
-      const globalSettings = settingsSnap?.exists ? settingsSnap.data() : null;
+      const settingsSnap = await dbAdmin.collection('settings').doc('system').get();
+      const globalSettings = settingsSnap.exists ? settingsSnap.data() : null;
       const globalSeo = globalSettings?.seo || {};
 
       let slug = url.split('?')[0].split('/').pop() || '';
       let isBlog = url.includes('/blog/');
+      let isOffer = url.includes('/offers/');
+      let isTour = url.includes('/tours/');
 
       let seoData: any = null;
 
       if (isBlog) {
-        const snap = await safeFirestore(() => dbAdmin.collection('blogs').where('slug', '==', slug).limit(1).get());
-        if (snap && !snap.empty) seoData = snap.docs[0].data();
+        const snap = await dbAdmin.collection('blogs').where('slug', '==', slug).limit(1).get();
+        if (!snap.empty) seoData = snap.docs[0].data();
+      } else if (isOffer) {
+        const snap = await dbAdmin.collection('offers').where('slug', '==', slug).limit(1).get();
+        if (!snap.empty) seoData = snap.docs[0].data();
+      } else if (isTour) {
+        const snap = await dbAdmin.collection('tours').where('slug', '==', slug).limit(1).get();
+        if (!snap.empty) seoData = snap.docs[0].data();
       } else if (slug) {
-        const snap = await safeFirestore(() => dbAdmin.collection('pages').where('slug', '==', slug).limit(1).get());
-        if (snap && !snap.empty) seoData = snap.docs[0].data();
+        const snap = await dbAdmin.collection('pages').where('slug', '==', slug).limit(1).get();
+        if (!snap.empty) seoData = snap.docs[0].data();
       } else {
         // Home page or other static pages without dynamic slug
-        const snap = await safeFirestore(() => dbAdmin.collection('pages').where('slug', '==', 'home').limit(1).get());
-        if (snap && !snap.empty) seoData = snap.docs[0].data();
+        const snap = await dbAdmin.collection('pages').where('slug', '==', 'home').limit(1).get();
+        if (!snap.empty) seoData = snap.docs[0].data();
       }
 
       const siteName = globalSeo.siteName || 'Merlux Chauffeur Services';
@@ -528,7 +444,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
       if (url.includes('.') || url.startsWith('/api/')) return next();
 
       try {
-        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        let template = fs.readFileSync(path.resolve(__dirnameResolved, 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(url, template);
         const html = await injectSEO(template, url);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);

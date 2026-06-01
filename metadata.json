@@ -3,5 +3,8 @@
   "description": "Premium luxury chauffeur booking platform in Melbourne, Australia. Airport transfers, corporate travel, and private tours.",
   "requestFramePermissions": [
     "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

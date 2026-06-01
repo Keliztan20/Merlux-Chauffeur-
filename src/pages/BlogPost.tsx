@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, limit, doc, getDoc, orderBy } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calendar, User, ArrowLeft, Clock, Share2, Loader2, ArrowRight, Map, Gift, Shield } from 'lucide-react';
 import { useSettings } from '../lib/SettingsContext';
+import { generateDescriptionFromContent } from '../lib/seo';
+import { formatDate } from '../lib/utils';
 import Comments from '../components/Comments';
 import { FormNotice, NoticeType } from '../components/FormNotice';
+import SEO from '../components/SEO';
 
 export default function BlogPost() {
   const { slug } = useParams();
@@ -65,39 +68,6 @@ export default function BlogPost() {
           );
           const relatedSnap = await getDocs(relatedQ);
           setRelatedPosts(relatedSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-
-          // SEO Metadata Updates
-          document.title = `${targetDoc.metaTitle || targetDoc.title} | Merlux`;
-
-          let metaDesc = document.querySelector('meta[name="description"]');
-          if (!metaDesc) {
-            metaDesc = document.createElement('meta');
-            metaDesc.setAttribute('name', 'description');
-            document.head.appendChild(metaDesc);
-          }
-          metaDesc.setAttribute('content', targetDoc.metaDescription || targetDoc.excerpt || '');
-
-          let metaKeywords = document.querySelector('meta[name="keywords"]');
-          if (!metaKeywords) {
-            metaKeywords = document.createElement('meta');
-            metaKeywords.setAttribute('name', 'keywords');
-            document.head.appendChild(metaKeywords);
-          }
-          const keywordsStr = Array.isArray(targetDoc.keywords) ? targetDoc.keywords.join(', ') : (targetDoc.keywords || '');
-          metaKeywords.setAttribute('content', keywordsStr);
-
-          // Robots noindex
-          let metaRobots = document.querySelector('meta[name="robots"]');
-          if (targetDoc.noindex) {
-            if (!metaRobots) {
-              metaRobots = document.createElement('meta');
-              metaRobots.setAttribute('name', 'robots');
-              document.head.appendChild(metaRobots);
-            }
-            metaRobots.setAttribute('content', 'noindex, nofollow');
-          } else if (metaRobots) {
-            metaRobots.setAttribute('content', 'index, follow');
-          }
 
           window.scrollTo(0, 0);
 
@@ -182,10 +152,30 @@ export default function BlogPost() {
     );
   }
 
-  const articleDate = post.date || (post.createdAt?.toDate ? post.createdAt.toDate().toLocaleDateString() : (post.createdAt?.seconds ? new Date(post.createdAt.seconds * 1000).toLocaleDateString() : ''));
+  const articleDate = formatDate(post.createdAt || post.date);
 
   return (
     <div className="bg-black min-h-screen pb-24">
+      <SEO 
+        title={post.metaTitle || post.title}
+        description={post.metaDescription || post.excerpt || generateDescriptionFromContent(post.content)}
+        keywords={Array.isArray(post.keywords) ? post.keywords.join(', ') : post.keywords}
+        ogImage={post.featuredImage || post.image}
+        ogType="article"
+        noindex={post.noindex}
+        structuredData={{
+          "@context": "https://schema.org",
+          "@type": "BlogPosting",
+          "headline": post.title,
+          "image": [post.featuredImage || post.image],
+          "datePublished": post.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          "author": [{
+            "@type": "Organization",
+            "name": "Merlux Chauffeur Services",
+            "url": window.location.origin
+          }]
+        }}
+      />
       {/* Back Button and Featured Image Hero */}
       <section className="relative h-[70vh] w-full overflow-hidden">
         <img

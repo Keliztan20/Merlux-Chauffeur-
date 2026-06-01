@@ -4,6 +4,7 @@ import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestor
 import { db } from '../lib/firebase';
 import { ChevronDown, HelpCircle, MessageSquare, Search, CornerDownRight } from 'lucide-react';
 import { cn } from '../lib/utils';
+import SEO from '../components/SEO';
 
 interface FAQ {
   id: string;
@@ -57,6 +58,10 @@ const FAQPage: React.FC = () => {
   const schemaData = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
+    "mainEntityOfPage": {
+      "@type": "WebPage",
+      "@id": typeof window !== 'undefined' ? window.location.href : ''
+    },
     "mainEntity": faqs.map(faq => ({
       "@type": "Question",
       "name": faq.question,
@@ -69,9 +74,11 @@ const FAQPage: React.FC = () => {
 
   return (
     <div className="min-h-screen pt-20 pb-20 px-6">
-      <script type="application/ld+json">
-        {JSON.stringify(schemaData)}
-      </script>
+      <SEO 
+        title="Frequently Asked Questions"
+        description="Find answers to common questions about Merlux Chauffeur services, bookings, luxury fleet, and travel arrangements in Melbourne."
+        schema={schemaData}
+      />
 
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-16">

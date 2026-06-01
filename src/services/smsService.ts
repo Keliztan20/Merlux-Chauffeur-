@@ -52,9 +52,9 @@ export const smsService = {
     }
   },
 
-  async notify(eventName: string, data: any) {
+  async notify(eventName: string, data: any, ignoreGlobalDisabled: boolean = false) {
     const settings = await this.getSettings();
-    if (!settings?.enabled) {
+    if (!ignoreGlobalDisabled && !settings?.enabled) {
       console.log('SMS notifications are disabled globally');
       return;
     }
@@ -65,10 +65,63 @@ export const smsService = {
       return;
     }
 
+    // Enrich driver/vehicle information if vehicleId exists
+    const enrichedData = { ...data };
+    if (!enrichedData.bookingId) enrichedData.bookingId = enrichedData.id || '';
+    if (!enrichedData.id) enrichedData.id = enrichedData.bookingId || '';
+    if (enrichedData.vehicleId) {
+      try {
+        const vehicleDoc = await getDoc(doc(db, 'fleet', enrichedData.vehicleId));
+        if (vehicleDoc.exists()) {
+          const vData = vehicleDoc.data();
+          const fleetName = `${vData.name || ''} ${vData.model || ''}`.trim() || vData.name || '';
+          const fleetPlate = vData.plateNo || '';
+          enrichedData.driverVehicle = fleetName;
+          enrichedData.driverPlate = fleetPlate;
+          enrichedData.vehicleName = fleetName;
+          enrichedData.vehiclePlate = fleetPlate;
+          enrichedData.fleetName = fleetName;
+          enrichedData.fleetPlate = fleetPlate;
+        }
+      } catch (err) {
+        console.error('Error enriching vehicle details for SMS notification:', err);
+      }
+    }
+
+    if (enrichedData.driverId && (!enrichedData.driverName || !enrichedData.driverPhone)) {
+      try {
+        const driverDoc = await getDoc(doc(db, 'users', enrichedData.driverId));
+        if (driverDoc.exists()) {
+          const drData = driverDoc.data();
+          if (!enrichedData.driverName) enrichedData.driverName = drData.name || '';
+          if (!enrichedData.driverPhone) enrichedData.driverPhone = drData.phone || '';
+          if (!enrichedData.driverEmail) enrichedData.driverEmail = drData.email || '';
+        }
+      } catch (err) {
+        console.error('Error enriching driver details for SMS notification:', err);
+      }
+    }
+
     let message = template.content;
+    
+    // Process conditional wrapping blocks first
+    Object.keys(enrichedData).forEach(key => {
+      const val = enrichedData[key];
+      const hasValue = val !== undefined && val !== null && String(val).trim() !== '' && String(val).trim() !== '0' && String(val).trim() !== '0.00' && String(val).trim() !== 'N/A';
+      const ifRegex = new RegExp(`\\{if:${key}\\}([\\s\\S]*?)\\{\\/if:${key}\\}`, 'g');
+      if (hasValue) {
+        message = message.replace(ifRegex, '$1');
+      } else {
+        message = message.replace(ifRegex, '');
+      }
+    });
+
+    // Cleanup any extra or nested unresolved standard if blocks
+    message = message.replace(/\{if:\w+\}[\s\S]*?\{\/if:\w+\}/g, '');
+
     // Basic placeholder replacement
-    Object.keys(data).forEach(key => {
-      const value = data[key] || '';
+    Object.keys(enrichedData).forEach(key => {
+      const value = enrichedData[key] || '';
       message = message.replace(new RegExp(`{${key}}`, 'g'), String(value));
     });
 

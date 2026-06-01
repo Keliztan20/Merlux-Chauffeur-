@@ -1,10 +1,8 @@
 import { useState, FormEvent, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mail, Lock, LogIn, UserPlus, AlertCircle, ChevronRight, Phone, MapPin, ArrowRight, Chrome, User, ShieldCheck, Clock, Check } from 'lucide-react';
+import { Mail, Lock, UserPlus, AlertCircle, ChevronRight, Phone, MapPin, ArrowRight, User, ShieldCheck, Clock, Check } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -18,6 +16,7 @@ import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, getDocs
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import Logo from '../components/layout/Logo';
 import { cn } from '../lib/utils';
+import SEO from '../components/SEO';
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -31,6 +30,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isWaitingVerification, setIsWaitingVerification] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -38,19 +38,49 @@ export default function Login() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    if (params.get('mode') === 'register') {
+      setIsLogin(false);
+    }
     if (params.get('reason') === 'session_expired') {
       setError('Your session has expired due to inactivity. Please log in again.');
     }
   }, [location.search]);
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const isRegisterMode = params.get('mode') === 'register';
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
+      if (user && user.emailVerified && !isRegisterMode) {
         navigate(from, { replace: true });
+      } else if (user && !user.emailVerified) {
+        setIsWaitingVerification(true);
       }
     });
     return () => unsubscribe();
-  }, [navigate, from]);
+  }, [navigate, from, location.search]);
+
+  // Polling for verification status
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (isWaitingVerification && auth.currentUser) {
+      interval = setInterval(async () => {
+        try {
+          await auth.currentUser?.reload();
+          if (auth.currentUser?.emailVerified) {
+            navigate(from, { replace: true });
+          }
+        } catch (err) {
+          console.error('Error reloading user:', err);
+        }
+      }, 3000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isWaitingVerification, navigate, from]);
 
   const createUserProfile = async (user: any, displayName?: string, selectedRole?: string, phone?: string, address?: string) => {
     const userRef = doc(db, 'users', user.uid);
@@ -65,6 +95,7 @@ export default function Login() {
           phone: phone || '',
           address: address || '',
           role: selectedRole || 'customer',
+          emailVerified: user.emailVerified || false,
           createdAt: serverTimestamp()
         });
 
@@ -106,26 +137,6 @@ export default function Login() {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      // Google login always defaults to 'customer' role
-      await createUserProfile(result.user, result.user.displayName || undefined, 'customer');
-      navigate(from, { replace: true });
-    } catch (error: any) {
-      console.error('Login error:', error);
-      setLoading(false);
-      if (error.code === 'auth/operation-not-allowed') {
-        setError('Google login is not enabled. Please enable it in your Firebase Console (Authentication > Sign-in method).');
-      } else if (error.code !== 'auth/popup-closed-by-user') {
-        setError('Google login failed. Please try again.');
-      }
-    }
-  };
-
   const handleEmailAuth = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
@@ -144,12 +155,19 @@ export default function Login() {
       localStorage.setItem('rememberMe', rememberMe ? 'true' : 'false');
 
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const result = await signInWithEmailAndPassword(auth, email, password);
+        if (!result.user.emailVerified) {
+          setIsWaitingVerification(true);
+          setLoading(false);
+          return;
+        }
       } else {
         const result = await createUserWithEmailAndPassword(auth, email, password);
         await sendEmailVerification(result.user);
         await createUserProfile(result.user, name, role, phone, address);
-        setError('A verification email has been sent to your inbox. Please verify your email.');
+        setIsWaitingVerification(true);
+        setLoading(false);
+        return;
       }
       navigate(from, { replace: true });
     } catch (err: any) {
@@ -166,7 +184,7 @@ export default function Login() {
       } else if (err.code === 'auth/too-many-requests') {
         errorMessage = 'Too many failed login attempts. Please try again later or reset your password.';
       } else if (err.code === 'auth/operation-not-allowed') {
-        errorMessage = 'Authentication providers are not enabled. Please enable Email/Password and Google in your Firebase Console (Authentication > Sign-in method).';
+        errorMessage = 'Authentication providers are not enabled. Please enable Email/Password in your Firebase Console (Authentication > Sign-in method).';
       } else if (err.code === 'auth/invalid-email') {
         errorMessage = 'Please enter a valid email address.';
       } else if (err.code === 'auth/user-disabled') {
@@ -190,6 +208,10 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center relative overflow-hidden mt-10">
+      <SEO 
+        title="Login - Merlux Chauffeurs"
+        robots="noindex, nofollow"
+      />
       {/* Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full blur-[120px]" />
@@ -244,14 +266,85 @@ export default function Login() {
                 <Logo className="h-10" />
               </div>
               <span className="text-gold uppercase tracking-[0.4em] text-[10px] font-bold mb-2 block">
-                {isForgotPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Get Started')}
+                {isForgotPassword ? 'Reset Password' : (isWaitingVerification ? 'Verify Email' : (isLogin ? 'Welcome Back' : 'Get Started'))}
               </span>
               <h1 className="text-3xl font-display text-white">
-                {isForgotPassword ? 'Forgot Password' : (isLogin ? 'Client Login' : 'Create Account')}
+                {isForgotPassword ? 'Forgot Password' : (isWaitingVerification ? 'Verify Email' : (isLogin ? 'Client Login' : 'Create Account'))}
               </h1>
             </div>
 
-            {resetEmailSent ? (
+            {isWaitingVerification ? (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-center space-y-6"
+              >
+                <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-4 relative">
+                  <Mail className="text-gold" size={32} />
+                  <motion.div 
+                    animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                    className="absolute inset-0 bg-gold/20 rounded-full blur-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-bold text-white">Verification Pending</h3>
+                  <p className="text-white/60 text-sm leading-relaxed">
+                    We've sent a verification link to <span className="text-gold font-bold">{auth.currentUser?.email}</span>. 
+                    <br />Please click the link to verify your account.
+                  </p>
+                </div>
+                
+                <div className="bg-white/5 border border-white/5 rounded-xl p-4 flex items-center gap-3 justify-center">
+                  <div className="w-2 h-2 bg-gold rounded-full animate-pulse" />
+                  <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Waiting for verification...</span>
+                </div>
+
+                {error && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl mb-6 flex items-center gap-3 text-xs"
+                  >
+                    <AlertCircle size={16} className="shrink-0" />
+                    {error}
+                  </motion.div>
+                )}
+
+                <div className="space-y-3 pt-4">
+                  <button 
+                    onClick={async () => {
+                      if (auth.currentUser) {
+                        setLoading(true);
+                        try {
+                          await sendEmailVerification(auth.currentUser);
+                          setError('Verification email resent!');
+                        } catch (err: any) {
+                          setError('Failed to resend. Please try again later.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                    disabled={loading}
+                    className="w-full bg-white/5 text-white py-4 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                  >
+                    {loading ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : 'Resend Email'}
+                  </button>
+                  <button 
+                    onClick={async () => {
+                      await auth.signOut();
+                      setIsWaitingVerification(false);
+                      setIsLogin(true);
+                      setError('');
+                    }}
+                    className="w-full text-white/40 hover:text-white py-2 font-bold uppercase tracking-widest text-[10px] transition-colors"
+                  >
+                    Back to Login
+                  </button>
+                </div>
+              </motion.div>
+            ) : resetEmailSent ? (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -288,28 +381,6 @@ export default function Login() {
                     {error}
                   </motion.div>
                 )}
-
-                {!isForgotPassword && (
-                  <button 
-                    onClick={handleGoogleLogin}
-                    disabled={loading}
-                    className="w-full flex items-center justify-center gap-3 bg-white text-black py-3.5 rounded-xl font-bold hover:bg-gold transition-all mb-6 group disabled:opacity-50"
-                  >
-                    <Chrome size={20} className="group-hover:scale-110 transition-transform" />
-                    <span className="text-sm">Continue with Google</span>
-                  </button>
-                )}
-
-                <div className="relative mb-8">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-white/5"></div>
-                  </div>
-                  <div className="relative flex justify-center text-[10px] uppercase tracking-widest">
-                    <span className="bg-[#0b0b0b] px-4 text-white/20">
-                      {isForgotPassword ? 'Enter your email' : 'Or use email'}
-                    </span>
-                  </div>
-                </div>
 
                 <form onSubmit={handleEmailAuth} className="space-y-4">
                   <AnimatePresence mode="wait">

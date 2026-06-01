@@ -4,6 +4,7 @@ import { User, Briefcase, Check, Star, Navigation } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import SEO from '../components/SEO';
 
 const DEFAULT_FLEET = [
   {
@@ -50,7 +51,11 @@ export default function Fleet() {
   }, []);
 
   return (
-    <div className="pt-24 md:pt-32 pb-24 bg-black min-h-screen">
+    <div className="pt-20 md:pt-32 pb-24 bg-black min-h-screen">
+      <SEO 
+        title="Our Luxury Vehicle Fleet"
+        description="Experience the pinnacle of automotive engineering. Browse our meticulously maintained fleet of premium sedans, SUVs, and luxury vans for any occasion."
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="text-center mb-16 md:mb-20">
           <span className="text-gold uppercase tracking-[0.3em] text-[10px] md:text-xs font-bold mb-4 block">Our Fleet</span>

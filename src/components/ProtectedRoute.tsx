@@ -24,7 +24,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAuthenticated(!!user);
+      setAuthenticated(!!user && user.emailVerified);
       setLoading(false);
     });
 

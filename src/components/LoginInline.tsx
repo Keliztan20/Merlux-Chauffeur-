@@ -1,12 +1,9 @@
 import { useState } from 'react';
-import { Mail, Lock, LogIn, AlertCircle, Chrome } from 'lucide-react';
+import { Mail, Lock, AlertCircle } from 'lucide-react';
 import { 
-  signInWithEmailAndPassword, 
-  signInWithPopup, 
-  GoogleAuthProvider 
+  signInWithEmailAndPassword
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 import { cn } from '../lib/utils';
 
 export default function LoginInline() {
@@ -20,35 +17,13 @@ export default function LoginInline() {
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (err: any) {
-      setError(err.message || 'Failed to login');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      
-      // Ensure user profile exists
-      const userRef = doc(db, 'users', result.user.uid);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        await setDoc(userRef, {
-          id: result.user.uid,
-          name: result.user.displayName || 'New User',
-          email: result.user.email,
-          role: 'customer',
-          createdAt: serverTimestamp()
-        });
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      if (!result.user.emailVerified) {
+        setError('Please verify your email before logging in.');
+        await auth.signOut();
       }
     } catch (err: any) {
-      setError(err.message || 'Google login failed');
+      setError(err.message || 'Failed to login');
     } finally {
       setLoading(false);
     }
@@ -108,24 +83,6 @@ export default function LoginInline() {
       </button>
     </div>
   </div>
-
-  <div className="relative py-2">
-    <div className="absolute inset-0 flex items-center">
-      <div className="w-full border-t border-white/10"></div>
-    </div>
-    <div className="relative flex justify-center text-[10px] uppercase tracking-tighter">
-      <span className="bg-[#0A0A0A] px-2 text-white/30">Or continue with</span>
-    </div>
-  </div>
-
-  <button
-    onClick={handleGoogleLogin}
-    disabled={loading}
-    className="w-full bg-white/5 border border-white/10 text-white py-3 rounded-xl text-xs font-medium hover:bg-white/10 transition-all flex items-center justify-center gap-3"
-  >
-    <Chrome size={16} className="text-gold" />
-    Google
-  </button>
 </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, FormEvent, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Clock, Users, ArrowRight, Star, Calendar, User, Mail, Phone, CreditCard, Minus, Plus, ChevronRight, CheckCircle, Info, LayoutGrid, DollarSign, Tag, X, Image as ImageIcon, Banknote as BanknoteIcon, UserCheck, FileText, Luggage, LocateFixed, BadgePercent, Shield } from 'lucide-react';
+import { MapPin, Clock, Users, ArrowRight, Star, Calendar, User, Mail, Phone, CreditCard, Minus, Plus, ChevronRight, ChevronLeft, CheckCircle, Info, LayoutGrid, DollarSign, Tag, X, Image as ImageIcon, Banknote as BanknoteIcon, UserCheck, FileText, Luggage, LocateFixed, BadgePercent, Shield } from 'lucide-react';
 import { useNavigate, Link, useParams } from 'react-router-dom';
 import { collection, onSnapshot, query, where, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -11,6 +11,8 @@ import { cn } from '../lib/utils';
 import Logo from '../components/layout/Logo';
 import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_ID } from '../lib/google-maps';
 import LoginInline from '../components/LoginInline';
+import SEO from '../components/SEO';
+import { generateDescriptionFromContent } from '../lib/seo';
 
 export default function Tours() {
   const navigate = useNavigate();
@@ -21,6 +23,7 @@ export default function Tours() {
   const [selectedTour, setSelectedTour] = useState<any>(null);
   const [systemSettings, setSystemSettings] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [priceAddons, setPriceAddons] = useState<any[]>([]);
   const [notice, setNotice] = useState<{ type: NoticeType; message: string; title?: string } | null>(null);
 
   const showNotice = (type: NoticeType, message: string, title?: string) => {
@@ -213,6 +216,27 @@ export default function Tours() {
   const filteredTours = useMemo(() => {
     let result = [...tours];
 
+    // Filter out expired tours
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    result = result.filter(t => {
+      if (t.availability?.endDate) {
+        try {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(t.availability.endDate)) {
+            return t.availability.endDate >= todayStr;
+          }
+          const end = new Date(t.availability.endDate);
+          if (!isNaN(end.getTime())) {
+            end.setHours(23, 59, 59, 999);
+            return end >= now;
+          }
+        } catch (e) {
+          console.error("Error parsing tour endDate:", e);
+        }
+      }
+      return true;
+    });
+
     if (searchQuery) {
       result = result.filter(t =>
         t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -246,7 +270,18 @@ export default function Tours() {
       setTours(parsedTours);
       setIsLoading(false);
     });
-    return () => unsubscribe();
+
+    const addonsQ = query(collection(db, 'price-addons'), where('active', '==', true));
+    const unsubscribeAddons = onSnapshot(addonsQ, (snapshot) => {
+      setPriceAddons(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("Price addons loading suspended:", err);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeAddons();
+    };
   }, []);
 
   // Deep Linking Effect
@@ -259,15 +294,6 @@ export default function Tours() {
       }
     }
   }, [slug, tours, selectedTour]);
-
-  // Set page title based on selected tour
-  useEffect(() => {
-    if (selectedTour) {
-      document.title = `${selectedTour.title} | Merlux Chauffeur`;
-    } else {
-      document.title = 'Private Tours | Merlux Chauffeur';
-    }
-  }, [selectedTour]);
 
   const handleTourSelect = (tour: any) => {
     setSelectedTour(tour);
@@ -319,8 +345,9 @@ export default function Tours() {
     });
   };
 
-  const calculateTotalPrice = () => {
-    if (!selectedFleet) return 0;
+  const calculateTourPriceBreakdown = () => {
+    if (!selectedFleet) return { base: 0, extras: 0, subtotal: 0, appliedAddons: [], total: 0 };
+
     let base = Number(selectedFleet?.salePrice || selectedFleet?.standardPrice || selectedFleet?.price || 0);
 
     if (details.returnRide) {
@@ -331,10 +358,48 @@ export default function Tours() {
       const extra = (selectedTour?.extras || []).find((e: any) => (e.id || e.name) === idOrName);
       return acc + (Number(extra?.price || 0) * (count as number));
     }, 0);
-    return (base * quantity) + extrasTotal;
+
+    const subtotal = (base * quantity) + extrasTotal;
+
+    // Apply Add-ons
+    let addonTotal = 0;
+    const appliedAddons: any[] = [];
+    (priceAddons || []).forEach((addon) => {
+      if (!addon.active) return;
+
+      // For tours/offers, gross/net/total are often the same since they are fixed packages
+      // but we maintain the logic for consistency
+      const baseValue = (base * quantity);
+
+      let value = 0;
+      if (addon.type === 'percentage') {
+        value = baseValue * (addon.value / 100);
+      } else {
+        value = addon.value;
+      }
+
+      addonTotal += value;
+      appliedAddons.push({
+        id: addon.id,
+        name: addon.name,
+        value: value,
+        type: addon.type,
+        target: addon.target
+      });
+    });
+
+    return {
+      base: base * quantity,
+      extras: extrasTotal,
+      subtotal,
+      appliedAddons,
+      addonTotal,
+      total: subtotal + addonTotal
+    };
   };
 
-  const totalPrice = calculateTotalPrice();
+  const bookingPricing = calculateTourPriceBreakdown();
+  const totalPrice = bookingPricing.total;
 
   const handleDetailsSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -414,6 +479,14 @@ export default function Tours() {
         vehicleId: selectedFleet?.id || selectedFleet?.name || 'unknown',
         vehicleType: selectedFleet?.name || 'Unknown Vehicle',
         price: totalPrice,
+        priceBreakdown: {
+          base: bookingPricing.base,
+          extras: bookingPricing.extras,
+          subtotal: bookingPricing.subtotal,
+          appliedAddons: bookingPricing.appliedAddons,
+          addonTotal: bookingPricing.addonTotal,
+          total: bookingPricing.total
+        },
         selectedExtras: selectedExtras,
         status: 'pending',
         type: 'tour',
@@ -476,10 +549,25 @@ export default function Tours() {
 
   return (
     <>
-      <div className="pt-32 pb-24 bg-black min-h-screen">
+      <SEO
+        title={selectedTour ? selectedTour.title : 'Private Tours Melbourne'}
+        description={selectedTour ? (selectedTour.seoDescription || selectedTour.shortDescription) : 'Luxury private tours in Melbourne and Victoria.'}
+        ogImage={selectedTour?.image || selectedTour?.featuredImage}
+        structuredData={selectedTour ? {
+          "@context": "https://schema.org",
+          "@type": "Service",
+          "name": selectedTour.title,
+          "description": selectedTour.shortDescription,
+          "provider": {
+            "@type": "Organization",
+            "name": "Merlux Chauffeur Services"
+          },
+          "areaServed": "Melbourne, Australia"
+        } : undefined}
+      />
+      <div className="pt-20 pb-24 bg-black min-h-screen">
         <section className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <Logo className="justify-center mb-8" />
             <motion.span
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -504,7 +592,7 @@ export default function Tours() {
                 { id: 3, label: 'Details', icon: User },
                 { id: 4, label: 'Summary', icon: FileText }
               ].map((s, idx, arr) => (
-                <div key={s.id} className="flex-1 flex flex-col items-center xl:flex-row xl:items-center">
+                <div key={`tour-step-${s.id}`} className="flex-1 flex flex-col items-center xl:flex-row xl:items-center">
                   <div
                     className={cn(
                       "flex items-center gap-2 transition-all duration-300",
@@ -572,7 +660,7 @@ export default function Tours() {
             </div>
           </div>
 
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="popLayout">
             {!showFullDetails && step === 1 && (
               <motion.div
                 key="filters"
@@ -604,8 +692,8 @@ export default function Tours() {
                         onChange={(e) => setCategoryFilter(e.target.value)}
                         className="custom-select w-full bg-black/40 border border-white/10 rounded-[1.2rem] py-2 pl-12 pr-8 focus:border-gold outline-none transition-all text-sm uppercase appearance-none cursor-pointer"
                       >
-                        {categories.map(cat => (
-                          <option key={cat} value={cat}>
+                        {categories.map((cat, cIdx) => (
+                          <option key={`cat-${cat}-${cIdx}`} value={cat}>
                             {cat === 'all' ? 'All Collections' : cat}
                           </option>
                         ))}
@@ -622,8 +710,8 @@ export default function Tours() {
                         onChange={(e) => setDurationFilter(e.target.value)}
                         className="custom-select w-full bg-black/40 border border-white/10 rounded-[1.2rem] py-2 pl-12 pr-8 focus:border-gold outline-none transition-all text-sm appearance-none cursor-pointer"
                       >
-                        {durations.map(dur => (
-                          <option key={dur} value={dur}>
+                        {durations.map((dur, dIdx) => (
+                          <option key={`dur-${dur}-${dIdx}`} value={dur}>
                             {dur === 'all' ? 'Any Duration' : dur}
                           </option>
                         ))}
@@ -981,36 +1069,32 @@ export default function Tours() {
 
             {!showFullDetails && step === 1 && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-16 glass p-8 md:p-12 rounded-[2rem] border border-gold/20 relative overflow-hidden group"
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                className="mt-24 bg-gold rounded-[3rem] p-12 md:p-20 text-black text-center relative overflow-hidden shadow-2xl"
               >
-                <div className="absolute top-0 right-0 p-4 opacity-10 blur-[2px] transition-all duration-700 group-hover:scale-110 group-hover:opacity-20 group-hover:blur-none">
-                  <BadgePercent size={200} className="text-gold" />
+                <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+                  <div className="absolute top-[-50%] left-[-20%] w-[100%] h-[200%] bg-white blur-[120px] rounded-full rotate-45" />
                 </div>
-                <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-                  <div>
-                    <span className="text-[10px] uppercase tracking-widest text-gold font-bold mb-2 block">Offer Airport Ride</span>
-                    <h3 className="text-2xl md:text-4xl font-display mb-3 leading-tight">Premium Melbourne Airport Transfers</h3>
-                    <p className="text-white/60 text-xs md:text-sm leading-relaxed max-w-lg">
-                      Enjoy smooth and reliable airport transfers with Merlux Chauffeur. Travel in luxury with professional chauffeurs, comfortable premium vehicles, and punctual pickup and drop-off service across Melbourne.
-                    </p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-4 lg:justify-end">
+                <div className="relative z-10 max-w-2xl mx-auto">
+                  <span className="uppercase tracking-[0.3em] text-[10px] font-bold mb-4 block">Elevated Travel</span>
+                  <h2 className="text-4xl md:text-6xl font-display mb-8 leading-tight">Reserve Your <span className="italic">Luxury Ride</span></h2>
+                  <p className="text-black/70 mb-10 text-lg leading-relaxed text-balance">
+                    Whether it's a specialized regional tour or a premium point-to-point transfer, we guarantee an unparalleled travel experience.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     <Link
                       to="/booking"
-                      className="relative overflow-hidden group/btn flex items-center justify-center gap-2 px-8 py-3 rounded-full border-2 border-gold bg-gold text-black font-bold uppercase tracking-widest text-[11px] transition-all duration-300 hover:bg-transparent hover:text-gold"
+                      className="bg-black text-white px-12 py-5 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-white hover:text-black transition-all shadow-2xl"
                     >
-                      <span className="relative z-10 flex items-center gap-2">
-                        Book Your Journey
-                        <ArrowRight size={16} className="group-hover/btn:translate-x-1 transition-transform" />
-                      </span>
+                      Book A Journey
                     </Link>
                     <Link
                       to="/offers"
-                      className="flex items-center justify-center gap-2 px-8 py-3 rounded-full border-2 border-white/20 bg-black/50 text-white/60 font-bold uppercase tracking-widest text-[11px] transition-all duration-300 hover:border-white hover:text-white"
+                      className="bg-white/20 backdrop-blur-md border border-black/10 text-black px-12 py-5 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-black hover:text-white transition-all font-display"
                     >
-                      Explore Offers
+                      View Special Offers
                     </Link>
                   </div>
                 </div>
@@ -1257,18 +1341,28 @@ export default function Tours() {
                       {/* Combined Price breakdown */}
                       <div className="border-t border-white/5 pt-8 mb-8 space-y-4">
                         <div className="flex items-center justify-between text-[11px] font-bold text-white/30 tracking-[0.1em] uppercase">
-                          <span>Primary Fleet ({quantity} Unit)</span>
+                          <span>Ride Price</span>
                           <span className="text-white font-mono">${(getFleetPrice(selectedFleet) * quantity).toFixed(2)}</span>
                         </div>
-                        <div className="flex items-center justify-between text-[11px] font-bold text-white/30 tracking-[0.1em] uppercase">
-                          <span>Extras Total</span>
-                          <span className="text-white font-mono">
-                            ${Object.entries(selectedExtras).reduce((acc, [idOrName, count]) => {
-                              const extra = (selectedTour?.extras || []).find((e: any) => (e.id || e.name) === idOrName);
-                              return acc + (Number(extra?.price || 0) * (count as number));
-                            }, 0).toFixed(2)}
-                          </span>
-                        </div>
+                        {bookingPricing.appliedAddons.map((addon: any, aIdx: number) => (
+                          <div key={`addon-tour-summary-${addon.id || aIdx}-${aIdx}`} className="flex justify-between border-b border-white/5 pb-4">
+                            <span className="text-gold text-[10px] uppercase tracking-widest font-bold">{addon.name}</span>
+                            <span className="text-gold font-bold text-sm">
+                              +${(addon.price ?? addon.value ?? addon.amount ?? addon.cost ?? 0).toFixed(2)}
+                            </span>
+                          </div>
+                        ))}
+                        {Object.keys(selectedExtras).length > 0 && (
+                          <div className="flex items-center justify-between text-[11px] font-bold text-white/30 tracking-[0.1em] uppercase">
+                            <span>Extras Total</span>
+                            <span className="text-white font-mono">
+                              ${Object.entries(selectedExtras).reduce((acc, [idOrName, count]) => {
+                                const extra = (selectedTour?.extras || []).find((e: any) => (e.id || e.name) === idOrName);
+                                return acc + (Number(extra?.price || 0) * (count as number));
+                              }, 0).toFixed(2)}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="mb-10 text-center glass p-6 rounded-3xl border border-gold/20 bg-gold/5">
@@ -1593,6 +1687,18 @@ export default function Tours() {
                           </div>
                         )}
 
+                        {bookingPricing.appliedAddons.length > 0 && (
+                          <div className="space-y-2 border-b border-white/5 pb-3">
+                            <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Price Add-ons</p>
+                            {bookingPricing.appliedAddons.map((addon: any, aIdx: number) => (
+                              <div key={`addon-tour-sticky-summary-${addon.id || aIdx}-${aIdx}`} className="flex justify-between text-[10px] text-white/60">
+                                <span>{addon.name}</span>
+                                <span className="font-mono text-gold font-bold">+${addon.value.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         <div className="flex items-center justify-between pt-2">
                           <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Grand Total</p>
                           <p className="text-2xl font-display text-white">${totalPrice.toFixed(2)}</p>
@@ -1675,6 +1781,12 @@ export default function Tours() {
                       <span className="text-white/20 text-[10px] uppercase tracking-widest font-bold">Pickup Location</span>
                       <span className="text-white font-bold text-sm">{details.pickup}</span>
                     </div>
+                    {bookingPricing.appliedAddons.map((addon: any, aIdx: number) => (
+                      <div key={`addon-tour-summary-${addon.id || aIdx}-${aIdx}`} className="flex justify-between border-b border-white/5 pb-4">
+                        <span className="text-gold/40 text-[10px] uppercase tracking-widest font-bold">{addon.name}</span>
+                        <span className="text-gold font-bold text-sm">+{addon.value.toFixed(2)}</span>
+                      </div>
+                    ))}
                     <div className="flex justify-between pt-6">
                       <span className="text-gold text-[10px] uppercase tracking-widest font-bold mt-2">Grand Total</span>
                       <span className="text-5xl font-display text-white">${totalPrice.toFixed(2)}</span>
@@ -1682,7 +1794,7 @@ export default function Tours() {
                   </div>
 
                   {/* Payment Selection */}
-                  <div className="grid grid-cols-2 gap-4 mb-10">
+                  <div className="grid grid-cols-2 gap-4 mb-8">
                     {[
                       { id: 'stripe', label: 'Digital Payment', sub: 'Instant Update', icon: CreditCard },
                       { id: 'cash', label: 'Cash Payment', sub: 'Pay on Arrival', icon: BanknoteIcon }
@@ -1702,12 +1814,6 @@ export default function Tours() {
                         <p className={cn("text-[8px] uppercase font-bold opacity-40", paymentType === p.id ? "text-black" : "text-gold")}>{p.sub}</p>
                       </button>
                     ))}
-                    <div className="mt-8 flex items-center justify-center gap-6 opacity-30 border-t border-white/5 pt-8">
-                      <img src="https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg" className="h-4 grayscale invert" />
-                      <div className="w-px h-4 bg-white/20" />
-                      <CreditCard size={16} />
-                      <span className="text-[8px] uppercase font-bold tracking-widest">Encrypted</span>
-                    </div>
                   </div>
 
                   <button
@@ -1718,12 +1824,32 @@ export default function Tours() {
                     {isSubmitting ? 'Processing Booking...' : `Confirm Your ${paymentType === 'stripe' ? 'Payment' : 'Reservation'}`}
                   </button>
                   <div className="flex items-center justify-center gap-8">
-                    <button onClick={reset} className="text-white/20 uppercase tracking-widest text-[9px] font-bold hover:text-red-500 transition-all">
-                      Cancel Booking
+                    <button
+                      onClick={reset}
+                      className="group flex items-center gap-2 text-white/20 uppercase tracking-widest text-[9px] font-bold hover:text-red-500 transition-all duration-300"
+                    >
+                      <ChevronLeft
+                        size={10}
+                        className="transform translate-x-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-300 ease-out"
+                      />
+                      <span className="transform group-hover:-translate-x-0.5 transition-transform duration-300">
+                        Change Tour Package
+                      </span>
                     </button>
+
                     <div className="w-px h-3 bg-white/10" />
-                    <button onClick={() => setStep(3)} className="text-white/20 uppercase tracking-widest text-[9px] font-bold hover:text-gold transition-all">
-                      Edit Details
+
+                    <button
+                      onClick={() => setStep(3)}
+                      className="group flex items-center gap-2 text-white/20 uppercase tracking-widest text-[9px] font-bold hover:text-gold transition-all duration-300"
+                    >
+                      <span className="transform group-hover:translate-x-0.5 transition-transform duration-300">
+                        Edit Contact Details
+                      </span>
+                      <ChevronRight
+                        size={10}
+                        className="transform -translate-x-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-300 ease-out"
+                      />
                     </button>
                   </div>
                 </div>

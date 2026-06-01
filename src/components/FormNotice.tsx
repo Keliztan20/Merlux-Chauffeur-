@@ -75,7 +75,13 @@ export const FormNotice: React.FC<FormNoticeProps> = ({
   if (isMobile) toastPosition = toastSettings?.position?.mobile || 'top-center';
 
   let toastWidth = toastSettings?.width?.desktop || 'auto';
-  if (isMobile) toastWidth = toastSettings?.width?.mobile || 'calc(100% - 32px)';
+  if (isMobile) toastWidth = toastSettings?.width?.mobile || 'full-margin';
+
+  // Map settings to CSS
+  let finalToastWidth = toastWidth;
+  if (toastWidth === 'full-margin') finalToastWidth = 'calc(100% - 32px)';
+  else if (toastWidth === 'full') finalToastWidth = '100%';
+  else if (toastWidth === 'auto') finalToastWidth = 'auto';
 
   const offset = toastSettings?.offset ? Number(toastSettings.offset) : 16;
   const padding = toastSettings?.padding ? Number(toastSettings.padding) : 16;
@@ -84,7 +90,7 @@ export const FormNotice: React.FC<FormNoticeProps> = ({
   const fixedStyles: React.CSSProperties = isFloating ? {
     position: 'fixed',
     zIndex: 9999,
-    width: toastWidth,
+    width: finalToastWidth,
     padding: `${padding}px`,
     top: toastPosition.startsWith('top') ? `${offset}px` : 'auto',
     bottom: toastPosition.startsWith('bottom') ? `${offset}px` : 'auto',
@@ -92,7 +98,7 @@ export const FormNotice: React.FC<FormNoticeProps> = ({
     right: toastPosition.endsWith('right') ? `${offset}px` : 'auto',
     transform: toastPosition.endsWith('center') ? 'translateX(-50%)' : 'none',
   } : {
-    width: toastWidth,
+    width: finalToastWidth,
     padding: `${padding}px`,
   };
 
