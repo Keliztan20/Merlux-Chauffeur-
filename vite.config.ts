@@ -25,7 +25,6 @@ export default defineConfig(({ mode }) => {
     build: {
       chunkSizeWarningLimit: 2600,
       rollupOptions: {
-        // ✅ merge everything here
         output: {
           manualChunks: {
             vendor: ["react", "react-dom"],
