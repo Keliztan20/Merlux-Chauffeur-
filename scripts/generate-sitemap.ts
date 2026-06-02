@@ -469,6 +469,27 @@ async function generateSitemap() {
       indexStream.on('error', (err) => reject(err));
     });
 
+    console.log('📄 Generating a single flat sitemap.xml as direct fallback...');
+    const flatSitemapTempPath = path.join(PUBLIC_DIR, 'sitemap.xml.tmp');
+    const flatSitemapStream = fs.createWriteStream(flatSitemapTempPath, { encoding: 'utf8' });
+    flatSitemapStream.write('<?xml version="1.0" encoding="UTF-8"?>\n');
+    flatSitemapStream.write('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n');
+    sitemapHtmlEntries.forEach(entry => {
+      flatSitemapStream.write(`  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>\n`);
+    });
+    flatSitemapStream.write('</urlset>');
+    flatSitemapStream.end();
+
+    await new Promise<void>((resolve, reject) => {
+      flatSitemapStream.on('finish', () => resolve());
+      flatSitemapStream.on('error', (err) => reject(err));
+    });
+
     // Move completed sitemaps into public/ and dist/
     const filesToCopy = [
       { temp: pageTempPath, name: 'page-sitemap.xml' },
@@ -476,7 +497,7 @@ async function generateSitemap() {
       { temp: offerTempPath, name: 'offer-sitemap.xml' },
       { temp: toursTempPath, name: 'tours-sitemap.xml' },
       { temp: indexTempPath, name: 'sitemap_index.xml' },
-      { temp: indexTempPath, name: 'sitemap.xml' } // Copy index as sitemap.xml for legacy compatibility
+      { temp: flatSitemapTempPath, name: 'sitemap.xml' } // Dynamic flat sitemap containing all URLs
     ];
 
     filesToCopy.forEach(f => {
