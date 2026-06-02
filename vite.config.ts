@@ -26,22 +26,25 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes("node_modules")) {
-              if (id.includes("react-router-dom")) return "reactRouter";
-              if (id.includes("react") || id.includes("react-dom"))
-                return "reactCore";
-              if (id.includes("motion")) return "animations";
-              if (id.includes("firebase")) return "firebase";
-              if (id.includes("recharts")) return "recharts";
-              if (id.includes("@stripe") || id.includes("stripe-js"))
-                return "stripe";
-              if (id.includes("twilio")) return "twilio";
-              if (id.includes("@react-google-maps")) return "googleMaps";
-              if (id.includes("@google/genai")) return "genai";
-              if (id.includes("date-fns")) return "dateFns";
-              if (id.includes("lucide-react")) return "lucide";
-              return "vendor";
-            }
+            if (!id.includes("node_modules")) return;
+
+            if (id.includes("node_modules/react-router-dom"))
+              return "reactRouter";
+            if (id.includes("node_modules/motion")) return "animations";
+            if (id.includes("node_modules/firebase")) return "firebase";
+            if (id.includes("node_modules/recharts")) return "recharts";
+            if (
+              id.includes("node_modules/@stripe") ||
+              id.includes("node_modules/stripe-js")
+            )
+              return "stripe";
+            if (id.includes("node_modules/twilio")) return "twilio";
+            if (id.includes("node_modules/@react-google-maps"))
+              return "googleMaps";
+            if (id.includes("node_modules/@google/genai")) return "genai";
+            if (id.includes("node_modules/date-fns")) return "dateFns";
+            if (id.includes("node_modules/lucide-react")) return "lucide";
+            return "vendor";
           },
         },
       },
