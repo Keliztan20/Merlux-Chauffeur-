@@ -713,7 +713,7 @@ ${sitemapEntries.map(entry => `  <url>
         title = titleTemplate.replace('%s', title);
       }
 
-      const desc = seoData?.metaDescription || globalSeo.defaultDescription || '';
+      const desc = seoData?.metaDescription || seoData?.seoDescription || seoData?.description || seoData?.shortDescription || globalSeo.defaultDescription || '';
       const seoKeywords = Array.isArray(seoData?.keywords) ? seoData.keywords : (typeof seoData?.keywords === 'string' ? seoData.keywords.split(',').map((k: string) => k.trim()) : []);
       const defaultKeywords = Array.isArray(globalSeo.defaultKeywords) ? globalSeo.defaultKeywords : (typeof globalSeo.defaultKeywords === 'string' ? globalSeo.defaultKeywords.split(',').map((k: string) => k.trim()) : []);
       const keywords = [...seoKeywords, ...defaultKeywords].filter(k => k !== '').join(', ');

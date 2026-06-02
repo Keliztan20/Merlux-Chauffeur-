@@ -46,6 +46,7 @@ const STATIC_PAGES = [
   { title: 'About', slug: 'about', path: '/about' },
   { title: 'Contact', slug: 'contact', path: '/contact' },
   { title: 'Faq', slug: 'faq', path: '/faq' },
+  { title: 'Terms and Conditions', slug: 'terms', path: '/terms' },
 ];
 
 const getRouteSlug = (item: any) => {
@@ -597,6 +598,14 @@ Sitemap: ${SITE_URL}/sitemap_index.xml
 <body class="min-h-screen py-10 px-4 sm:px-6 lg:px-8 selection:bg-[#d4af37]/20 selection:text-amber-200">
   <div class="max-w-6xl mx-auto space-y-10">
     
+    <!-- Top Navigation Bar (Back to Home) -->
+    <div class="flex items-center justify-between border-b border-white/5 pb-4">
+      <a href="/" class="inline-flex items-center gap-1.5 font-mono text-xs text-gray-400 hover:text-[#d4af37] transition-all duration-250 group">
+        <span class="inline-block transition-transform duration-200 group-hover:-translate-x-1">←</span> Back to Home
+      </a>
+      <span class="text-[10px] text-gray-500 uppercase tracking-widest font-mono">Merlux Luxury Elite</span>
+    </div>
+
     <!-- Brand Header -->
     <header class="text-center space-y-4">
       <div class="inline-flex items-center gap-1.5 font-mono text-[9px] text-[#d4af37] uppercase tracking-wider bg-[#d4af37]/10 px-3 py-1.5 rounded-full border border-[#d4af37]/20">
@@ -680,11 +689,11 @@ Sitemap: ${SITE_URL}/sitemap_index.xml
           <!-- Luxury Dropdown (select element) matching instruction "custom-select" -->
           <select class="custom-select" id="categorySelect">
             <option value="all">All Web Indexes</option>
-            <option value="page">Dynamic Pages</option>
+            <option value="page">Pages (Dynamic & Static)</option>
             <option value="blog">Blog Posts</option>
             <option value="offer">VIP Promo Offers</option>
             <option value="tour">Luxury Tours</option>
-            <option value="static">System Static Pages</option>
+            <option value="static">System Static Pages Only</option>
           </select>
 
           <!-- Current Results Status Flag -->
@@ -782,8 +791,8 @@ Sitemap: ${SITE_URL}/sitemap_index.xml
           if (currentCategory === 'static') {
             if (!entry.isStatic) return false;
           } else if (currentCategory === 'page') {
-            // Include dynamic pages except static
-            if (entry.isStatic || entry.category !== 'page') return false;
+            // Include both custom dynamic pages and static system pages (since they are both part of page-sitemap.xml)
+            if (entry.category !== 'page') return false;
           } else {
             if (entry.isStatic || entry.category !== currentCategory) return false;
           }
