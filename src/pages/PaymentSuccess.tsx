@@ -25,6 +25,7 @@ export default function PaymentSuccess() {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [bookingDoc, setBookingDoc] = useState<any>(null);
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
 
   // Live snapshot listener for booking document details
   useEffect(() => {
@@ -178,6 +179,9 @@ export default function PaymentSuccess() {
     );
   }
 
+  const isRatingVisible = bookingDoc?.status === 'completed' || searchParams.get('rate') === 'true' || showFeedbackForm;
+  const hasSubmittedFeedback = !!(bookingDoc?.rating || bookingDoc?.feedback);
+
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 text-center">
       <SEO 
@@ -209,12 +213,18 @@ export default function PaymentSuccess() {
         </div>
 
         {/* Feedback / Rating Section if completed */}
-        {bookingDoc?.status === 'completed' && (
-          <div className="max-w-md mx-auto p-6 md:p-8 bg-[#080808]/90 backdrop-blur-xl border border-white/[0.08] hover:border-gold/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative overflow-hidden transition-all duration-500">
+        {isRatingVisible && (
+          <motion.div 
+            id="feedback-form-container"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-md mx-auto p-6 md:p-8 bg-[#080808]/90 backdrop-blur-xl border border-white/[0.08] hover:border-gold/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative overflow-hidden transition-all duration-500"
+          >
             {/* Subtle elegant top line accent */}
             <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-gold/40 to-transparent"></div>
             
-            {bookingDoc.feedback || bookingDoc.rating ? (
+            {hasSubmittedFeedback ? (
               <div className="text-center space-y-4 animate-fade-in">
                 <div className="w-12 h-12 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-2">
                   <Star className="text-gold fill-gold" size={24} />
@@ -228,11 +238,11 @@ export default function PaymentSuccess() {
                     <Star
                       key={`value-star-${star}`}
                       size={18}
-                      className={star <= (bookingDoc.rating || 0) ? "text-gold fill-gold" : "text-white/10"}
+                      className={star <= (bookingDoc?.rating || 0) ? "text-gold fill-gold" : "text-white/10"}
                     />
                   ))}
                 </div>
-                {bookingDoc.feedback && (
+                {bookingDoc?.feedback && (
                   <p className="text-white/70 italic text-xs py-2 px-4 bg-white/5 rounded-xl border border-white/5 max-w-xs mx-auto">
                     "{bookingDoc.feedback}"
                   </p>
@@ -243,7 +253,7 @@ export default function PaymentSuccess() {
                 <div className="text-center">
                   <h3 className="text-lg font-display text-white mb-2">Rate Your Journey</h3>
                   <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">
-                    Booking Reference #{bookingDoc.id.substring(0, 8)}
+                    Booking Reference #{bookingDoc?.id ? bookingDoc.id.substring(0, 8) : (bookingId ? bookingId.substring(0, 8) : '')}
                   </p>
                 </div>
 
@@ -304,7 +314,7 @@ export default function PaymentSuccess() {
                 </button>
               </form>
             )}
-          </div>
+          </motion.div>
         )}
         
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -315,6 +325,23 @@ export default function PaymentSuccess() {
             <Calendar size={16} />
             View My Bookings
           </button>
+          {!isRatingVisible && !hasSubmittedFeedback && (
+            <button 
+              onClick={() => {
+                setShowFeedbackForm(true);
+                setTimeout(() => {
+                  const element = document.getElementById('feedback-form-container');
+                  if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }, 100);
+              }}
+              className="bg-gold/10 border border-gold/35 text-gold px-8 py-4 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-gold hover:text-black transition-all flex items-center justify-center gap-2 cursor-pointer duration-300"
+            >
+              <Star size={16} className="fill-current" />
+              Rate Now
+            </button>
+          )}
           <button 
             onClick={() => navigate('/')}
             className="bg-white/5 border border-white/10 text-white px-8 py-4 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-white/10 transition-all flex items-center justify-center gap-2 cursor-pointer"
