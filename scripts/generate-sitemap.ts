@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, orderBy, query, where, limit, startAfter } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, query, limit, startAfter } from 'firebase/firestore';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -33,18 +33,6 @@ if (!firebaseConfig) {
 // Initialize Firebase Client
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-
-const STATIC_PAGES = [
-  { title: 'Home', slug: '', path: '/' },
-  { title: 'Offers', slug: 'offers', path: '/offers' },
-  { title: 'Tours', slug: 'tours', path: '/tours' },
-  { title: 'Services', slug: 'services', path: '/services' },
-  { title: 'Blog', slug: 'blog', path: '/blog' },
-  { title: 'Fleet', slug: 'fleet', path: '/fleet' },
-  { title: 'About', slug: 'about', path: '/about' },
-  { title: 'Contact', slug: 'contact', path: '/contact' },
-  { title: 'Faq', slug: 'faq', path: '/faq' },
-];
 
 const getRouteSlug = (item: any) => {
   if (item.type === 'Page') {
@@ -142,13 +130,19 @@ async function generateSitemap() {
     let maxLastmodOffer = formatDate(null);
     let maxLastmodTour = formatDate(null);
 
+    const outputPages: { path: string, label: string }[] = [];
+    const outputBlogs: { path: string, label: string }[] = [];
+    const outputOffers: { path: string, label: string }[] = [];
+    const outputTours: { path: string, label: string }[] = [];
+
     const writeUrlEntryWithTracking = (
       stream: fs.WriteStream, 
       path: string, 
       lastmod: string, 
       changefreq: string, 
       priority: string,
-      category: 'page' | 'blog' | 'offer' | 'tour'
+      category: 'page' | 'blog' | 'offer' | 'tour',
+      label: string
     ) => {
       stream.write(`  <url>
     <loc>${SITE_URL}${path}</loc>
@@ -159,12 +153,16 @@ async function generateSitemap() {
 
       if (category === 'page') {
         maxLastmodPage = lastmod > maxLastmodPage ? lastmod : maxLastmodPage;
+        outputPages.push({ path, label });
       } else if (category === 'blog') {
         maxLastmodBlog = lastmod > maxLastmodBlog ? lastmod : maxLastmodBlog;
+        outputBlogs.push({ path, label });
       } else if (category === 'offer') {
         maxLastmodOffer = lastmod > maxLastmodOffer ? lastmod : maxLastmodOffer;
+        outputOffers.push({ path, label });
       } else if (category === 'tour') {
         maxLastmodTour = lastmod > maxLastmodTour ? lastmod : maxLastmodTour;
+        outputTours.push({ path, label });
       }
     };
 
@@ -199,32 +197,13 @@ async function generateSitemap() {
       return override;
     };
 
-    // Tracking for static pages and already processed paths to guarantee uniqueness
-    interface StaticPageStatus {
-      isCovered: boolean;
-      noindex?: boolean;
-      updatedAt?: any;
-      createdAt?: any;
-    }
-
-    const staticPagesStatus = new Map<string, StaticPageStatus>();
-    STATIC_PAGES.forEach(sp => {
-      staticPagesStatus.set(sp.slug.toLowerCase(), {
-        isCovered: false,
-        noindex: false,
-        updatedAt: null,
-        createdAt: null
-      });
-    });
-
     const registeredPaths = new Set<string>();
 
-    // 2. Stream and process the Dynamic 'pages' collection
+    // 2. Stream and process the Dynamic 'pages' collection (purely dynamic records)
     console.log('📄 Processing dynamic pages streaming...');
     for await (const docs of streamCollection('pages', 100)) {
       (docs as any[]).forEach((doc: any) => {
         const p = { id: doc.id, type: 'Page', ...(doc.data() as any) } as any;
-        const slugKey = (p.slug || '').toLowerCase();
         const routeSlug = p.slug || 'home';
         const docOverride = getMetadataOverride(routeSlug);
         const noindex = p.active === false || (docOverride?.noindex !== undefined ? docOverride.noindex : (p.noindex || false));
@@ -232,23 +211,21 @@ async function generateSitemap() {
         const updatedAt = docOverride?.updatedAt || p.updatedAt || p.createdAt || null;
         const createdAt = p.createdAt || null;
 
-        // If this page covers a static system route, record it to merge at the end
-        if (staticPagesStatus.has(slugKey)) {
-          staticPagesStatus.set(slugKey, {
-            isCovered: true,
-            noindex,
-            updatedAt,
-            createdAt
-          });
-        } else {
-          // If purely custom dynamic page, write it immediately
-          const cleanPath = getFullPath(p);
-          if (!registeredPaths.has(cleanPath)) {
-            registeredPaths.add(cleanPath);
-            if (!noindex && active) {
-              const lastmod = formatDate(updatedAt || createdAt);
-              writeUrlEntryWithTracking(pageStream, cleanPath, lastmod, cleanPath === '/' ? 'daily' : 'weekly', cleanPath === '/' ? '1.0' : '0.8', 'page');
-            }
+        const cleanPath = getFullPath(p);
+        if (!registeredPaths.has(cleanPath)) {
+          registeredPaths.add(cleanPath);
+          if (!noindex && active) {
+            const lastmod = formatDate(updatedAt || createdAt);
+            const label = p.title || p.name || p.id || 'Untitled Page';
+            writeUrlEntryWithTracking(
+              pageStream, 
+              cleanPath, 
+              lastmod, 
+              cleanPath === '/' ? 'daily' : 'weekly', 
+              cleanPath === '/' ? '1.0' : '0.8', 
+              'page', 
+              label
+            );
           }
         }
       });
@@ -271,7 +248,8 @@ async function generateSitemap() {
           registeredPaths.add(cleanPath);
           if (!noindex && active) {
             const lastmod = formatDate(updatedAt || createdAt);
-            writeUrlEntryWithTracking(blogStream, cleanPath, lastmod, 'weekly', '0.8', 'blog');
+            const label = b.title || b.name || b.id || 'Untitled Post';
+            writeUrlEntryWithTracking(blogStream, cleanPath, lastmod, 'weekly', '0.8', 'blog', label);
           }
         }
       });
@@ -294,7 +272,8 @@ async function generateSitemap() {
           registeredPaths.add(cleanPath);
           if (!noindex && active) {
             const lastmod = formatDate(updatedAt || createdAt);
-            writeUrlEntryWithTracking(offerStream, cleanPath, lastmod, 'weekly', '0.8', 'offer');
+            const label = o.title || o.name || o.id || 'Special Offer';
+            writeUrlEntryWithTracking(offerStream, cleanPath, lastmod, 'weekly', '0.8', 'offer', label);
           }
         }
       });
@@ -317,50 +296,12 @@ async function generateSitemap() {
           registeredPaths.add(cleanPath);
           if (!noindex && active) {
             const lastmod = formatDate(updatedAt || createdAt);
-            writeUrlEntryWithTracking(toursStream, cleanPath, lastmod, 'weekly', '0.8', 'tour');
+            const label = t.title || t.name || t.id || 'Tour';
+            writeUrlEntryWithTracking(toursStream, cleanPath, lastmod, 'weekly', '0.8', 'tour', label);
           }
         }
       });
     }
-
-    // 6. Process and append STATIC_PAGES with correct merges
-    console.log('⚙️ Appending processed static system pages...');
-    STATIC_PAGES.forEach((page: any) => {
-      const slugKey = page.slug.toLowerCase();
-      const status = staticPagesStatus.get(slugKey);
-      
-      let noindex = false;
-      let updatedAt = null;
-      let createdAt = null;
-
-      if (status) {
-        if (status.isCovered) {
-          if (status.noindex) return; // ignore static page if it is marked as noindex via the covering page
-          updatedAt = status.updatedAt;
-          createdAt = status.createdAt;
-        } else {
-          // If uncovered virtual static page, see metadata override
-          const routeSlug = page.slug || 'home';
-          const docOverride = getMetadataOverride(routeSlug);
-          if (docOverride?.noindex === true) return;
-          updatedAt = docOverride?.updatedAt || null;
-        }
-      }
-
-      const cleanPath = page.path || '/';
-      if (!registeredPaths.has(cleanPath)) {
-        registeredPaths.add(cleanPath);
-        const lastmod = formatDate(updatedAt || createdAt);
-        writeUrlEntryWithTracking(
-          pageStream,
-          cleanPath,
-          lastmod,
-          cleanPath === '/' ? 'daily' : 'weekly',
-          cleanPath === '/' ? '1.0' : '0.8',
-          'page'
-        );
-      }
-    });
 
     const endSitemapStream = async (stream: fs.WriteStream) => {
       stream.write('</urlset>');
@@ -406,6 +347,168 @@ async function generateSitemap() {
       indexStream.on('finish', () => resolve());
       indexStream.on('error', (err) => reject(err));
     });
+
+    // 6. Generate HTML Sitemap (sitemap.html)
+    console.log('📁 Generating parallel sitemap.html diagram for user view...');
+    
+    const generateHtmlList = (items: { path: string, label: string }[]) => {
+      if (items.length === 0) {
+        return '            <li class="text-center text-white/30 text-xs py-4 font-light italic">No dynamic records published.</li>';
+      }
+      return items.map(item => `              <li class="group">
+                <a href="${item.path}" class="flex flex-col sm:flex-row sm:items-baseline justify-between py-2 border-b border-white/5 group-hover:border-[#d4af37]/20 transition-all">
+                  <span class="text-white group-hover:text-[#d4af37] text-sm sm:text-base font-normal tracking-wide transition-colors">${item.label}</span>
+                  <span class="text-white/40 text-[10px] uppercase tracking-widest font-mono">${item.path}</span>
+                </a>
+              </li>`).join('\n');
+    };
+
+    const sitemapHtmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sitemap | Merlux Luxury Tours & Services</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0b0b0b;
+      color: #f3f4f6;
+    }
+    
+    .font-serif {
+      font-family: 'Playfair Display', serif;
+    }
+    
+    /* custom-scrollbar */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #d4af37; /* Gold accent */
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #f3e5ab;
+    }
+    
+    /* Firefox support */
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: #d4af37 rgba(255, 255, 255, 0.03);
+    }
+  </style>
+</head>
+<body class="min-h-screen py-12 px-4 sm:px-6 lg:px-8 flex flex-col justify-between">
+  <!-- Content wrapper -->
+  <div class="max-w-6xl w-full mx-auto">
+    <!-- Header -->
+    <header class="text-center mb-16 border-b border-white/10 pb-8">
+      <div class="inline-block mb-3 px-3 py-1 border border-[#d4af37]/30 rounded-full bg-[#d4af37]/5">
+        <span class="text-xs font-semibold tracking-widest text-[#d4af37] uppercase">Directory Overview</span>
+      </div>
+      <h1 class="font-serif text-4xl sm:text-5xl font-semibold tracking-tight text-white mb-4">Sitemap</h1>
+      <p class="text-white/60 text-sm sm:text-base max-w-lg mx-auto font-light leading-relaxed">
+        Explore luxury private tours, premium chauffeured charter fleet services, and exclusive promotions across Australia.
+      </p>
+    </header>
+
+    <!-- Categories Grid -->
+    <main class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16">
+      
+      <!-- Category 1: Pages -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Dynamic Pages</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputPages)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Category 2: Private Tours -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Luxury Tours</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputTours)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Category 3: Special Offers -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Exclusive Offers</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputOffers)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Category 4: Travel Blog -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Travel Journal & Blog</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputBlogs)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="text-center text-white/30 text-xs mt-12 border-t border-white/5 pt-8 max-w-6xl w-full mx-auto">
+    <p class="mb-2">© 2026 Merlux Luxury Tours. All rights reserved.</p>
+    <p>
+      XML Sitemaps: 
+      <a href="/sitemap_index.xml" class="text-[#d4af37] hover:underline mx-1">Index</a> • 
+      <a href="/page-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Pages</a> • 
+      <a href="/tours-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Tours</a> • 
+      <a href="/offer-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Offers</a> • 
+      <a href="/blog-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Blog</a>
+    </p>
+  </footer>
+</body>
+</html>`;
+
+    // Write html sitemap to file
+    fs.writeFileSync(path.join(PUBLIC_DIR, 'sitemap.html'), sitemapHtmlBody, 'utf8');
+    fs.writeFileSync(path.join(DIST_DIR, 'sitemap.html'), sitemapHtmlBody, 'utf8');
+    console.log('✨ sitemap.html generated successfully in public/ and dist/');
 
     // Move completed sitemaps into public/ and dist/
     const filesToCopy = [

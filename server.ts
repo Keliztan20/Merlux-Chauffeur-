@@ -401,18 +401,6 @@ async function startServer() {
       const pages = pagesSnap.docs.map(doc => ({ id: doc.id, type: 'Page', ...doc.data() } as any));
       const metadataDocs = metadataSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
 
-      const staticPages = [
-        { title: 'Home', slug: '', path: '/' },
-        { title: 'Offers', slug: 'offers', path: '/offers' },
-        { title: 'Tours', slug: 'tours', path: '/tours' },
-        { title: 'Services', slug: 'services', path: '/services' },
-        { title: 'Blog', slug: 'blog', path: '/blog' },
-        { title: 'Fleet', slug: 'fleet', path: '/fleet' },
-        { title: 'FAQ', slug: 'faq', path: '/faq' },
-        { title: 'About', slug: 'about', path: '/about' },
-        { title: 'Contact', slug: 'contact', path: '/contact' },
-      ];
-
       const getMetadataOverride = (routeSlug: string) => {
         const normSlug = (routeSlug || '').toLowerCase();
         const replaced = normSlug.replace(/\//g, '_');
@@ -426,7 +414,7 @@ async function startServer() {
       const sitemapEntries: any[] = [];
       const registeredPaths = new Set<string>();
 
-      // A. Dynamic Pages Collection
+      // Dynamic Pages Collection
       pages.forEach((p: any) => {
         const routeSlug = p.slug || 'home';
         const docOverride = getMetadataOverride(routeSlug);
@@ -445,24 +433,6 @@ async function startServer() {
               priority: cleanPath === '/' ? '1.0' : '0.8'
             });
           }
-        }
-      });
-
-      // B. Static system pages
-      staticPages.forEach((sp: any) => {
-        const cleanPath = sp.path || '/';
-        const routeSlug = sp.slug || 'home';
-        const docOverride = getMetadataOverride(routeSlug);
-        if (docOverride?.noindex === true) return;
-
-        if (!registeredPaths.has(cleanPath)) {
-          registeredPaths.add(cleanPath);
-          sitemapEntries.push({
-            path: cleanPath,
-            lastmod: getFormatDate(docOverride?.updatedAt),
-            changefreq: cleanPath === '/' ? 'daily' : 'weekly',
-            priority: cleanPath === '/' ? '1.0' : '0.8'
-          });
         }
       });
 
@@ -648,6 +618,283 @@ ${sitemapEntries.map(entry => `  <url>
         return res.sendFile(sitemapPath);
       }
       res.status(500).send('Error generating tours sitemap');
+    }
+  });
+
+  // Serve user-facing HTML sitemap
+  app.get('/sitemap.html', async (req, res) => {
+    try {
+      const [pagesSnap, blogsSnap, offersSnap, toursSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection('pages').get(),
+        dbAdmin.collection('blogs').get(),
+        dbAdmin.collection('offers').get(),
+        dbAdmin.collection('tours').get(),
+        dbAdmin.collection('metadata').get()
+      ]);
+
+      const pages = pagesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const blogs = blogsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const offers = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const tours = toursSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const metadataDocs = metadataSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+
+      const getMetadataOverride = (routeSlug: string) => {
+        const normSlug = (routeSlug || '').toLowerCase();
+        const replaced = normSlug.replace(/\//g, '_');
+        let override = metadataDocs.find((d: any) => d.slug === routeSlug || d.id === routeSlug);
+        if (!override && replaced) {
+          override = metadataDocs.find((d: any) => d.slug === replaced || d.id === replaced);
+        }
+        return override;
+      };
+
+      const outputPages: { path: string, label: string }[] = [];
+      const outputBlogs: { path: string, label: string }[] = [];
+      const outputOffers: { path: string, label: string }[] = [];
+      const outputTours: { path: string, label: string }[] = [];
+
+      const registeredPaths = new Set<string>();
+
+      // Filter & process dynamic Pages
+      pages.forEach((p: any) => {
+        const routeSlug = p.slug || 'home';
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = p.active === false || (docOverride?.noindex !== undefined ? docOverride.noindex : (p.noindex || false));
+        const active = p.active !== false;
+
+        if (!noindex && active) {
+          const cleanPath = p.slug === 'home' || p.slug === '' ? '/' : `/${p.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            outputPages.push({
+              path: cleanPath,
+              label: p.title || p.name || p.id || 'Untitled Page'
+            });
+          }
+        }
+      });
+
+      // Filter & process Blogs
+      blogs.forEach((b: any) => {
+        const routeSlug = `blog/${b.slug}`;
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = b.active === false || (docOverride?.noindex !== undefined ? docOverride.noindex : (b.noindex || false));
+        const active = b.active !== false;
+
+        if (!noindex && active) {
+          const cleanPath = `/blog/${b.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            outputBlogs.push({
+              path: cleanPath,
+              label: b.title || b.name || b.id || 'Untitled Post'
+            });
+          }
+        }
+      });
+
+      // Filter & process Offers
+      offers.forEach((o: any) => {
+        const routeSlug = `offers/${o.slug}`;
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = o.active === false || (docOverride?.noindex !== undefined ? docOverride.noindex : (o.noindex || false));
+        const active = o.active !== false;
+
+        if (!noindex && active) {
+          const cleanPath = `/offers/${o.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            outputOffers.push({
+              path: cleanPath,
+              label: o.title || o.name || o.id || 'Special Offer'
+            });
+          }
+        }
+      });
+
+      // Filter & process Tours
+      tours.forEach((t: any) => {
+        const routeSlug = `tours/${t.slug}`;
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = t.active === false || (docOverride?.noindex !== undefined ? docOverride.noindex : (t.noindex || false));
+        const active = t.active !== false;
+
+        if (!noindex && active) {
+          const cleanPath = `/tours/${t.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            outputTours.push({
+              path: cleanPath,
+              label: t.title || t.name || t.id || 'Tour'
+            });
+          }
+        }
+      });
+
+      const generateHtmlList = (items: { path: string, label: string }[]) => {
+        if (items.length === 0) {
+          return '            <li class="text-center text-white/30 text-xs py-4 font-light italic">No dynamic records published.</li>';
+        }
+        return items.map(item => `              <li class="group">
+                <a href="${item.path}" class="flex flex-col sm:flex-row sm:items-baseline justify-between py-2 border-b border-white/5 group-hover:border-[#d4af37]/20 transition-all">
+                  <span class="text-white group-hover:text-[#d4af37] text-sm sm:text-base font-normal tracking-wide transition-colors">${item.label}</span>
+                  <span class="text-white/40 text-[10px] uppercase tracking-widest font-mono">${item.path}</span>
+                </a>
+              </li>`).join('\n');
+      };
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sitemap | Merlux Luxury Tours & Services</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0b0b0b;
+      color: #f3f4f6;
+    }
+    
+    .font-serif {
+      font-family: 'Playfair Display', serif;
+    }
+    
+    /* custom-scrollbar */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #d4af37; /* Gold accent */
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #f3e5ab;
+    }
+    
+    /* Firefox support */
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: #d4af37 rgba(255, 255, 255, 0.03);
+    }
+  </style>
+</head>
+<body class="min-h-screen py-12 px-4 sm:px-6 lg:px-8 flex flex-col justify-between">
+  <!-- Content wrapper -->
+  <div class="max-w-6xl w-full mx-auto">
+    <!-- Header -->
+    <header class="text-center mb-16 border-b border-white/10 pb-8">
+      <div class="inline-block mb-3 px-3 py-1 border border-[#d4af37]/30 rounded-full bg-[#d4af37]/5">
+        <span class="text-xs font-semibold tracking-widest text-[#d4af37] uppercase">Directory Overview</span>
+      </div>
+      <h1 class="font-serif text-4xl sm:text-5xl font-semibold tracking-tight text-white mb-4">Sitemap</h1>
+      <p class="text-white/60 text-sm sm:text-base max-w-lg mx-auto font-light leading-relaxed">
+        Explore luxury private tours, premium chauffeured charter fleet services, and exclusive promotions across Australia.
+      </p>
+    </header>
+
+    <!-- Categories Grid -->
+    <main class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16">
+      
+      <!-- Category 1: Pages -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Dynamic Pages</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputPages)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Category 2: Private Tours -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Luxury Tours</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputTours)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Category 3: Special Offers -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Exclusive Offers</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputOffers)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Category 4: Travel Blog -->
+      <section class="bg-white/[0.02] border border-white/5 rounded-2xl p-6 sm:p-8 flex flex-col justify-between hover:border-[#d4af37]/30 transition-all duration-300">
+        <div>
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-2 h-6 bg-[#d4af37] rounded-full"></div>
+            <h2 class="font-serif text-xl sm:text-2xl font-semibold text-white">Travel Journal & Blog</h2>
+          </div>
+          <div class="max-h-[350px] overflow-y-auto custom-scrollbar pr-2">
+            <ul class="space-y-3">
+${generateHtmlList(outputBlogs)}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="text-center text-white/30 text-xs mt-12 border-t border-white/5 pt-8 max-w-6xl w-full mx-auto">
+    <p class="mb-2">© 2026 Merlux Luxury Tours. All rights reserved.</p>
+    <p>
+      XML Sitemaps: 
+      <a href="/sitemap_index.xml" class="text-[#d4af37] hover:underline mx-1">Index</a> • 
+      <a href="/page-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Pages</a> • 
+      <a href="/tours-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Tours</a> • 
+      <a href="/offer-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Offers</a> • 
+      <a href="/blog-sitemap.xml" class="text-[#d4af37] hover:underline mx-1">Blog</a>
+    </p>
+  </footer>
+</body>
+</html>`;
+
+      res.header('Content-Type', 'text/html');
+      return res.send(html);
+    } catch (err: any) {
+      console.error('Error generating dynamic HTML sitemap:', err);
+      const sitemapHtmlPath = path.join(process.cwd(), 'dist', 'sitemap.html');
+      if (fs.existsSync(sitemapHtmlPath)) {
+        res.header('Content-Type', 'text/html');
+        return res.sendFile(sitemapHtmlPath);
+      }
+      res.status(500).send('Error generating HTML sitemap');
     }
   });
 
