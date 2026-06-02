@@ -48,8 +48,6 @@ import {
 import { FormNotice, type NoticeType } from "../components/FormNotice";
 import { cn } from "../lib/utils";
 import { useSettings } from "../lib/SettingsContext";
-import { smsService } from "../services/smsService";
-import { emailService } from "../services/emailService";
 import { auth, db, handleFirestoreError, OperationType } from "../lib/firebase";
 import {
   collection,
@@ -1379,6 +1377,10 @@ export default function Booking() {
           });
 
           // Trigger Notifications
+          const [{ smsService }, { emailService }] = await Promise.all([
+            import("../services/smsService"),
+            import("../services/emailService")
+          ]);
           smsService.notify("booking_created", { ...bookingData, id: docRef.id });
           emailService.notify("booking_created", { ...bookingData, id: docRef.id });
 

@@ -11,7 +11,6 @@ import { cn, formatDate } from '../lib/utils';
 import { useSettings } from '../lib/SettingsContext';
 import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { emailService } from '../services/emailService';
 import * as Icons from 'lucide-react';
 import SEO from '../components/SEO';
 
@@ -109,6 +108,7 @@ export default function Home() {
 
       // 2. Dispatch inquiry emails to the Contact Email and the Customer
       try {
+        const { emailService } = await import('../services/emailService');
         const targetEmail = contact.email || contact.bookingEmail || 'bookings@merlux.com.au';
         
         // Admin notification email html
