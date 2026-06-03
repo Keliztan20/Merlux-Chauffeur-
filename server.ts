@@ -65,6 +65,7 @@ function getStripe(): Stripe {
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', true);
   const PORT = 3000;
 
   app.use(cors());
@@ -321,8 +322,10 @@ async function startServer() {
   const getSiteUrl = (req: any) => {
     let SITE_URL = process.env.VITE_SITE_URL || '';
     if (!SITE_URL) {
-      const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
-      SITE_URL = `${protocol}://${req.get('host')}`;
+      const host = req.get('host') || '';
+      const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1') || host.includes('0.0.0.0');
+      const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' || !isLocalhost ? 'https' : 'http';
+      SITE_URL = `${protocol}://${host}`;
     }
     if (SITE_URL.endsWith('/')) {
       SITE_URL = SITE_URL.slice(0, -1);
@@ -483,7 +486,7 @@ async function startServer() {
       const indexXml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${sitemapsXML}
-</sitemapindex>`;
+</sitemapindex>`.trim();
 
       res.set('Content-Type', 'application/xml; charset=utf-8');
       return res.send(indexXml);
@@ -646,15 +649,15 @@ ${sitemapEntries.map(entry => `  <url>
     <changefreq>${entry.changefreq}</changefreq>
     <priority>${entry.priority}</priority>
   </url>`).join('\n')}
-</urlset>`;
+</urlset>`.trim();
 
-      res.header('Content-Type', 'application/xml');
+      res.set('Content-Type', 'application/xml; charset=utf-8');
       return res.send(xml);
     } catch (err: any) {
       console.error('Error generating dynamic flat sitemap fallback:', err);
       const fallbackPath = path.join(process.cwd(), 'dist', 'sitemap.xml');
       if (fs.existsSync(fallbackPath)) {
-        res.header('Content-Type', 'application/xml');
+        res.set('Content-Type', 'application/xml; charset=utf-8');
         return res.sendFile(fallbackPath);
       }
       res.status(500).send('Error generating sitemap');
@@ -747,15 +750,15 @@ ${sitemapEntries.map(entry => `  <url>
     <changefreq>${entry.changefreq}</changefreq>
     <priority>${entry.priority}</priority>
   </url>`).join('\n')}
-</urlset>`;
+</urlset>`.trim();
 
-      res.header('Content-Type', 'application/xml');
+      res.set('Content-Type', 'application/xml; charset=utf-8');
       return res.send(xml);
     } catch (err: any) {
       console.error('Error generating page sitemap:', err);
       const sitemapPath = path.join(process.cwd(), 'dist', 'page-sitemap.xml');
       if (fs.existsSync(sitemapPath)) {
-        res.header('Content-Type', 'application/xml');
+        res.set('Content-Type', 'application/xml; charset=utf-8');
         return res.sendFile(sitemapPath);
       }
       res.status(500).send('Error generating sitemap');
@@ -801,15 +804,15 @@ ${sitemapEntries.map(entry => `  <url>
     <changefreq>${entry.changefreq}</changefreq>
     <priority>${entry.priority}</priority>
   </url>`).join('\n')}
-</urlset>`;
+</urlset>`.trim();
 
-      res.header('Content-Type', 'application/xml');
+      res.set('Content-Type', 'application/xml; charset=utf-8');
       return res.send(xml);
     } catch (err: any) {
       console.error('Error generating blog sitemap:', err);
       const sitemapPath = path.join(process.cwd(), 'dist', 'blog-sitemap.xml');
       if (fs.existsSync(sitemapPath)) {
-        res.header('Content-Type', 'application/xml');
+        res.set('Content-Type', 'application/xml; charset=utf-8');
         return res.sendFile(sitemapPath);
       }
       res.status(500).send('Error generating sitemap');
@@ -855,15 +858,15 @@ ${sitemapEntries.map(entry => `  <url>
     <changefreq>${entry.changefreq}</changefreq>
     <priority>${entry.priority}</priority>
   </url>`).join('\n')}
-</urlset>`;
+</urlset>`.trim();
 
-      res.header('Content-Type', 'application/xml');
+      res.set('Content-Type', 'application/xml; charset=utf-8');
       return res.send(xml);
     } catch (err: any) {
       console.error('Error generating offer sitemap:', err);
       const sitemapPath = path.join(process.cwd(), 'dist', 'offer-sitemap.xml');
       if (fs.existsSync(sitemapPath)) {
-        res.header('Content-Type', 'application/xml');
+        res.set('Content-Type', 'application/xml; charset=utf-8');
         return res.sendFile(sitemapPath);
       }
       res.status(500).send('Error generating sitemap');
@@ -909,15 +912,15 @@ ${sitemapEntries.map(entry => `  <url>
     <changefreq>${entry.changefreq}</changefreq>
     <priority>${entry.priority}</priority>
   </url>`).join('\n')}
-</urlset>`;
+</urlset>`.trim();
 
-      res.header('Content-Type', 'application/xml');
+      res.set('Content-Type', 'application/xml; charset=utf-8');
       return res.send(xml);
     } catch (err: any) {
       console.error('Error generating tours sitemap:', err);
       const sitemapPath = path.join(process.cwd(), 'dist', 'tours-sitemap.xml');
       if (fs.existsSync(sitemapPath)) {
-        res.header('Content-Type', 'application/xml');
+        res.set('Content-Type', 'application/xml; charset=utf-8');
         return res.sendFile(sitemapPath);
       }
       res.status(500).send('Error generating tours sitemap');

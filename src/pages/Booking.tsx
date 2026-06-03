@@ -46,7 +46,7 @@ import {
   TrafficLayer,
 } from "@react-google-maps/api";
 import { FormNotice, type NoticeType } from "../components/FormNotice";
-import { cn } from "../lib/utils";
+import { cn, getAssetPath } from "../lib/utils";
 import { useSettings } from "../lib/SettingsContext";
 import { auth, db, handleFirestoreError, OperationType } from "../lib/firebase";
 import {
@@ -2434,7 +2434,7 @@ export default function Booking() {
                             {/* Image with Luxury Ambient Gradient Overlay */}
                             <div className="relative aspect-[16/10] overflow-hidden flex-shrink-0 bg-black/40">
                               <img
-                                src={v.img || null}
+                                src={getAssetPath(v.img) || null}
                                 alt={v.name}
                                 className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105 block"
                                 referrerPolicy="no-referrer"

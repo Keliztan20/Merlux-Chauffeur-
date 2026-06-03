@@ -133,12 +133,18 @@ export default function AppDashboard() {
     item.roles.includes(userProfile?.role || 'customer')
   );
 
-if (loading) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gold"></div>
-          <p className="text-gold text-lg font-medium">Loading Data...</p>
+      <div className="min-h-screen bg-black flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-8">
+          <div className="relative">
+            <div className="animate-spin rounded-full h-16 w-16 border-y-2 border-gold shadow-[0_0_20px_rgba(212,175,55,0.2)]"></div>
+            <div className="absolute inset-0 animate-pulse rounded-full bg-gold/5 blur-2xl"></div>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <h2 className="text-gold text-xs font-bold uppercase tracking-[0.4em] animate-pulse">Loading Data...</h2>
+            <div className="h-[1px] w-24 bg-gradient-to-r from-transparent via-gold/50 to-transparent"></div>
+          </div>
         </div>
       </div>
     );

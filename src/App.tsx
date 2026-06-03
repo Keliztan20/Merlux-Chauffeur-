@@ -8,6 +8,8 @@ import FloatingElements from "./components/FloatingElements";
 import ScrollToTop from "./components/layout/ScrollToTop";
 import { useSettings, SettingsProvider } from "./lib/SettingsContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { OfflineDetector } from "./components/OfflineDetector";
+import SearchDialog from "./components/SearchDialog";
 
 const Home = lazy(() => import("./pages/Home"));
 const Booking = lazy(() => import("./pages/Booking"));
@@ -29,6 +31,28 @@ const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 function AppLayout() {
   const { floatingSettings } = useSettings();
   const barPosition = floatingSettings?.bar?.position || "top";
+
+  const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+
+  // Keyboard shortcut Ctrl+K / Cmd+K and global open-search event
+  React.useEffect(() => {
+    const handleOpenSearch = () => setIsSearchOpen(true);
+    window.addEventListener("open-search-dialog", handleOpenSearch);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // CMD+K or CTRL+K
+      if ((e.metaKey || e.ctrlKey) && e.key?.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("open-search-dialog", handleOpenSearch);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   // Custom Toaster Settings
   const toastSettings = floatingSettings?.toast || {};
@@ -102,6 +126,8 @@ function AppLayout() {
         }}
       />
       <FloatingElements />
+      <OfflineDetector />
+      <SearchDialog isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
       <header className="sticky top-0 z-50 w-full pointer-events-none">
         <div className="pointer-events-auto">
           <Navbar />
