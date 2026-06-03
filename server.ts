@@ -128,11 +128,6 @@ async function startServer() {
     }
   });
 
-  //health call
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: Date.now() });
-  });
-
   app.get("/api/checkout-session/:sessionId", async (req, res) => {
     try {
       const { sessionId } = req.params;
@@ -352,6 +347,11 @@ async function startServer() {
       console.error("Email Send Error:", error.message);
       res.status(500).json({ error: error.message });
     }
+  });
+
+  // Health check endpoint for offline/connectivity detection
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", uptime: process.uptime() });
   });
 
   // Favicon Redirect
