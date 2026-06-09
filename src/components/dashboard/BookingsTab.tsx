@@ -16,7 +16,7 @@ import {
   ChevronDown, CheckSquare as CheckCloud, Route as RouteIcon, ArrowRight, Bell, CreditCard,
   Square, SquareCheck, UserCheck, Plus, CircleX, Loader2, MessageSquare
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import RouteMap from './RouteMap';
 import ConfirmationModal from './ConfirmationModal';
@@ -112,6 +112,27 @@ export default function BookingsTab({
   const [cancellationReasonInput, setCancellationReasonInput] = useState<string>('');
   const [expandedFeedback, setExpandedFeedback] = useState<string[]>([]);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Auto-trigger Feedback Modal if rate_booking_id is provided in URL
+  useEffect(() => {
+    const rateBookingId = searchParams.get('rate_booking_id');
+    if (rateBookingId && bookings && bookings.length > 0) {
+      const targetB = bookings.find((b) => b.id === rateBookingId);
+      if (targetB) {
+        if (!isDriver && targetB.status !== 'cancelled') {
+          setRatingBooking(targetB);
+          setRatingValue(targetB.rating || 0);
+          setRatingComment(targetB.feedback || '');
+
+          // Clear query parameter so it handles once
+          const newParams = new URLSearchParams(searchParams);
+          newParams.delete('rate_booking_id');
+          setSearchParams(newParams, { replace: true });
+        }
+      }
+    }
+  }, [searchParams, bookings, isDriver, setSearchParams]);
 
   // Fetching Logic
   useEffect(() => {

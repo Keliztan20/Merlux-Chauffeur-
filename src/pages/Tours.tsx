@@ -14,6 +14,46 @@ import LoginInline from '../components/LoginInline';
 import SEO from '../components/SEO';
 import { generateDescriptionFromContent } from '../lib/seo';
 
+const COUNTRY_CODES = [
+  { code: "+61", short: "AU +61" },
+  { code: "+64", short: "NZ +64" },
+  { code: "+1", short: "US +1" },
+  { code: "+44", short: "UK +44" },
+  { code: "+65", short: "SG +65" },
+  { code: "+86", short: "CN +86" },
+  { code: "+91", short: "IN +91" },
+  { code: "+971", short: "AE +971" },
+  { code: "+60", short: "MY +60" },
+  { code: "+81", short: "JP +81" },
+  { code: "+49", short: "DE +49" },
+  { code: "+33", short: "FR +33" },
+  { code: "+82", short: "KR +82" },
+  { code: "+62", short: "ID +62" },
+  { code: "+66", short: "TH +66" },
+  { code: "+84", short: "VN +84" },
+  { code: "+39", short: "IT +39" },
+  { code: "+34", short: "ES +34" },
+  { code: "+63", short: "PH +63" },
+  { code: "+94", short: "LK +94" },
+];
+
+const parsePhoneNumber = (phone: string) => {
+  const cleanPhone = (phone || "").trim();
+  const sortedCodes = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length);
+  for (const item of sortedCodes) {
+    if (cleanPhone.startsWith(item.code)) {
+      return {
+        countryCode: item.code,
+        localNumber: cleanPhone.substring(item.code.length).trim()
+      };
+    }
+  }
+  return {
+    countryCode: "+61",
+    localNumber: cleanPhone
+  };
+};
+
 export default function Tours() {
   const navigate = useNavigate();
   const { slug } = useParams();
@@ -112,6 +152,12 @@ export default function Tours() {
       const place = pickupAutocompleteRef.current.getPlace();
       if (place?.formatted_address) {
         setDetails(prev => ({ ...prev, pickup: place.formatted_address }));
+        if (place.geometry?.location) {
+          setPickupCoords({
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
+          });
+        }
       }
     }
   };
@@ -121,6 +167,12 @@ export default function Tours() {
       const place = dropoffAutocompleteRef.current.getPlace();
       if (place?.formatted_address) {
         setDetails(prev => ({ ...prev, dropoff: place.formatted_address }));
+        if (place.geometry?.location) {
+          setDropoffCoords({
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
+          });
+        }
       }
     }
   };
@@ -145,6 +197,12 @@ export default function Tours() {
           if (status === "OK" && results && results[0]) {
             const address = results[0].formatted_address;
             setDetails(prev => ({ ...prev, [field]: address }));
+            const coords = { lat: latitude, lng: longitude };
+            if (field === 'pickup') {
+              setPickupCoords(coords);
+            } else {
+              setDropoffCoords(coords);
+            }
             showNotice('success', "Location found!", 'Success');
           } else {
             showNotice('error', "Could not determine address", 'Geocoding Error');
@@ -173,6 +231,16 @@ export default function Tours() {
   const [selectedExtras, setSelectedExtras] = useState<Record<string, number>>({});
   const [quantity, setQuantity] = useState(1);
   const [paymentType, setPaymentType] = useState<'cash' | 'stripe'>('stripe');
+
+  useEffect(() => {
+    if (systemSettings) {
+      if (systemSettings.allowStripeCardPayment === false && systemSettings.allowCashPayment !== false && paymentType === 'stripe') {
+        setPaymentType('cash');
+      } else if (systemSettings.allowCashPayment === false && systemSettings.allowStripeCardPayment !== false && paymentType === 'cash') {
+        setPaymentType('stripe');
+      }
+    }
+  }, [systemSettings, paymentType]);
   const [expandedItinerary, setExpandedItinerary] = useState<number | null>(0);
   const [mainImage, setMainImage] = useState<string>('');
   const [details, setDetails] = useState({
@@ -188,6 +256,45 @@ export default function Tours() {
     returnDate: '',
     returnTime: ''
   });
+
+  const [pickupCoords, setPickupCoords] = useState<google.maps.LatLngLiteral | null>(null);
+  const [dropoffCoords, setDropoffCoords] = useState<google.maps.LatLngLiteral | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded || !details.pickup || details.pickup.length < 5) {
+      setPickupCoords(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!window.google || !window.google.maps) return;
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ address: details.pickup }, (results, status) => {
+        if (status === "OK" && results?.[0]) {
+          const loc = results[0].geometry.location;
+          setPickupCoords({ lat: loc.lat(), lng: loc.lng() });
+        }
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [details.pickup, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded || !details.dropoff || details.dropoff.length < 5) {
+      setDropoffCoords(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!window.google || !window.google.maps) return;
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ address: details.dropoff }, (results, status) => {
+        if (status === "OK" && results?.[0]) {
+          const loc = results[0].geometry.location;
+          setDropoffCoords({ lat: loc.lat(), lng: loc.lng() });
+        }
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [details.dropoff, isLoaded]);
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState("");
@@ -382,8 +489,293 @@ export default function Tours() {
     // Apply Add-ons
     let addonTotal = 0;
     const appliedAddons: any[] = [];
+    const formatTimeString = (t: string) => {
+      if (!t) return "";
+      const parts = t.split(":");
+      if (parts.length < 2) return t;
+      let h = parseInt(parts[0], 10);
+      const m = parts[1];
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12;
+      h = h ? h : 12;
+      return `${h}:${m} ${ampm}`;
+    };
+
     (priceAddons || []).forEach((addon) => {
       if (!addon.active) return;
+
+      // 1. Page/Scope Filter
+      if (addon.applyToTours === false) return;
+
+      // 1.5 Activation Date Range verification (auto-deactivates dynamically)
+      if (addon.activeStartDate || addon.activeEndDate) {
+        const todayLocal = new Date().toISOString().split("T")[0];
+        if (addon.activeStartDate && todayLocal < addon.activeStartDate) return;
+        if (addon.activeEndDate && todayLocal > addon.activeEndDate) return;
+      }
+
+      const satisfyDetails: string[] = [];
+      const ruleResults: { matched: boolean; details: string[] }[] = [];
+
+      // 2. Location restriction
+      if (addon.limitLocation) {
+        const checkBBoxLocation = (lat: number, lng: number) => {
+          if (addon.bboxes && addon.bboxes.length > 0) {
+            return addon.bboxes.some((box: any) => {
+              const n = Number(box.north);
+              const s = Number(box.south);
+              const e = Number(box.east);
+              const w = Number(box.west);
+              const matchLat = lat >= Math.min(s, n) && lat <= Math.max(s, n);
+              const matchLng = lng >= Math.min(w, e) && lng <= Math.max(w, e);
+              return matchLat && matchLng;
+            });
+          }
+          const n = Number(addon.bboxNorth);
+          const s = Number(addon.bboxSouth);
+          const e = Number(addon.bboxEast);
+          const w = Number(addon.bboxWest);
+          const matchLat = lat >= Math.min(s, n) && lat <= Math.max(s, n);
+          const matchLng = lng >= Math.min(w, e) && lng <= Math.max(w, e);
+          return matchLat && matchLng;
+        };
+
+        const hasPickup = pickupCoords && typeof pickupCoords.lat === "number" && typeof pickupCoords.lng === "number";
+        const hasDropoff = dropoffCoords && typeof dropoffCoords.lat === "number" && typeof dropoffCoords.lng === "number";
+
+        let locationMatch = false;
+        const matchedNames: string[] = [];
+        const getBBoxName = (lat: number, lng: number) => {
+          if (addon.bboxes && addon.bboxes.length > 0) {
+            const found = addon.bboxes.find((box: any) => {
+              const n = Number(box.north);
+              const s = Number(box.south);
+              const e = Number(box.east);
+              const w = Number(box.west);
+              const matchLat = lat >= Math.min(s, n) && lat <= Math.max(s, n);
+              const matchLng = lng >= Math.min(w, e) && lng <= Math.max(w, e);
+              return matchLat && matchLng;
+            });
+            if (found) return found.name || "Custom Range";
+          } else {
+            const n = Number(addon.bboxNorth);
+            const s = Number(addon.bboxSouth);
+            const e = Number(addon.bboxEast);
+            const w = Number(addon.bboxWest);
+            const matchLat = lat >= Math.min(s, n) && lat <= Math.max(s, n);
+            const matchLng = lng >= Math.min(w, e) && lng <= Math.max(w, e);
+            if (matchLat && matchLng) {
+              return "Default Range";
+            }
+          }
+          return null;
+        };
+
+        if (addon.bboxTarget === "pickup") {
+          locationMatch = !!(hasPickup && checkBBoxLocation(pickupCoords.lat, pickupCoords.lng));
+          if (locationMatch && hasPickup) {
+            const name = getBBoxName(pickupCoords.lat, pickupCoords.lng);
+            if (name) matchedNames.push(name);
+          }
+        } else if (addon.bboxTarget === "dropoff") {
+          locationMatch = !!(hasDropoff && checkBBoxLocation(dropoffCoords.lat, dropoffCoords.lng));
+          if (locationMatch && hasDropoff) {
+            const name = getBBoxName(dropoffCoords.lat, dropoffCoords.lng);
+            if (name) matchedNames.push(name);
+          }
+        } else if (addon.bboxTarget === "both") {
+          locationMatch = !!(hasPickup && hasDropoff && checkBBoxLocation(pickupCoords.lat, pickupCoords.lng) && checkBBoxLocation(dropoffCoords.lat, dropoffCoords.lng));
+          if (locationMatch && hasPickup && hasDropoff) {
+            const nameP = getBBoxName(pickupCoords.lat, pickupCoords.lng);
+            const nameD = getBBoxName(dropoffCoords.lat, dropoffCoords.lng);
+            if (nameP) matchedNames.push(nameP);
+            if (nameD && nameD !== nameP) matchedNames.push(nameD);
+          }
+        } else if (addon.bboxTarget === "either") {
+          const matchP = hasPickup && checkBBoxLocation(pickupCoords.lat, pickupCoords.lng);
+          const matchD = hasDropoff && checkBBoxLocation(dropoffCoords.lat, dropoffCoords.lng);
+          locationMatch = !!(matchP || matchD);
+          if (matchP && hasPickup) {
+            const name = getBBoxName(pickupCoords.lat, pickupCoords.lng);
+            if (name) matchedNames.push(name);
+          } else if (matchD && hasDropoff) {
+            const name = getBBoxName(dropoffCoords.lat, dropoffCoords.lng);
+            if (name) matchedNames.push(name);
+          }
+        }
+
+        ruleResults.push({
+          matched: locationMatch,
+          details: matchedNames.length > 0 ? [`[${matchedNames.join(", ")}]`] : []
+        });
+      }
+
+      // 3. Date restriction
+      if (addon.limitDates) {
+        const checkDate = (d: string) => {
+          if (!d) return false;
+          if (addon.startDate && d < addon.startDate) return false;
+          if (addon.endDate && d > addon.endDate) return false;
+          return true;
+        };
+        const matchP = checkDate(details.date);
+        const matchR = details.returnRide ? checkDate(details.returnDate) : false;
+
+        const checkedDates: string[] = [];
+        if (matchP) checkedDates.push(details.date);
+        if (matchR) checkedDates.push(details.returnDate);
+
+        ruleResults.push({
+          matched: matchP || matchR,
+          details: (matchP || matchR) ? [`${checkedDates.join(", ")} (Validity: ${addon.startDate} to ${addon.endDate})`] : []
+        });
+      }
+
+      // 4. Time restriction
+      if (addon.limitTime) {
+        const checkTime = (timeStr: string) => {
+          if (!timeStr) return false;
+          const start = addon.startTime || "";
+          const end = addon.endTime || "";
+          if (start && end) {
+            if (start > end) {
+              // Overnight window (e.g., 22:00 - 05:00)
+              return timeStr >= start || timeStr <= end;
+            } else {
+              // Standard single-day window (e.g., 08:00 - 17:00)
+              return timeStr >= start && timeStr <= end;
+            }
+          } else if (start) {
+            return timeStr >= start;
+          } else if (end) {
+            return timeStr <= end;
+          }
+          return true;
+        };
+        const matchP = checkTime(details.time);
+        const matchR = details.returnRide ? checkTime(details.returnTime) : false;
+        
+        let timeMatch = false;
+        const target = addon.timeTarget || "any";
+        if (target === "pickup") {
+          timeMatch = matchP;
+        } else if (target === "return") {
+          timeMatch = details.returnRide ? matchR : false;
+        } else if (target === "both") {
+          timeMatch = details.returnRide ? (matchP && matchR) : matchP;
+        } else {
+          // "any"
+          timeMatch = details.returnRide ? (matchP || matchR) : matchP;
+        }
+
+        const checkedTimes: string[] = [];
+        if (matchP && (target === "pickup" || target === "any" || target === "both")) {
+          checkedTimes.push(formatTimeString(details.time));
+        }
+        if (matchR && (target === "return" || target === "any" || target === "both")) {
+          checkedTimes.push(formatTimeString(details.returnTime));
+        }
+
+        ruleResults.push({
+          matched: timeMatch,
+          details: timeMatch ? [`${checkedTimes.join(", ")} (Range: ${addon.startTime} - ${addon.endTime})`] : []
+        });
+      }
+
+      // 5. Day of week restriction
+      if (addon.limitDays) {
+        const days = addon.selectedDays || [];
+        const checkDay = (d: string) => {
+          if (!d) return false;
+          try {
+            const parsedDate = new Date(d.replace(/-/g, "/"));
+            const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+            const dayName = weekdays[parsedDate.getDay()];
+            return days.includes(dayName);
+          } catch (_) {
+            return false;
+          }
+        };
+        const matchP = checkDay(details.date);
+        const matchR = details.returnRide ? checkDay(details.returnDate) : false;
+
+        const satisfiedDays: string[] = [];
+        const getDayName = (d: string) => {
+          try {
+            const parsedDate = new Date(d.replace(/-/g, "/"));
+            return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][parsedDate.getDay()];
+          } catch (_) { return ""; }
+        };
+        if (matchP) satisfiedDays.push(getDayName(details.date));
+        if (matchR) satisfiedDays.push(getDayName(details.returnDate));
+
+        ruleResults.push({
+          matched: matchP || matchR,
+          details: (matchP || matchR) ? [`${satisfiedDays.join(", ")}`] : []
+        });
+      }
+
+      // 6. Fleet restriction
+      if (addon.limitFleet) {
+        const fleetList = addon.selectedFleet || [];
+        const matched = !!selectedFleet && (fleetList.includes(selectedFleet.name) || fleetList.includes(selectedFleet.id));
+        ruleResults.push({
+          matched,
+          details: matched && selectedFleet ? [`${selectedFleet.name}`] : []
+        });
+      }
+
+      // 7. Service restriction (Match against tour category/title text)
+      if (addon.limitService) {
+        const serviceList = addon.selectedServices || [];
+        const hasTours = serviceList.map((s: string) => s.toLowerCase()).includes("tours");
+        let matchesAny = false;
+        if (hasTours) {
+          const otherServices = serviceList.filter((s: string) => s.toLowerCase() !== "tours");
+          if (otherServices.length > 0) {
+            const tourVal = (selectedTour?.title || selectedTour?.category || "").toLowerCase();
+            matchesAny = otherServices.some((s: string) => tourVal.includes(s.toLowerCase()));
+          } else {
+            matchesAny = true;
+          }
+        }
+        ruleResults.push({
+          matched: matchesAny,
+          details: matchesAny ? [`${selectedTour?.title || "Tour"}`] : []
+        });
+      }
+
+      // 8. One-way / Return ride restriction
+      if (addon.limitRideType) {
+        const targetType = addon.rideTypeTarget || "any";
+        let matched = true;
+        if (targetType === "oneway" && details.returnRide) matched = false;
+        if (targetType === "return" && !details.returnRide) matched = false;
+        ruleResults.push({
+          matched,
+          details: matched ? [`${details.returnRide ? "Return" : "One-Way"}`] : []
+        });
+      }
+
+      // Apply AND / OR operator connection logic
+      const connectionOperator = addon.connectionOperator || "AND";
+      let finalMatch = true;
+      if (ruleResults.length > 0) {
+        if (connectionOperator === "OR") {
+          finalMatch = ruleResults.some(r => r.matched);
+        } else {
+          finalMatch = ruleResults.every(r => r.matched);
+        }
+      }
+
+      if (!finalMatch) return;
+
+      // Collect details from matched rules
+      ruleResults.forEach(r => {
+        if (r.matched) {
+          satisfyDetails.push(...r.details);
+        }
+      });
 
       // For tours/offers, gross/net/total are often the same since they are fixed packages
       // but we maintain the logic for consistency
@@ -396,13 +788,19 @@ export default function Tours() {
         value = addon.value;
       }
 
-      addonTotal += value;
+      const impact = addon.operation === "subtraction" ? -value : value;
+      addonTotal += impact;
       appliedAddons.push({
         id: addon.id,
         name: addon.name,
         value: value,
+        impact: impact,
         type: addon.type,
-        target: addon.target
+        target: addon.target,
+        operation: addon.operation,
+        hideLabelInBreakdown: !!addon.hideLabelInBreakdown,
+        hideSatisfyDetails: !!addon.hideSatisfyDetails,
+        satisfyDetails
       });
     });
 
@@ -1373,12 +1771,24 @@ export default function Tours() {
                           <span>Ride Price</span>
                           <span className="text-white font-mono">${(getFleetPrice(selectedFleet) * quantity).toFixed(2)}</span>
                         </div>
-                        {bookingPricing.appliedAddons.map((addon: any, aIdx: number) => (
-                          <div key={`addon-tour-summary-${addon.id || aIdx}-${aIdx}`} className="flex justify-between border-b border-white/5 pb-4">
-                            <span className="text-gold text-[10px] uppercase tracking-widest font-bold">{addon.name}</span>
-                            <span className="text-gold font-bold text-sm">
-                              +${(addon.price ?? addon.value ?? addon.amount ?? addon.cost ?? 0).toFixed(2)}
-                            </span>
+                        {bookingPricing.appliedAddons.filter((addon: any) => !addon.hideLabelInBreakdown).map((addon: any, aIdx: number) => (
+                          <div key={`addon-tour-summary-${addon.id || aIdx}-${aIdx}`} className="border-b border-white/5 pb-4">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-gold text-[10px] uppercase tracking-widest font-bold">{addon.name}</span>
+                              <span className="text-gold font-bold text-sm">
+                                {addon.impact > 0 ? "+" : "-"}${Math.abs(addon.impact).toFixed(2)}
+                              </span>
+                            </div>
+                            {!addon.hideSatisfyDetails && addon.satisfyDetails && addon.satisfyDetails.length > 0 && (
+                              <div className="mt-1 space-y-0.5 pl-2 border-l border-gold/20">
+                                {addon.satisfyDetails.map((detail: string, dIdx: number) => (
+                                  <div key={dIdx} className="text-[9px] text-white/40 normal-case font-mono tracking-wider flex items-center gap-1">
+                                    <span className="text-gold/50">•</span>
+                                    <span>{detail}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                         {Object.keys(selectedExtras).length > 0 && (
@@ -1489,16 +1899,43 @@ export default function Tours() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-2">
                           <label className="text-[10px] uppercase tracking-widest font-bold text-white/30 ml-4">Phone Number</label>
-                          <div className="relative">
-                            <Phone className="absolute left-6 top-1/2 -translate-y-1/2 text-gold opacity-50" size={16} />
-                            <input
-                              required
-                              type="tel"
-                              value={details.phone}
-                              onChange={(e) => setDetails({ ...details, phone: e.target.value })}
-                              className="w-full bg-black/40 border border-white/10 rounded-[1.2rem] py-5 pl-14 pr-6 focus:border-gold outline-none transition-all text-sm"
-                              placeholder="+61 400 000 000"
-                            />
+                          <div className="flex gap-3">
+                            <div className="relative min-w-[120px] w-1/3">
+                              <select
+                                className="custom-select w-full h-[62px] !py-0 !pl-4 text-sm rounded-[1.2rem] select-none hover:border-gold/50 cursor-pointer"
+                                value={parsePhoneNumber(details.phone).countryCode}
+                                onChange={(e) => {
+                                  const { localNumber } = parsePhoneNumber(details.phone);
+                                  setDetails({ ...details, phone: `${e.target.value} ${localNumber}` });
+                                }}
+                              >
+                                {COUNTRY_CODES.map((c) => (
+                                  <option key={c.code} value={c.code}>
+                                    {c.short}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="relative flex-1">
+                              <Phone className="absolute left-6 top-1/2 -translate-y-1/2 text-gold opacity-50" size={16} />
+                              <input
+                                required
+                                type="tel"
+                                value={parsePhoneNumber(details.phone).localNumber}
+                                onChange={(e) => {
+                                  let val = e.target.value;
+                                  const { countryCode } = parsePhoneNumber(details.phone);
+                                  if (val.startsWith("+")) {
+                                    const parsed = parsePhoneNumber(val);
+                                    setDetails({ ...details, phone: `${parsed.countryCode} ${parsed.localNumber}` });
+                                  } else {
+                                    setDetails({ ...details, phone: `${countryCode} ${val}` });
+                                  }
+                                }}
+                                className="w-full bg-black/40 border border-white/10 rounded-[1.2rem] py-5 pl-14 pr-6 focus:border-gold outline-none transition-all text-sm"
+                                placeholder="Phone number"
+                              />
+                            </div>
                           </div>
                         </div>
                         <div className="space-y-2">
@@ -1716,13 +2153,32 @@ export default function Tours() {
                           </div>
                         )}
 
-                        {bookingPricing.appliedAddons.length > 0 && (
-                          <div className="space-y-2 border-b border-white/5 pb-3">
+                                                <div className="flex items-center justify-between text-[11px] font-bold text-white/30 tracking-[0.1em] uppercase">
+                          <span>Ride Price</span>
+                          <span className="text-white font-mono">${(getFleetPrice(selectedFleet) * quantity).toFixed(2)}</span>
+                        </div>
+
+                        {bookingPricing.appliedAddons.filter((addon: any) => !addon.hideLabelInBreakdown).length > 0 && (
+                          <div className="space-y-3 border-b border-white/5 pb-3">
                             <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">Price Add-ons</p>
-                            {bookingPricing.appliedAddons.map((addon: any, aIdx: number) => (
-                              <div key={`addon-tour-sticky-summary-${addon.id || aIdx}-${aIdx}`} className="flex justify-between text-[10px] text-white/60">
-                                <span>{addon.name}</span>
-                                <span className="font-mono text-gold font-bold">+${addon.value.toFixed(2)}</span>
+                            {bookingPricing.appliedAddons.filter((addon: any) => !addon.hideLabelInBreakdown).map((addon: any, aIdx: number) => (
+                              <div key={`addon-tour-sticky-summary-${addon.id || aIdx}-${aIdx}`} className="space-y-1">
+                                <div className="flex justify-between text-[10px] text-gold/80">
+                                  <span className="font-semibold">{addon.name}</span>
+                                  <span className="font-mono text-gold font-bold">
+                                    {addon.impact > 0 ? "+" : "-"}${Math.abs(addon.impact).toFixed(2)}
+                                  </span>
+                                </div>
+                                {!addon.hideSatisfyDetails && addon.satisfyDetails && addon.satisfyDetails.length > 0 && (
+                                  <div className="mt-1 space-y-0.5 pl-2 border-l border-gold/20">
+                                    {addon.satisfyDetails.map((detail: string, dIdx: number) => (
+                                      <div key={dIdx} className="text-[8px] text-white/40 normal-case font-mono tracking-wider flex items-center gap-1">
+                                        <span className="text-gold/50">•</span>
+                                        <span>{detail}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -1810,10 +2266,24 @@ export default function Tours() {
                       <span className="text-white/20 text-[10px] uppercase tracking-widest font-bold">Pickup Location</span>
                       <span className="text-white font-bold text-sm">{details.pickup}</span>
                     </div>
-                    {bookingPricing.appliedAddons.map((addon: any, aIdx: number) => (
-                      <div key={`addon-tour-summary-${addon.id || aIdx}-${aIdx}`} className="flex justify-between border-b border-white/5 pb-4">
-                        <span className="text-gold/40 text-[10px] uppercase tracking-widest font-bold">{addon.name}</span>
-                        <span className="text-gold font-bold text-sm">+{addon.value.toFixed(2)}</span>
+                    {bookingPricing.appliedAddons.filter((addon: any) => !addon.hideLabelInBreakdown).map((addon: any, aIdx: number) => (
+                      <div key={`addon-tour-summary-3-${addon.id || aIdx}-${aIdx}`} className="border-b border-white/5 pb-4">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-gold/40 text-[10px] uppercase tracking-widest font-bold">{addon.name}</span>
+                          <span className="text-gold font-bold text-sm">
+                            {addon.impact > 0 ? "+" : "-"}${Math.abs(addon.impact).toFixed(2)}
+                          </span>
+                        </div>
+                        {!addon.hideSatisfyDetails && addon.satisfyDetails && addon.satisfyDetails.length > 0 && (
+                          <div className="mt-1 space-y-0.5 pl-2 border-l border-gold/20">
+                            {addon.satisfyDetails.map((detail: string, dIdx: number) => (
+                              <div key={dIdx} className="text-[9px] text-white/40 normal-case font-mono tracking-wider flex items-center gap-1">
+                                <span className="text-gold/50">•</span>
+                                <span>{detail}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                     <div className="flex justify-between pt-6">
@@ -1823,27 +2293,32 @@ export default function Tours() {
                   </div>
 
                   {/* Payment Selection */}
-                  <div className="grid grid-cols-2 gap-4 mb-8">
-                    {[
-                      { id: 'stripe', label: 'Digital Payment', sub: 'Instant Update', icon: CreditCard },
-                      { id: 'cash', label: 'Cash Payment', sub: 'Pay on Arrival', icon: BanknoteIcon }
-                    ].map((p: any) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setPaymentType(p.id)}
-                        className={cn(
-                          "p-6 rounded-2xl border transition-all text-left group",
-                          paymentType === p.id ? "bg-gold border-gold" : "bg-white/5 border-white/10 hover:border-gold/50"
-                        )}
-                      >
-                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-4 transition-all", paymentType === p.id ? "bg-black text-gold" : "bg-white/5 text-white/20 group-hover:text-gold")}>
-                          {p.id === 'stripe' ? <CreditCard size={18} /> : <BanknoteIcon size={18} />}
-                        </div>
-                        <p className={cn("text-[9px] uppercase font-bold tracking-widest", paymentType === p.id ? "text-black" : "text-white/30")}>{p.label}</p>
-                        <p className={cn("text-[8px] uppercase font-bold opacity-40", paymentType === p.id ? "text-black" : "text-gold")}>{p.sub}</p>
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    const paymentTypesList = [
+                      ...(systemSettings?.allowStripeCardPayment !== false ? [{ id: 'stripe', label: 'Digital Payment', sub: 'Instant Update', icon: CreditCard }] : []),
+                      ...(systemSettings?.allowCashPayment !== false ? [{ id: 'cash', label: 'Cash Payment', sub: 'Pay on Arrival', icon: BanknoteIcon }] : [])
+                    ];
+                    return (
+                      <div className={cn("grid gap-4 mb-8", paymentTypesList.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
+                        {paymentTypesList.map((p: any) => (
+                          <button
+                            key={p.id}
+                            onClick={() => setPaymentType(p.id)}
+                            className={cn(
+                              "p-6 rounded-2xl border transition-all text-left group",
+                              paymentType === p.id ? "bg-gold border-gold" : "bg-white/5 border-white/10 hover:border-gold/50"
+                            )}
+                          >
+                            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-4 transition-all", paymentType === p.id ? "bg-black text-gold" : "bg-white/5 text-white/20 group-hover:text-gold")}>
+                              {p.id === 'stripe' ? <CreditCard size={18} /> : <BanknoteIcon size={18} />}
+                            </div>
+                            <p className={cn("text-[9px] uppercase font-bold tracking-widest", paymentType === p.id ? "text-black" : "text-white/30")}>{p.label}</p>
+                            <p className={cn("text-[8px] uppercase font-bold opacity-40", paymentType === p.id ? "text-black" : "text-gold")}>{p.sub}</p>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   <button
                     onClick={handleBooking}

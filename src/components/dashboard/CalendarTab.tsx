@@ -903,6 +903,79 @@ export default function CalendarTab({
                   {day && !isNaN(day.getTime()) ? format(day, "d") : '?'}
                 </span>
 
+                {/* Synced/Not Synced status dot in top-right corner */}
+                {(() => {
+                  if (dayBookings.length === 0 || !isSameMonth(day, currentMonth)) {
+                    return null;
+                  }
+
+                  const currentUserId = user?.uid;
+                  const isDriver = userProfile?.role === 'driver';
+
+                  const getEventId = (b: any) => {
+                    return currentUserId ? (b.gcalEvents?.[currentUserId]?.eventId || null) : b.calendarEventId;
+                  };
+
+                  const getReturnEventId = (b: any) => {
+                    return currentUserId ? (b.gcalEvents?.[currentUserId]?.returnEventId || null) : b.returnCalendarEventId;
+                  };
+
+                  const isEligibleToSync = (b: any) => {
+                    if (isDriver) {
+                      return b.status === 'accepted';
+                    } else {
+                      return b.status !== 'cancelled' && b.status !== 'rejected' && b.status !== 'completed';
+                    }
+                  };
+
+                  // Check if any booking on this day is eligible but lacks correct sync ID
+                  let hasEligible = false;
+                  let allSynced = true;
+
+                  dayBookings.forEach((b) => {
+                    if (isEligibleToSync(b)) {
+                      hasEligible = true;
+                      
+                      const isPickup = b.date && isSameDay(parseISO(b.date), day);
+                      const isReturn = b.returnDate && isSameDay(parseISO(b.returnDate), day);
+
+                      if (calendarDateType === 'booking') {
+                        const mainSynced = !!getEventId(b);
+                        const returnSynced = b.returnDate ? !!getReturnEventId(b) : true;
+                        if (!mainSynced || !returnSynced) {
+                          allSynced = false;
+                        }
+                      } else {
+                        if (isPickup && !getEventId(b)) {
+                          allSynced = false;
+                        }
+                        if (isReturn && !getReturnEventId(b)) {
+                          allSynced = false;
+                        }
+                      }
+                    }
+                  });
+
+                  if (!hasEligible) {
+                    return null;
+                  }
+
+                  return (
+                    <div className="absolute top-1 right-1 sm:top-2 sm:right-2 group/sync-dot z-20">
+                      <span
+                        className={cn(
+                          "w-1.5 h-1.5 rounded-full block border border-black/40",
+                          allSynced ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-orange-400 shadow-[0_0_6px_rgba(251,146,60,0.6)]"
+                        )}
+                      />
+                      {/* Tooltip */}
+                      <span className="pointer-events-none invisible group-hover/sync-dot:visible absolute top-full right-0 mt-1 bg-black/95 text-white text-[9px] px-2 py-1 rounded-md border border-white/10 shadow-2xl font-sans tracking-wide whitespace-nowrap z-[110]">
+                        {allSynced ? "Google Calendar: Synced" : "Google Calendar: Pending/Not Synced"}
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 {dayBookings.length > 0 && (
                   <div className="absolute bottom-1 sm:bottom-2 left-1 sm:left-3 right-1 sm:right-3">
                     <div className="flex flex-wrap gap-[3px] sm:gap-[5px] items-center max-w-full">
@@ -1040,6 +1113,24 @@ export default function CalendarTab({
               </div>
             );
           })}
+        </div>
+
+        {/* Google Calendar Sync Legend */}
+        <div className="mt-6 pt-4 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-white/40">
+            <span>Sync Indicators:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)] border border-black/40" />
+              <span className="text-white/60">Synced to GCal</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-orange-400 shadow-[0_0_6px_rgba(251,146,60,0.6)] border border-black/40" />
+              <span className="text-white/60">Not Synced / Pending</span>
+            </div>
+          </div>
+          <p className="text-[9px] text-white/30 italic font-medium font-sans">
+            * Indicators show Google Calendar sync status in top right corner of each date cell
+          </p>
         </div>
       </div>
 
