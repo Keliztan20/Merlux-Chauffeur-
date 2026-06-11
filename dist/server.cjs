@@ -78,6 +78,7 @@ function getStripe() {
 }
 async function startServer() {
   const app = (0, import_express.default)();
+  app.set("trust proxy", true);
   const PORT = 3e3;
   app.use((0, import_cors.default)());
   app.use(import_express.default.json());
@@ -278,22 +279,552 @@ async function startServer() {
     }
     next();
   });
-  app.get("/sitemap.xml", (req, res) => {
-    const sitemapPath = import_path.default.join(process.cwd(), "dist", "sitemap.xml");
-    if (import_fs.default.existsSync(sitemapPath)) {
-      return res.sendFile(sitemapPath);
+  const getSiteUrl = (req) => {
+    let SITE_URL = process.env.VITE_SITE_URL || "";
+    if (!SITE_URL) {
+      const host = req.get("host") || "";
+      const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0");
+      const protocol = req.secure || req.headers["x-forwarded-proto"] === "https" || !isLocalhost ? "https" : "http";
+      SITE_URL = `${protocol}://${host}`;
     }
-    res.status(404).send("Sitemap not found. Run npm run build to generate.");
+    if (SITE_URL.endsWith("/")) {
+      SITE_URL = SITE_URL.slice(0, -1);
+    }
+    return SITE_URL;
+  };
+  const getFormatDate = (val) => {
+    if (!val) return (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    try {
+      let d;
+      if (val.seconds !== void 0) {
+        d = new Date(val.seconds * 1e3);
+      } else if (val._seconds !== void 0) {
+        d = new Date(val._seconds * 1e3);
+      } else if (val.toDate && typeof val.toDate === "function") {
+        d = val.toDate();
+      } else {
+        d = new Date(val);
+      }
+      if (!isNaN(d.getTime())) {
+        return d.toISOString().split("T")[0];
+      }
+    } catch (e) {
+    }
+    return (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  };
+  app.get("/sitemap_index.xml", async (req, res) => {
+    try {
+      const SITE_URL = getSiteUrl(req);
+      const todayString = getFormatDate(null);
+      const [pagesSnap, blogsSnap, offersSnap, toursSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection("pages").get(),
+        dbAdmin.collection("blogs").get(),
+        dbAdmin.collection("offers").get(),
+        dbAdmin.collection("tours").get(),
+        dbAdmin.collection("metadata").get()
+      ]);
+      const pages = pagesSnap.docs.map((doc) => ({ id: doc.id, type: "Page", ...doc.data() }));
+      const blogs = blogsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const offers = offersSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const tours = toursSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const metadataDocs = metadataSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const staticPages = [
+        { title: "Home", slug: "", path: "/" },
+        { title: "Offers", slug: "offers", path: "/offers" },
+        { title: "Tours", slug: "tours", path: "/tours" },
+        { title: "Services", slug: "services", path: "/services" },
+        { title: "Blog", slug: "blog", path: "/blog" },
+        { title: "Fleet", slug: "fleet", path: "/fleet" },
+        { title: "FAQ", slug: "faq", path: "/faq" },
+        { title: "About", slug: "about", path: "/about" },
+        { title: "Contact", slug: "contact", path: "/contact" },
+        { title: "Terms and Conditions", slug: "terms", path: "/terms" }
+      ];
+      const getMetadataOverride = (routeSlug) => {
+        const normSlug = (routeSlug || "").toLowerCase();
+        const replaced = normSlug.replace(/\//g, "_");
+        let override = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug);
+        if (!override && replaced) {
+          override = metadataDocs.find((d) => d.slug === replaced || d.id === replaced);
+        }
+        return override;
+      };
+      let pageCount = 0;
+      let blogCount = 0;
+      let offerCount = 0;
+      let tourCount = 0;
+      const registeredPaths = /* @__PURE__ */ new Set();
+      pages.forEach((p) => {
+        const routeSlug = p.slug || "home";
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = p.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : p.noindex || false);
+        const active = p.active !== false;
+        if (!noindex && active) {
+          const cleanPath = p.slug === "home" || p.slug === "" ? "/" : `/${p.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            pageCount++;
+          }
+        }
+      });
+      staticPages.forEach((sp) => {
+        const cleanPath = sp.path || "/";
+        const routeSlug = sp.slug || "home";
+        const docOverride = getMetadataOverride(routeSlug);
+        if (docOverride?.noindex === true) return;
+        if (!registeredPaths.has(cleanPath)) {
+          registeredPaths.add(cleanPath);
+          pageCount++;
+        }
+      });
+      blogs.forEach((b) => {
+        const routeSlug = `blog/${b.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = b.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : b.noindex || false);
+        const active = b.active !== false;
+        if (!noindex && active) {
+          blogCount++;
+        }
+      });
+      offers.forEach((o) => {
+        const routeSlug = `offers/${o.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = o.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : o.noindex || false);
+        const active = o.active !== false;
+        if (!noindex && active) {
+          offerCount++;
+        }
+      });
+      tours.forEach((t) => {
+        const routeSlug = `tours/${t.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = t.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : t.noindex || false);
+        const active = t.active !== false;
+        if (!noindex && active) {
+          tourCount++;
+        }
+      });
+      const sitemapsToInclude = [
+        { name: "page-sitemap.xml", count: pageCount },
+        { name: "blog-sitemap.xml", count: blogCount },
+        { name: "offer-sitemap.xml", count: offerCount },
+        { name: "tours-sitemap.xml", count: tourCount }
+      ];
+      const sitemapsXML = sitemapsToInclude.filter((s) => s.count > 0).map((s) => `  <sitemap>
+    <loc>${SITE_URL}/${s.name}</loc>
+    <lastmod>${todayString}</lastmod>
+  </sitemap>`).join("\n");
+      const indexXml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapsXML}
+</sitemapindex>`.trim();
+      res.set("Content-Type", "application/xml; charset=utf-8");
+      return res.send(indexXml);
+    } catch (err) {
+      console.error("Error generating dynamic sitemap index:", err);
+      const indexSitemapPath = import_path.default.join(process.cwd(), "dist", "sitemap_index.xml");
+      if (import_fs.default.existsSync(indexSitemapPath)) {
+        res.set("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(indexSitemapPath);
+      }
+      return res.status(500).send("Error generating sitemap index");
+    }
+  });
+  app.get("/sitemap.xml", async (req, res) => {
+    try {
+      const SITE_URL = getSiteUrl(req);
+      const [pagesSnap, blogsSnap, offersSnap, toursSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection("pages").get(),
+        dbAdmin.collection("blogs").get(),
+        dbAdmin.collection("offers").get(),
+        dbAdmin.collection("tours").get(),
+        dbAdmin.collection("metadata").get()
+      ]);
+      const pages = pagesSnap.docs.map((doc) => ({ id: doc.id, type: "Page", ...doc.data() }));
+      const blogs = blogsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const offers = offersSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const tours = toursSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const metadataDocs = metadataSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const staticPages = [
+        { title: "Home", slug: "", path: "/" },
+        { title: "Offers", slug: "offers", path: "/offers" },
+        { title: "Tours", slug: "tours", path: "/tours" },
+        { title: "Services", slug: "services", path: "/services" },
+        { title: "Blog", slug: "blog", path: "/blog" },
+        { title: "Fleet", slug: "fleet", path: "/fleet" },
+        { title: "FAQ", slug: "faq", path: "/faq" },
+        { title: "About", slug: "about", path: "/about" },
+        { title: "Contact", slug: "contact", path: "/contact" },
+        { title: "Terms and Conditions", slug: "terms", path: "/terms" }
+      ];
+      const getMetadataOverride = (routeSlug) => {
+        const normSlug = (routeSlug || "").toLowerCase();
+        const replaced = normSlug.replace(/\//g, "_");
+        let override = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug);
+        if (!override && replaced) {
+          override = metadataDocs.find((d) => d.slug === replaced || d.id === replaced);
+        }
+        return override;
+      };
+      const sitemapEntries = [];
+      const registeredPaths = /* @__PURE__ */ new Set();
+      pages.forEach((p) => {
+        const routeSlug = p.slug || "home";
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = p.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : p.noindex || false);
+        const active = p.active !== false;
+        if (!noindex && active) {
+          const cleanPath = p.slug === "home" || p.slug === "" ? "/" : `/${p.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            const updatedAt = docOverride?.updatedAt || p.updatedAt || p.createdAt || null;
+            sitemapEntries.push({
+              path: cleanPath,
+              lastmod: getFormatDate(updatedAt),
+              changefreq: cleanPath === "/" ? "daily" : "weekly",
+              priority: cleanPath === "/" ? "1.0" : "0.8"
+            });
+          }
+        }
+      });
+      staticPages.forEach((sp) => {
+        const cleanPath = sp.path || "/";
+        const routeSlug = sp.slug || "home";
+        const docOverride = getMetadataOverride(routeSlug);
+        if (docOverride?.noindex === true) return;
+        if (!registeredPaths.has(cleanPath)) {
+          registeredPaths.add(cleanPath);
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(docOverride?.updatedAt),
+            changefreq: cleanPath === "/" ? "daily" : "weekly",
+            priority: cleanPath === "/" ? "1.0" : "0.8"
+          });
+        }
+      });
+      blogs.forEach((b) => {
+        const routeSlug = `blog/${b.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = b.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : b.noindex || false);
+        const active = b.active !== false;
+        if (!noindex && active) {
+          const cleanPath = `/blog/${b.slug}`;
+          const updatedAt = docOverride?.updatedAt || b.updatedAt || b.createdAt || null;
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(updatedAt),
+            changefreq: "weekly",
+            priority: "0.8"
+          });
+        }
+      });
+      offers.forEach((o) => {
+        const routeSlug = `offers/${o.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = o.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : o.noindex || false);
+        const active = o.active !== false;
+        if (!noindex && active) {
+          const cleanPath = `/offers/${o.slug}`;
+          const updatedAt = docOverride?.updatedAt || o.updatedAt || o.createdAt || null;
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(updatedAt),
+            changefreq: "weekly",
+            priority: "0.8"
+          });
+        }
+      });
+      tours.forEach((t) => {
+        const routeSlug = `tours/${t.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = t.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : t.noindex || false);
+        const active = t.active !== false;
+        if (!noindex && active) {
+          const cleanPath = `/tours/${t.slug}`;
+          const updatedAt = docOverride?.updatedAt || t.updatedAt || t.createdAt || null;
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(updatedAt),
+            changefreq: "weekly",
+            priority: "0.8"
+          });
+        }
+      });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapEntries.map((entry) => `  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`.trim();
+      res.set("Content-Type", "application/xml; charset=utf-8");
+      return res.send(xml);
+    } catch (err) {
+      console.error("Error generating dynamic flat sitemap fallback:", err);
+      const fallbackPath = import_path.default.join(process.cwd(), "dist", "sitemap.xml");
+      if (import_fs.default.existsSync(fallbackPath)) {
+        res.set("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(fallbackPath);
+      }
+      res.status(500).send("Error generating sitemap");
+    }
+  });
+  app.get("/page-sitemap.xml", async (req, res) => {
+    try {
+      const SITE_URL = getSiteUrl(req);
+      const [pagesSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection("pages").get(),
+        dbAdmin.collection("metadata").get()
+      ]);
+      const pages = pagesSnap.docs.map((doc) => ({ id: doc.id, type: "Page", ...doc.data() }));
+      const metadataDocs = metadataSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const staticPages = [
+        { title: "Home", slug: "", path: "/" },
+        { title: "Offers", slug: "offers", path: "/offers" },
+        { title: "Tours", slug: "tours", path: "/tours" },
+        { title: "Services", slug: "services", path: "/services" },
+        { title: "Blog", slug: "blog", path: "/blog" },
+        { title: "Fleet", slug: "fleet", path: "/fleet" },
+        { title: "FAQ", slug: "faq", path: "/faq" },
+        { title: "About", slug: "about", path: "/about" },
+        { title: "Contact", slug: "contact", path: "/contact" },
+        { title: "Terms and Conditions", slug: "terms", path: "/terms" }
+      ];
+      const getMetadataOverride = (routeSlug) => {
+        const normSlug = (routeSlug || "").toLowerCase();
+        const replaced = normSlug.replace(/\//g, "_");
+        let override = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug);
+        if (!override && replaced) {
+          override = metadataDocs.find((d) => d.slug === replaced || d.id === replaced);
+        }
+        return override;
+      };
+      const sitemapEntries = [];
+      const registeredPaths = /* @__PURE__ */ new Set();
+      pages.forEach((p) => {
+        const routeSlug = p.slug || "home";
+        const docOverride = getMetadataOverride(routeSlug);
+        const noindex = p.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : p.noindex || false);
+        const active = p.active !== false;
+        if (!noindex && active) {
+          const cleanPath = p.slug === "home" || p.slug === "" ? "/" : `/${p.slug}`;
+          if (!registeredPaths.has(cleanPath)) {
+            registeredPaths.add(cleanPath);
+            const updatedAt = docOverride?.updatedAt || p.updatedAt || p.createdAt || null;
+            sitemapEntries.push({
+              path: cleanPath,
+              lastmod: getFormatDate(updatedAt),
+              changefreq: cleanPath === "/" ? "daily" : "weekly",
+              priority: cleanPath === "/" ? "1.0" : "0.8"
+            });
+          }
+        }
+      });
+      staticPages.forEach((sp) => {
+        const cleanPath = sp.path || "/";
+        const routeSlug = sp.slug || "home";
+        const docOverride = getMetadataOverride(routeSlug);
+        if (docOverride?.noindex === true) return;
+        if (!registeredPaths.has(cleanPath)) {
+          registeredPaths.add(cleanPath);
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(docOverride?.updatedAt),
+            changefreq: cleanPath === "/" ? "daily" : "weekly",
+            priority: cleanPath === "/" ? "1.0" : "0.8"
+          });
+        }
+      });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapEntries.map((entry) => `  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`.trim();
+      res.set("Content-Type", "application/xml; charset=utf-8");
+      return res.send(xml);
+    } catch (err) {
+      console.error("Error generating page sitemap:", err);
+      const sitemapPath = import_path.default.join(process.cwd(), "dist", "page-sitemap.xml");
+      if (import_fs.default.existsSync(sitemapPath)) {
+        res.set("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(sitemapPath);
+      }
+      res.status(500).send("Error generating sitemap");
+    }
+  });
+  app.get("/blog-sitemap.xml", async (req, res) => {
+    try {
+      const SITE_URL = getSiteUrl(req);
+      const [blogsSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection("blogs").get(),
+        dbAdmin.collection("metadata").get()
+      ]);
+      const blogs = blogsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const metadataDocs = metadataSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const sitemapEntries = [];
+      blogs.forEach((b) => {
+        const routeSlug = `blog/${b.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = b.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : b.noindex || false);
+        const active = b.active !== false;
+        if (!noindex && active) {
+          const cleanPath = `/blog/${b.slug}`;
+          const updatedAt = docOverride?.updatedAt || b.updatedAt || b.createdAt || null;
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(updatedAt),
+            changefreq: "weekly",
+            priority: "0.8"
+          });
+        }
+      });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapEntries.map((entry) => `  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`.trim();
+      res.set("Content-Type", "application/xml; charset=utf-8");
+      return res.send(xml);
+    } catch (err) {
+      console.error("Error generating blog sitemap:", err);
+      const sitemapPath = import_path.default.join(process.cwd(), "dist", "blog-sitemap.xml");
+      if (import_fs.default.existsSync(sitemapPath)) {
+        res.set("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(sitemapPath);
+      }
+      res.status(500).send("Error generating sitemap");
+    }
+  });
+  app.get("/offer-sitemap.xml", async (req, res) => {
+    try {
+      const SITE_URL = getSiteUrl(req);
+      const [offersSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection("offers").get(),
+        dbAdmin.collection("metadata").get()
+      ]);
+      const offers = offersSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const metadataDocs = metadataSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const sitemapEntries = [];
+      offers.forEach((o) => {
+        const routeSlug = `offers/${o.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = o.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : o.noindex || false);
+        const active = o.active !== false;
+        if (!noindex && active) {
+          const cleanPath = `/offers/${o.slug}`;
+          const updatedAt = docOverride?.updatedAt || o.updatedAt || o.createdAt || null;
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(updatedAt),
+            changefreq: "weekly",
+            priority: "0.8"
+          });
+        }
+      });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapEntries.map((entry) => `  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`.trim();
+      res.set("Content-Type", "application/xml; charset=utf-8");
+      return res.send(xml);
+    } catch (err) {
+      console.error("Error generating offer sitemap:", err);
+      const sitemapPath = import_path.default.join(process.cwd(), "dist", "offer-sitemap.xml");
+      if (import_fs.default.existsSync(sitemapPath)) {
+        res.set("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(sitemapPath);
+      }
+      res.status(500).send("Error generating sitemap");
+    }
+  });
+  app.get("/tours-sitemap.xml", async (req, res) => {
+    try {
+      const SITE_URL = getSiteUrl(req);
+      const [toursSnap, metadataSnap] = await Promise.all([
+        dbAdmin.collection("tours").get(),
+        dbAdmin.collection("metadata").get()
+      ]);
+      const tours = toursSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const metadataDocs = metadataSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const sitemapEntries = [];
+      tours.forEach((t) => {
+        const routeSlug = `tours/${t.slug}`;
+        const docOverride = metadataDocs.find((d) => d.slug === routeSlug || d.id === routeSlug.replace(/\//g, "_"));
+        const noindex = t.active === false || (docOverride?.noindex !== void 0 ? docOverride.noindex : t.noindex || false);
+        const active = t.active !== false;
+        if (!noindex && active) {
+          const cleanPath = `/tours/${t.slug}`;
+          const updatedAt = docOverride?.updatedAt || t.updatedAt || t.createdAt || null;
+          sitemapEntries.push({
+            path: cleanPath,
+            lastmod: getFormatDate(updatedAt),
+            changefreq: "weekly",
+            priority: "0.8"
+          });
+        }
+      });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapEntries.map((entry) => `  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`.trim();
+      res.set("Content-Type", "application/xml; charset=utf-8");
+      return res.send(xml);
+    } catch (err) {
+      console.error("Error generating tours sitemap:", err);
+      const sitemapPath = import_path.default.join(process.cwd(), "dist", "tours-sitemap.xml");
+      if (import_fs.default.existsSync(sitemapPath)) {
+        res.set("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(sitemapPath);
+      }
+      res.status(500).send("Error generating tours sitemap");
+    }
+  });
+  app.get(["/sitemap", "/sitemap.html"], (req, res) => {
+    let sitemapHtmlPath = import_path.default.join(process.cwd(), "dist", "sitemap.html");
+    if (!import_fs.default.existsSync(sitemapHtmlPath)) {
+      sitemapHtmlPath = import_path.default.join(process.cwd(), "public", "sitemap.html");
+    }
+    if (import_fs.default.existsSync(sitemapHtmlPath)) {
+      res.header("Content-Type", "text/html");
+      return res.sendFile(sitemapHtmlPath);
+    }
+    res.status(404).send("Sitemap HTML directory not found. Please run build first.");
   });
   app.get("/robots.txt", (req, res) => {
+    const SITE_URL = getSiteUrl(req);
     const robotsPath = import_path.default.join(process.cwd(), "dist", "robots.txt");
     if (import_fs.default.existsSync(robotsPath)) {
       return res.sendFile(robotsPath);
     }
-    res.send("User-agent: *\nAllow: /\nSitemap: /sitemap.xml");
+    res.send(`User-agent: *
+Allow: /
+Sitemap: ${SITE_URL}/sitemap_index.xml
+Sitemap: ${SITE_URL}/sitemap.xml`);
   });
-  const injectSEO = async (html, url) => {
+  const injectSEO = async (html, req) => {
     try {
+      const url = req.originalUrl;
+      const SITE_URL = getSiteUrl(req);
       const settingsSnap = await dbAdmin.collection("settings").doc("system").get();
       const globalSettings = settingsSnap.exists ? settingsSnap.data() : null;
       const globalSeo = globalSettings?.seo || {};
@@ -325,13 +856,13 @@ async function startServer() {
       if (title !== defaultTitle && !title.includes(siteName)) {
         title = titleTemplate.replace("%s", title);
       }
-      const desc = seoData?.metaDescription || globalSeo.defaultDescription || "";
+      const desc = seoData?.metaDescription || seoData?.seoDescription || seoData?.description || seoData?.shortDescription || globalSeo.defaultDescription || "";
       const seoKeywords = Array.isArray(seoData?.keywords) ? seoData.keywords : typeof seoData?.keywords === "string" ? seoData.keywords.split(",").map((k) => k.trim()) : [];
       const defaultKeywords = Array.isArray(globalSeo.defaultKeywords) ? globalSeo.defaultKeywords : typeof globalSeo.defaultKeywords === "string" ? globalSeo.defaultKeywords.split(",").map((k) => k.trim()) : [];
       const keywords = [...seoKeywords, ...defaultKeywords].filter((k) => k !== "").join(", ");
       const favicon = globalSeo.favicon ? `<link rel="icon" href="${globalSeo.favicon}" />` : "";
       const ogImage = seoData?.ogImage || seoData?.featuredImage || globalSeo.ogImage || globalSeo.logo || "";
-      const canonical = seoData?.canonicalUrl || `${process.env.APP_URL || ""}${url}`;
+      const canonical = seoData?.canonicalUrl || `${SITE_URL}${url}`;
       const noindex = seoData?.noindex ? '<meta name="robots" content="noindex, nofollow">' : '<meta name="robots" content="index, follow">';
       const pageSchema = seoData?.schema ? `<script type="application/ld+json">${JSON.stringify(seoData.schema)}</script>` : "";
       const orgSchema = globalSeo.organizationSchema ? `<script type="application/ld+json">${JSON.stringify(globalSeo.organizationSchema)}</script>` : "";
@@ -346,24 +877,25 @@ async function startServer() {
       ` : "";
       const scMeta = globalSeo.searchConsoleId ? `<meta name="google-site-verification" content="${globalSeo.searchConsoleId}" />` : "";
       const seoTags = `
-    <title>${title}</title>
-    <meta name="description" content="${desc}" />
-    <meta name="keywords" content="${keywords}" />
-    <link rel="canonical" href="${canonical}" />
-    ${favicon}
-    ${noindex}
-    ${scMeta}
-    <meta property="og:title" content="${title}" />
-    <meta property="og:description" content="${desc}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="${canonical}" />
-    <meta property="og:image" content="${ogImage}" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <title data-rh="true">${title}</title>
+    <meta data-rh="true" name="description" content="${desc}" />
+    <meta data-rh="true" name="keywords" content="${keywords}" />
+    <link data-rh="true" rel="canonical" href="${canonical}" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="${SITE_URL}/sitemap_index.xml" />
+    ${favicon.replace("<link", '<link data-rh="true"')}
+    ${noindex.replace("<meta", '<meta data-rh="true"')}
+    ${scMeta.replace("<meta", '<meta data-rh="true"')}
+    <meta data-rh="true" property="og:title" content="${title}" />
+    <meta data-rh="true" property="og:description" content="${desc}" />
+    <meta data-rh="true" property="og:type" content="website" />
+    <meta data-rh="true" property="og:url" content="${canonical}" />
+    <meta data-rh="true" property="og:image" content="${ogImage}" />
+    <meta data-rh="true" name="twitter:card" content="summary_large_image" />
     ${orgSchema}
     ${pageSchema}
     ${gaScript}
       `;
-      return html.replace(/<title>.*?<\/title>/, "").replace("</head>", `${seoTags}</head>`);
+      return html.replace(/<title data-rh="true">.*?<\/title>/, "").replace(/<title>.*?<\/title>/, "").replace("</head>", `${seoTags}</head>`);
     } catch (error) {
       console.error("SEO Injection Error:", error);
       return html;
@@ -381,7 +913,7 @@ async function startServer() {
       try {
         let template = import_fs.default.readFileSync(import_path.default.resolve(__dirnameResolved, "index.html"), "utf-8");
         template = await vite.transformIndexHtml(url, template);
-        const html = await injectSEO(template, url);
+        const html = await injectSEO(template, req);
         res.status(200).set({ "Content-Type": "text/html" }).end(html);
       } catch (e) {
         vite.ssrFixStacktrace(e);
@@ -394,7 +926,7 @@ async function startServer() {
     app.get("*", async (req, res) => {
       try {
         const template = import_fs.default.readFileSync(import_path.default.join(distPath, "index.html"), "utf-8");
-        const html = await injectSEO(template, req.originalUrl);
+        const html = await injectSEO(template, req);
         res.status(200).set({ "Content-Type": "text/html" }).end(html);
       } catch (e) {
         res.status(500).end("Internal Server Error");

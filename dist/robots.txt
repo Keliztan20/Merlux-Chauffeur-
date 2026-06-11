@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 
 # Sitemap
-Sitemap: https://merlux.com.au/sitemap.xml
+Sitemap: https://merlux.au/sitemap_index.xml
