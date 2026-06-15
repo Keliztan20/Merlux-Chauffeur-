@@ -1,6 +1,4 @@
-import os from 'os';
 import path from 'path';
-import generateSitemap from '../../scripts/generate-sitemap';
 
 export default async (req: any, res: any) => {
   if (req.method !== 'POST') {
@@ -8,22 +6,21 @@ export default async (req: any, res: any) => {
   }
 
   try {
-    // Call the generator in-process. This avoids spawning child processes which
-    // are often restricted in serverless environments.
-    const tempDir = path.join(os.tmpdir(), 'merlux-sitemaps');
-    const output = await generateSitemap({
-      publicDir: path.join(tempDir, 'public'),
-      distDir: path.join(tempDir, 'dist'),
-    });
+    const { exec } = await import('child_process');
+    const scriptPath = path.join(process.cwd(), 'scripts', 'generate-sitemap.ts');
 
-    return res.status(200).json({
-      success: true,
-      message: 'Sitemap regenerated in temporary storage',
-      output,
-      warning: 'These files are generated in serverless temp storage and will not persist across cold starts.',
+    console.log(`Triggering sitemap script: npx tsx "${scriptPath}"`);
+
+    exec(`npx tsx "${scriptPath}"`, { timeout: 1000 * 60 * 5 }, (error: any, stdout: string, stderr: string) => {
+      if (error) {
+        console.error('Sitemap generation failed:', error);
+        return res.status(500).json({ success: false, error: String(error), stderr });
+      }
+      console.log('Sitemap generation output:', stdout || stderr);
+      return res.status(200).json({ success: true, message: 'Sitemap regenerated', stdout, stderr });
     });
   } catch (err: any) {
-    console.error('Sitemap generation error:', err);
+    console.error('Error invoking sitemap generator:', err);
     return res.status(500).json({ success: false, error: err?.message || String(err) });
   }
 };

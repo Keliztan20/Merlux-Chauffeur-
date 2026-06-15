@@ -11,8 +11,8 @@ let SITE_URL = process.env.VITE_SITE_URL || 'https://merlux.au';
 if (!SITE_URL.startsWith('http')) {
   SITE_URL = `https://${SITE_URL}`;
 }
-const DEFAULT_PUBLIC_DIR = path.join(process.cwd(), 'public');
-const DEFAULT_DIST_DIR = path.join(process.cwd(), 'dist');
+const PUBLIC_DIR = path.join(process.cwd(), 'public');
+const DIST_DIR = path.join(process.cwd(), 'dist');
 
 // Load Firebase config from firebase-applet-config.json
 let firebaseConfig: any;
@@ -26,7 +26,8 @@ try {
 }
 
 if (!firebaseConfig) {
-  throw new Error('Firebase configuration not found. Cannot generate sitemap. Ensure firebase-applet-config.json is available.');
+  console.error('❌ Firebase configuration not found. Cannot generate sitemap.');
+  process.exit(1);
 }
 
 // Initialize Firebase Client SDK with forced HTTP Long Polling for 100% reliable sandbox building
@@ -135,35 +136,17 @@ const prettifyTitle = (pathStr: string, currentTitle: string = ''): string => {
     .join(' ');
 };
 
-async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: string }) {
-  const PUBLIC_DIR = outputPaths?.publicDir || DEFAULT_PUBLIC_DIR;
-  const DIST_DIR = outputPaths?.distDir || DEFAULT_DIST_DIR;
-
+async function generateSitemap() {
   console.log('🚀 Starting Scalable Admin Multiple Sitemap & HTML Generation matches MetaTab.tsx rules...');
 
   try {
     if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
     if (!fs.existsSync(DIST_DIR)) fs.mkdirSync(DIST_DIR, { recursive: true });
 
-    const pageTempPath = path.join(PUBLIC_DIR, 'page-sitemap.xml.tmp');
-    const blogTempPath = path.join(PUBLIC_DIR, 'blog-sitemap.xml.tmp');
-    const offerTempPath = path.join(PUBLIC_DIR, 'offer-sitemap.xml.tmp');
-    const toursTempPath = path.join(PUBLIC_DIR, 'tours-sitemap.xml.tmp');
-
-    const pageStream = fs.createWriteStream(pageTempPath, { encoding: 'utf8' });
-    const blogStream = fs.createWriteStream(blogTempPath, { encoding: 'utf8' });
-    const offerStream = fs.createWriteStream(offerTempPath, { encoding: 'utf8' });
-    const toursStream = fs.createWriteStream(toursTempPath, { encoding: 'utf8' });
-
-    const writeHeader = (stream: fs.WriteStream) => {
-      stream.write('<?xml version="1.0" encoding="UTF-8"?>\n');
-      stream.write('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n');
-    };
-
-    writeHeader(pageStream);
-    writeHeader(blogStream);
-    writeHeader(offerStream);
-    writeHeader(toursStream);
+    let pageStream: any = null;
+    let blogStream: any = null;
+    let offerStream: any = null;
+    let toursStream: any = null;
 
     let maxLastmodPage = formatDate(null);
     let maxLastmodBlog = formatDate(null);
@@ -176,7 +159,7 @@ async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: str
     let tourCount = 0;
 
     const writeUrlEntryWithTracking = (
-      stream: fs.WriteStream, 
+      stream: any, 
       path: string, 
       lastmod: string, 
       changefreq: string, 
@@ -185,13 +168,6 @@ async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: str
       docTitle: string,
       isStaticFlag = false
     ) => {
-      stream.write(`  <url>
-    <loc>${SITE_URL}${path}</loc>
-    <lastmod>${lastmod}</lastmod>
-    <changefreq>${changefreq}</changefreq>
-    <priority>${priority}</priority>
-  </url>\n`);
-
       sitemapHtmlEntries.push({
         url: `${SITE_URL}${path}`,
         path: path,
@@ -202,20 +178,6 @@ async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: str
         title: prettifyTitle(path, docTitle),
         isStatic: isStaticFlag
       });
-
-      if (category === 'page') {
-        pageCount++;
-        maxLastmodPage = lastmod > maxLastmodPage ? lastmod : maxLastmodPage;
-      } else if (category === 'blog') {
-        blogCount++;
-        maxLastmodBlog = lastmod > maxLastmodBlog ? lastmod : maxLastmodBlog;
-      } else if (category === 'offer') {
-        offerCount++;
-        maxLastmodOffer = lastmod > maxLastmodOffer ? lastmod : maxLastmodOffer;
-      } else if (category === 'tour') {
-        tourCount++;
-        maxLastmodTour = lastmod > maxLastmodTour ? lastmod : maxLastmodTour;
-      }
     };
 
     // 1. Accumulate metadata overrides in an Administrative Map
@@ -435,6 +397,123 @@ async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: str
       }
     });
 
+    // 7. Check for changes against the previous build cache
+    const cacheFilePath = path.join(PUBLIC_DIR, '.sitemap-cache.json');
+    const statsFilePathPublic = path.join(PUBLIC_DIR, 'sitemap-stats.json');
+    const statsFilePathDist = path.join(DIST_DIR, 'sitemap-stats.json');
+
+    const writeStats = (generatedTime: string, checkedTime: string, statusValue: string) => {
+      const statsObj = {
+        lastGenerated: generatedTime,
+        lastChecked: checkedTime,
+        status: statusValue,
+        urlCount: sitemapHtmlEntries.length,
+        isLatest: statusValue === 'generated'
+      };
+      try {
+        if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+        if (!fs.existsSync(DIST_DIR)) fs.mkdirSync(DIST_DIR, { recursive: true });
+        fs.writeFileSync(statsFilePathPublic, JSON.stringify(statsObj, null, 2), 'utf8');
+        fs.writeFileSync(statsFilePathDist, JSON.stringify(statsObj, null, 2), 'utf8');
+      } catch (err) {
+        console.warn('⚠️ Error writing stats file:', err);
+      }
+    };
+
+    let hasChanges = true;
+
+    try {
+      if (fs.existsSync(cacheFilePath)) {
+        const cachedData = JSON.parse(fs.readFileSync(cacheFilePath, 'utf8'));
+        if (Array.isArray(cachedData) && cachedData.length === sitemapHtmlEntries.length) {
+          const matchesAll = sitemapHtmlEntries.every((entry, index) => {
+            const cached = cachedData[index];
+            return cached &&
+              cached.path === entry.path &&
+              cached.lastmod === entry.lastmod &&
+              cached.changefreq === entry.changefreq &&
+              cached.priority === entry.priority &&
+              cached.category === entry.category &&
+              cached.title === entry.title &&
+              cached.isStatic === entry.isStatic;
+          });
+          if (matchesAll) {
+            hasChanges = false;
+          }
+        }
+      }
+    } catch (cacheErr) {
+      console.warn('⚠️ Cache verify encountered error, defaulting to complete generation:', cacheErr);
+    }
+
+    if (!hasChanges) {
+      console.log('✅ Sitemap URLs & dates are completely identical to the previous generation. No changes detected.');
+      console.log('⏩ Skipping sitemap writing to optimize build time and preserve file timestamps.');
+      
+      let existingGeneratedTime = new Date().toISOString();
+      try {
+        if (fs.existsSync(statsFilePathPublic)) {
+          const stats = JSON.parse(fs.readFileSync(statsFilePathPublic, 'utf8'));
+          if (stats && stats.lastGenerated) {
+            existingGeneratedTime = stats.lastGenerated;
+          }
+        }
+      } catch (_) {}
+
+      writeStats(existingGeneratedTime, new Date().toISOString(), 'generated');
+      process.exit(0);
+    }
+
+    console.log('✏️ Changes detected or cache missing. Initiating sitemap file generation...');
+
+    const pageTempPath = path.join(PUBLIC_DIR, 'page-sitemap.xml.tmp');
+    const blogTempPath = path.join(PUBLIC_DIR, 'blog-sitemap.xml.tmp');
+    const offerTempPath = path.join(PUBLIC_DIR, 'offer-sitemap.xml.tmp');
+    const toursTempPath = path.join(PUBLIC_DIR, 'tours-sitemap.xml.tmp');
+
+    pageStream = fs.createWriteStream(pageTempPath, { encoding: 'utf8' });
+    blogStream = fs.createWriteStream(blogTempPath, { encoding: 'utf8' });
+    offerStream = fs.createWriteStream(offerTempPath, { encoding: 'utf8' });
+    toursStream = fs.createWriteStream(toursTempPath, { encoding: 'utf8' });
+
+    const writeHeader = (stream: fs.WriteStream) => {
+      stream.write('<?xml version="1.0" encoding="UTF-8"?>\n');
+      stream.write('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n');
+    };
+
+    writeHeader(pageStream);
+    writeHeader(blogStream);
+    writeHeader(offerStream);
+    writeHeader(toursStream);
+
+    sitemapHtmlEntries.forEach(entry => {
+      let streamToUse: fs.WriteStream;
+      if (entry.category === 'page') {
+        streamToUse = pageStream;
+        pageCount++;
+        maxLastmodPage = entry.lastmod > maxLastmodPage ? entry.lastmod : maxLastmodPage;
+      } else if (entry.category === 'blog') {
+        streamToUse = blogStream;
+        blogCount++;
+        maxLastmodBlog = entry.lastmod > maxLastmodBlog ? entry.lastmod : maxLastmodBlog;
+      } else if (entry.category === 'offer') {
+        streamToUse = offerStream;
+        offerCount++;
+        maxLastmodOffer = entry.lastmod > maxLastmodOffer ? entry.lastmod : maxLastmodOffer;
+      } else {
+        streamToUse = toursStream;
+        tourCount++;
+        maxLastmodTour = entry.lastmod > maxLastmodTour ? entry.lastmod : maxLastmodTour;
+      }
+
+      streamToUse.write(`  <url>
+    <loc>${SITE_URL}${entry.path}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>\n`);
+    });
+
     const endSitemapStream = async (stream: fs.WriteStream) => {
       stream.write('</urlset>');
       stream.end();
@@ -525,6 +604,12 @@ async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: str
         fs.unlinkSync(tempPath);
       } catch (e) {}
     });
+
+    // Write new cache files to public/ and dist/ to survive clean builds
+    try {
+      fs.writeFileSync(cacheFilePath, JSON.stringify(sitemapHtmlEntries, null, 2), 'utf8');
+      fs.writeFileSync(path.join(DIST_DIR, '.sitemap-cache.json'), JSON.stringify(sitemapHtmlEntries, null, 2), 'utf8');
+    } catch (_) {}
 
     console.log('✨ All sitemaps (index and sub-sitemaps) generated successfully in public/ and dist/');
 
@@ -934,24 +1019,17 @@ Sitemap: ${SITE_URL}/sitemap_index.xml
 
     fs.writeFileSync(path.join(PUBLIC_DIR, 'sitemap.html'), sitemapHtmlBody, { encoding: 'utf8' });
     fs.writeFileSync(path.join(DIST_DIR, 'sitemap.html'), sitemapHtmlBody, { encoding: 'utf8' });
-    console.log(`✨ sitemap.html visual directory successfully compiled in ${PUBLIC_DIR} and ${DIST_DIR}`);
+    console.log('✨ sitemap.html visual directory successfully compiled in public/ and dist/');
 
-    return { publicDir: PUBLIC_DIR, distDir: DIST_DIR };
+    const nowISO = new Date().toISOString();
+    writeStats(nowISO, nowISO, 'generated');
+
   } catch (error) {
     console.error('❌ Error generating sitemaps:', error);
-    throw error;
+    process.exit(1);
+  } finally {
+    process.exit(0);
   }
 }
 
-import { fileURLToPath } from 'url';
-
-const scriptPath = fileURLToPath(import.meta.url);
-
-// When executed directly (npx tsx scripts/generate-sitemap.ts), run and exit.
-if (process.argv[1] === scriptPath) {
-  generateSitemap()
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1));
-}
-
-export default generateSitemap;
+generateSitemap();
