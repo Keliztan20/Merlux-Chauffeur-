@@ -1,4 +1,4 @@
-import path from 'path';
+import generateSitemap from '../../scripts/generate-sitemap';
 
 export default async (req: any, res: any) => {
   if (req.method !== 'POST') {
@@ -6,21 +6,12 @@ export default async (req: any, res: any) => {
   }
 
   try {
-    const { exec } = await import('child_process');
-    const scriptPath = path.join(process.cwd(), 'scripts', 'generate-sitemap.ts');
-
-    console.log(`Triggering sitemap script: npx tsx "${scriptPath}"`);
-
-    exec(`npx tsx "${scriptPath}"`, { timeout: 1000 * 60 * 5 }, (error: any, stdout: string, stderr: string) => {
-      if (error) {
-        console.error('Sitemap generation failed:', error);
-        return res.status(500).json({ success: false, error: String(error), stderr });
-      }
-      console.log('Sitemap generation output:', stdout || stderr);
-      return res.status(200).json({ success: true, message: 'Sitemap regenerated', stdout, stderr });
-    });
+    // Call the generator in-process. This avoids spawning child processes which
+    // are often restricted in serverless environments.
+    await generateSitemap();
+    return res.status(200).json({ success: true, message: 'Sitemap regenerated' });
   } catch (err: any) {
-    console.error('Error invoking sitemap generator:', err);
+    console.error('Sitemap generation error:', err);
     return res.status(500).json({ success: false, error: err?.message || String(err) });
   }
 };

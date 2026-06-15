@@ -936,10 +936,15 @@ Sitemap: ${SITE_URL}/sitemap_index.xml
 
   } catch (error) {
     console.error('❌ Error generating sitemaps:', error);
-    process.exit(1);
-  } finally {
-    process.exit(0);
+    throw error;
   }
 }
 
-generateSitemap();
+// When executed directly (npx tsx scripts/generate-sitemap.ts), run and exit.
+if (typeof process !== 'undefined' && (process as any).argv && (process as any).argv[1] && (process as any).argv[1].endsWith('generate-sitemap.ts')) {
+  generateSitemap()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
+}
+
+export default generateSitemap;
