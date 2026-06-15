@@ -11,8 +11,8 @@ let SITE_URL = process.env.VITE_SITE_URL || 'https://merlux.au';
 if (!SITE_URL.startsWith('http')) {
   SITE_URL = `https://${SITE_URL}`;
 }
-const PUBLIC_DIR = path.join(process.cwd(), 'public');
-const DIST_DIR = path.join(process.cwd(), 'dist');
+const DEFAULT_PUBLIC_DIR = path.join(process.cwd(), 'public');
+const DEFAULT_DIST_DIR = path.join(process.cwd(), 'dist');
 
 // Load Firebase config from firebase-applet-config.json
 let firebaseConfig: any;
@@ -136,7 +136,10 @@ const prettifyTitle = (pathStr: string, currentTitle: string = ''): string => {
     .join(' ');
 };
 
-async function generateSitemap() {
+async function generateSitemap(outputPaths?: { publicDir?: string; distDir?: string }) {
+  const PUBLIC_DIR = outputPaths?.publicDir || DEFAULT_PUBLIC_DIR;
+  const DIST_DIR = outputPaths?.distDir || DEFAULT_DIST_DIR;
+
   console.log('🚀 Starting Scalable Admin Multiple Sitemap & HTML Generation matches MetaTab.tsx rules...');
 
   try {
@@ -932,16 +935,21 @@ Sitemap: ${SITE_URL}/sitemap_index.xml
 
     fs.writeFileSync(path.join(PUBLIC_DIR, 'sitemap.html'), sitemapHtmlBody, { encoding: 'utf8' });
     fs.writeFileSync(path.join(DIST_DIR, 'sitemap.html'), sitemapHtmlBody, { encoding: 'utf8' });
-    console.log('✨ sitemap.html visual directory successfully compiled in public/ and dist/');
+    console.log(`✨ sitemap.html visual directory successfully compiled in ${PUBLIC_DIR} and ${DIST_DIR}`);
 
+    return { publicDir: PUBLIC_DIR, distDir: DIST_DIR };
   } catch (error) {
     console.error('❌ Error generating sitemaps:', error);
     throw error;
   }
 }
 
+import { fileURLToPath } from 'url';
+
+const scriptPath = fileURLToPath(import.meta.url);
+
 // When executed directly (npx tsx scripts/generate-sitemap.ts), run and exit.
-if (typeof process !== 'undefined' && (process as any).argv && (process as any).argv[1] && (process as any).argv[1].endsWith('generate-sitemap.ts')) {
+if (process.argv[1] === scriptPath) {
   generateSitemap()
     .then(() => process.exit(0))
     .catch(() => process.exit(1));
