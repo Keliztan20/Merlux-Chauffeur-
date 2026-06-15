@@ -26,8 +26,7 @@ try {
 }
 
 if (!firebaseConfig) {
-  console.error('❌ Firebase configuration not found. Cannot generate sitemap.');
-  process.exit(1);
+  throw new Error('Firebase configuration not found. Cannot generate sitemap. Ensure firebase-applet-config.json is available.');
 }
 
 // Initialize Firebase Client SDK with forced HTTP Long Polling for 100% reliable sandbox building
