@@ -2,8 +2,6 @@ import React, { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Navbar from "./components/layout/Navbar";
-import { Analytics } from '@vercel/analytics/react';
-import { SpeedInsights } from '@vercel/speed-insights/react';
 import Footer from "./components/layout/Footer";
 import Breadcrumbs from "./components/layout/Breadcrumbs";
 import FloatingElements from "./components/FloatingElements";
@@ -58,7 +56,6 @@ function AppLayout() {
 
   return (
     <div className="min-h-screen bg-black text-white font-sans selection:bg-gold selection:text-black flex flex-col">
-      <SpeedInsights />
       <FloatingElements />
       <OfflineDetector />
       <SearchDialog isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
@@ -124,7 +121,6 @@ export default function App() {
           <AppLayout />
         </Router>
       </SettingsProvider>
-      <Analytics />
     </ErrorBoundary>
   );
 }
