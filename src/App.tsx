@@ -1,10 +1,15 @@
 import React, { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  useLocation,
+} from "react-router-dom";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
-import { Analytics } from '@vercel/analytics/react';
-import { SpeedInsights } from '@vercel/speed-insights/react';
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import Breadcrumbs from "./components/layout/Breadcrumbs";
 import FloatingElements from "./components/FloatingElements";
 import ScrollToTop from "./components/layout/ScrollToTop";
@@ -14,6 +19,10 @@ import { OfflineDetector } from "./components/OfflineDetector";
 import SearchDialog from "./components/SearchDialog";
 import AnimatedPage from "./components/layout/AnimatedPage";
 import { AnimatePresence } from "motion/react";
+import { Helmet } from "react-helmet-async";
+import { blogsFallback } from "./data/fallback/blogsFallback";
+import { toursFallback } from "./data/fallback/toursFallback";
+import { offersFallback } from "./data/fallback/offersFallback";
 
 const Home = lazy(() => import("./pages/Home"));
 const Booking = lazy(() => import("./pages/Booking"));
@@ -31,6 +40,59 @@ const DynamicPage = lazy(() => import("./pages/DynamicPage"));
 const Offers = lazy(() => import("./pages/Offers"));
 const Tours = lazy(() => import("./pages/Tours"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
+
+function DynamicSEO() {
+  const location = useLocation();
+  const pathname = location.pathname;
+  const parts = pathname.split("/").filter(Boolean);
+
+  let title = "";
+  let description = "";
+  let image = "";
+
+  if (parts.length === 2) {
+    const section = parts[0];
+    const slug = parts[1];
+
+    if (section === "blog") {
+      const post = blogsFallback.find((p) => p.slug === slug);
+      if (post) {
+        title = post.metaTitle || `${post.title} | Merlux Journal`;
+        description = post.metaDescription || post.excerpt;
+        image = post.featuredImage;
+      }
+    } else if (section === "tours") {
+      const tour = toursFallback.find((t) => t.slug === slug);
+      if (tour) {
+        title = `${tour.title} | Private Tours Melbourne`;
+        description = tour.shortDescription;
+        image = tour.image;
+      }
+    } else if (section === "offers") {
+      const offer = offersFallback.find((o) => o.slug === slug);
+      if (offer) {
+        title = `${offer.title} | Exclusive Offers`;
+        description = offer.description;
+        image = offer.image;
+      }
+    }
+  }
+
+  if (!title) return null;
+
+  return (
+    <Helmet>
+      <title>{title}</title>
+      <meta name="description" content={description} />
+      <meta property="og:title" content={title} />
+      <meta property="og:description" content={description} />
+      {image && <meta property="og:image" content={image} />}
+      <meta name="twitter:title" content={title} />
+      <meta name="twitter:description" content={description} />
+      {image && <meta name="twitter:image" content={image} />}
+    </Helmet>
+  );
+}
 
 function AppLayout() {
   const { floatingSettings } = useSettings();
@@ -61,10 +123,14 @@ function AppLayout() {
 
   return (
     <div className="min-h-screen bg-black text-white font-sans selection:bg-gold selection:text-black flex flex-col">
+      <DynamicSEO />
       <SpeedInsights />
       <FloatingElements />
       <OfflineDetector />
-      <SearchDialog isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
+      <SearchDialog
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+      />
       <header className="sticky top-0 z-50 w-full pointer-events-none">
         <div className="pointer-events-auto">
           <Navbar />
@@ -72,33 +138,130 @@ function AppLayout() {
       </header>
       <Breadcrumbs />
       <main className="flex-1">
-        <Suspense fallback={<div className="min-h-screen bg-black flex items-center justify-center p-6">
-          <div className="flex flex-col items-center gap-8">
-            <div className="relative">
-              <div className="animate-spin rounded-full h-16 w-16 border-y-2 border-gold shadow-[0_0_20px_rgba(212,175,55,0.2)]"></div>
-              <div className="absolute inset-0 animate-pulse rounded-full bg-gold/5 blur-2xl"></div>
+        <Suspense
+          fallback={
+            <div className="min-h-screen bg-black flex items-center justify-center p-6">
+              <div className="flex flex-col items-center gap-8">
+                <div className="relative">
+                  <div className="animate-spin rounded-full h-16 w-16 border-y-2 border-gold shadow-[0_0_20px_rgba(212,175,55,0.2)]"></div>
+                  <div className="absolute inset-0 animate-pulse rounded-full bg-gold/5 blur-2xl"></div>
+                </div>
+                <div className="flex flex-col items-center gap-2">
+                  <h2 className="text-gold text-xs font-bold uppercase tracking-[0.4em] animate-pulse">
+                    Loading Data...
+                  </h2>
+                  <div className="h-[1px] w-24 bg-gradient-to-r from-transparent via-gold/50 to-transparent"></div>
+                </div>
+              </div>
             </div>
-            <div className="flex flex-col items-center gap-2">
-              <h2 className="text-gold text-xs font-bold uppercase tracking-[0.4em] animate-pulse">Loading Data...</h2>
-              <div className="h-[1px] w-24 bg-gradient-to-r from-transparent via-gold/50 to-transparent"></div>
-            </div>
-          </div>
-        </div>}>
+          }
+        >
           <AnimatePresence mode="wait">
             <Routes location={location} key={location.pathname}>
-              <Route path="/" element={<AnimatedPage><Home /></AnimatedPage>} />
-              <Route path="/booking" element={<AnimatedPage><Booking /></AnimatedPage>} />
-              <Route path="/fleet" element={<AnimatedPage><Fleet /></AnimatedPage>} />
-              <Route path="/services" element={<AnimatedPage><Services /></AnimatedPage>} />
-              <Route path="/about" element={<AnimatedPage><About /></AnimatedPage>} />
-              <Route path="/contact" element={<AnimatedPage><Contact /></AnimatedPage>} />
-              <Route path="/blog" element={<AnimatedPage><Blog /></AnimatedPage>} />
-              <Route path="/blog/:slug" element={<AnimatedPage><BlogPost /></AnimatedPage>} />
-              <Route path="/faq" element={<AnimatedPage><FAQ /></AnimatedPage>} />
-              <Route path="/offers" element={<AnimatedPage><Offers /></AnimatedPage>} />
-              <Route path="/offers/:slug" element={<AnimatedPage><Offers /></AnimatedPage>} />
-              <Route path="/tours" element={<AnimatedPage><Tours /></AnimatedPage>} />
-              <Route path="/tours/:slug" element={<AnimatedPage><Tours /></AnimatedPage>} />
+              <Route
+                path="/"
+                element={
+                  <AnimatedPage>
+                    <Home />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/booking"
+                element={
+                  <AnimatedPage>
+                    <Booking />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/fleet"
+                element={
+                  <AnimatedPage>
+                    <Fleet />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/services"
+                element={
+                  <AnimatedPage>
+                    <Services />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/about"
+                element={
+                  <AnimatedPage>
+                    <About />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/contact"
+                element={
+                  <AnimatedPage>
+                    <Contact />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/blog"
+                element={
+                  <AnimatedPage>
+                    <Blog />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/blog/:slug"
+                element={
+                  <AnimatedPage>
+                    <BlogPost />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/faq"
+                element={
+                  <AnimatedPage>
+                    <FAQ />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/offers"
+                element={
+                  <AnimatedPage>
+                    <Offers />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/offers/:slug"
+                element={
+                  <AnimatedPage>
+                    <Offers />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/tours"
+                element={
+                  <AnimatedPage>
+                    <Tours />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/tours/:slug"
+                element={
+                  <AnimatedPage>
+                    <Tours />
+                  </AnimatedPage>
+                }
+              />
               <Route
                 path="/app"
                 element={
@@ -109,10 +272,38 @@ function AppLayout() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/login" element={<AnimatedPage><Login /></AnimatedPage>} />
-              <Route path="/payment/success" element={<AnimatedPage><PaymentSuccess /></AnimatedPage>} />
-              <Route path="/terms" element={<AnimatedPage><Terms /></AnimatedPage>} />
-              <Route path="/:slug" element={<AnimatedPage><DynamicPage /></AnimatedPage>} />
+              <Route
+                path="/login"
+                element={
+                  <AnimatedPage>
+                    <Login />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/payment/success"
+                element={
+                  <AnimatedPage>
+                    <PaymentSuccess />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/terms"
+                element={
+                  <AnimatedPage>
+                    <Terms />
+                  </AnimatedPage>
+                }
+              />
+              <Route
+                path="/:slug"
+                element={
+                  <AnimatedPage>
+                    <DynamicPage />
+                  </AnimatedPage>
+                }
+              />
             </Routes>
           </AnimatePresence>
         </Suspense>
