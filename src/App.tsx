@@ -1,15 +1,10 @@
 import React, { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  useLocation,
-} from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
-import { Analytics } from "@vercel/analytics/react";
-import { SpeedInsights } from "@vercel/speed-insights/react";
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import Breadcrumbs from "./components/layout/Breadcrumbs";
 import FloatingElements from "./components/FloatingElements";
 import ScrollToTop from "./components/layout/ScrollToTop";
@@ -127,10 +122,7 @@ function AppLayout() {
       <SpeedInsights />
       <FloatingElements />
       <OfflineDetector />
-      <SearchDialog
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-      />
+      <SearchDialog isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
       <header className="sticky top-0 z-50 w-full pointer-events-none">
         <div className="pointer-events-auto">
           <Navbar />
@@ -138,130 +130,33 @@ function AppLayout() {
       </header>
       <Breadcrumbs />
       <main className="flex-1">
-        <Suspense
-          fallback={
-            <div className="min-h-screen bg-black flex items-center justify-center p-6">
-              <div className="flex flex-col items-center gap-8">
-                <div className="relative">
-                  <div className="animate-spin rounded-full h-16 w-16 border-y-2 border-gold shadow-[0_0_20px_rgba(212,175,55,0.2)]"></div>
-                  <div className="absolute inset-0 animate-pulse rounded-full bg-gold/5 blur-2xl"></div>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <h2 className="text-gold text-xs font-bold uppercase tracking-[0.4em] animate-pulse">
-                    Loading Data...
-                  </h2>
-                  <div className="h-[1px] w-24 bg-gradient-to-r from-transparent via-gold/50 to-transparent"></div>
-                </div>
-              </div>
+        <Suspense fallback={<div className="min-h-screen bg-black flex items-center justify-center p-6">
+          <div className="flex flex-col items-center gap-8">
+            <div className="relative">
+              <div className="animate-spin rounded-full h-16 w-16 border-y-2 border-gold shadow-[0_0_20px_rgba(212,175,55,0.2)]"></div>
+              <div className="absolute inset-0 animate-pulse rounded-full bg-gold/5 blur-2xl"></div>
             </div>
-          }
-        >
+            <div className="flex flex-col items-center gap-2">
+              <h2 className="text-gold text-xs font-bold uppercase tracking-[0.4em] animate-pulse">Loading Data...</h2>
+              <div className="h-[1px] w-24 bg-gradient-to-r from-transparent via-gold/50 to-transparent"></div>
+            </div>
+          </div>
+        </div>}>
           <AnimatePresence mode="wait">
             <Routes location={location} key={location.pathname}>
-              <Route
-                path="/"
-                element={
-                  <AnimatedPage>
-                    <Home />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/booking"
-                element={
-                  <AnimatedPage>
-                    <Booking />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/fleet"
-                element={
-                  <AnimatedPage>
-                    <Fleet />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/services"
-                element={
-                  <AnimatedPage>
-                    <Services />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/about"
-                element={
-                  <AnimatedPage>
-                    <About />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/contact"
-                element={
-                  <AnimatedPage>
-                    <Contact />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/blog"
-                element={
-                  <AnimatedPage>
-                    <Blog />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/blog/:slug"
-                element={
-                  <AnimatedPage>
-                    <BlogPost />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/faq"
-                element={
-                  <AnimatedPage>
-                    <FAQ />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/offers"
-                element={
-                  <AnimatedPage>
-                    <Offers />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/offers/:slug"
-                element={
-                  <AnimatedPage>
-                    <Offers />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/tours"
-                element={
-                  <AnimatedPage>
-                    <Tours />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/tours/:slug"
-                element={
-                  <AnimatedPage>
-                    <Tours />
-                  </AnimatedPage>
-                }
-              />
+              <Route path="/" element={<AnimatedPage><Home /></AnimatedPage>} />
+              <Route path="/booking" element={<AnimatedPage><Booking /></AnimatedPage>} />
+              <Route path="/fleet" element={<AnimatedPage><Fleet /></AnimatedPage>} />
+              <Route path="/services" element={<AnimatedPage><Services /></AnimatedPage>} />
+              <Route path="/about" element={<AnimatedPage><About /></AnimatedPage>} />
+              <Route path="/contact" element={<AnimatedPage><Contact /></AnimatedPage>} />
+              <Route path="/blog" element={<AnimatedPage><Blog /></AnimatedPage>} />
+              <Route path="/blog/:slug" element={<AnimatedPage><BlogPost /></AnimatedPage>} />
+              <Route path="/faq" element={<AnimatedPage><FAQ /></AnimatedPage>} />
+              <Route path="/offers" element={<AnimatedPage><Offers /></AnimatedPage>} />
+              <Route path="/offers/:slug" element={<AnimatedPage><Offers /></AnimatedPage>} />
+              <Route path="/tours" element={<AnimatedPage><Tours /></AnimatedPage>} />
+              <Route path="/tours/:slug" element={<AnimatedPage><Tours /></AnimatedPage>} />
               <Route
                 path="/app"
                 element={
@@ -272,38 +167,10 @@ function AppLayout() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="/login"
-                element={
-                  <AnimatedPage>
-                    <Login />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/payment/success"
-                element={
-                  <AnimatedPage>
-                    <PaymentSuccess />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/terms"
-                element={
-                  <AnimatedPage>
-                    <Terms />
-                  </AnimatedPage>
-                }
-              />
-              <Route
-                path="/:slug"
-                element={
-                  <AnimatedPage>
-                    <DynamicPage />
-                  </AnimatedPage>
-                }
-              />
+              <Route path="/login" element={<AnimatedPage><Login /></AnimatedPage>} />
+              <Route path="/payment/success" element={<AnimatedPage><PaymentSuccess /></AnimatedPage>} />
+              <Route path="/terms" element={<AnimatedPage><Terms /></AnimatedPage>} />
+              <Route path="/:slug" element={<AnimatedPage><DynamicPage /></AnimatedPage>} />
             </Routes>
           </AnimatePresence>
         </Suspense>
